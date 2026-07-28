@@ -1,0 +1,1201 @@
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum ConnectionLifecycle {
+    #[default]
+    Disconnected,
+    Connecting,
+    Authenticating,
+    Establishing,
+    Connected,
+    Disconnecting,
+    Failed,
+}
+
+impl ConnectionLifecycle {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Disconnected => "disconnected",
+            Self::Connecting => "connecting",
+            Self::Authenticating => "authenticating",
+            Self::Establishing => "establishing",
+            Self::Connected => "connected",
+            Self::Disconnecting => "disconnecting",
+            Self::Failed => "failed",
+        }
+    }
+
+    pub fn is_busy(self) -> bool {
+        matches!(
+            self,
+            Self::Connecting | Self::Authenticating | Self::Establishing | Self::Disconnecting
+        )
+    }
+
+    pub fn is_active(self) -> bool {
+        matches!(self, Self::Connected)
+    }
+}
+
+/// Wire protocol for OpenConnect (ics-openconnect `vpn_protocol` values).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum ProtocolKind {
+    #[default]
+    AnyConnect,
+    /// Legacy UI label; maps to AnyConnect.
+    Ssl,
+    /// Legacy UI label; OpenConnect has no pure IPsec — still AnyConnect.
+    Ipsec,
+    Juniper,
+    GlobalProtect,
+    Pulse,
+    F5,
+    Fortinet,
+    Array,
+}
+
+impl ProtocolKind {
+    pub fn as_openconnect(self) -> &'static str {
+        match self {
+            Self::AnyConnect | Self::Ssl | Self::Ipsec => "anyconnect",
+            Self::Juniper => "nc",
+            Self::GlobalProtect => "gp",
+            Self::Pulse => "pulse",
+            Self::F5 => "f5",
+            Self::Fortinet => "fortinet",
+            Self::Array => "array",
+        }
+    }
+
+    pub fn as_label(self) -> &'static str {
+        match self {
+            Self::AnyConnect | Self::Ssl => "AnyConnect",
+            Self::Ipsec => "IPsec",
+            Self::Juniper => "Juniper NC",
+            Self::GlobalProtect => "GlobalProtect",
+            Self::Pulse => "Pulse",
+            Self::F5 => "F5",
+            Self::Fortinet => "Fortinet",
+            Self::Array => "Array",
+        }
+    }
+
+    pub fn from_label(label: &str) -> Self {
+        let l = label.to_ascii_lowercase();
+        match l.as_str() {
+            "ipsec" => Self::Ipsec,
+            "nc" | "juniper" | "juniper nc" => Self::Juniper,
+            "gp" | "globalprotect" => Self::GlobalProtect,
+            "pulse" => Self::Pulse,
+            "f5" => Self::F5,
+            "fortinet" => Self::Fortinet,
+            "array" => Self::Array,
+            "ssl" | "anyconnect" => Self::AnyConnect,
+            _ => Self::AnyConnect,
+        }
+    }
+
+    pub fn all() -> &'static [Self] {
+        &[
+            Self::AnyConnect,
+            Self::Juniper,
+            Self::GlobalProtect,
+            Self::Pulse,
+            Self::F5,
+            Self::Fortinet,
+            Self::Array,
+        ]
+    }
+}
+
+/// ics-openconnect `software_token` values.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum SoftwareToken {
+    #[default]
+    Disabled,
+    SecurId,
+    Totp,
+}
+
+impl SoftwareToken {
+    pub fn as_label(self) -> &'static str {
+        match self {
+            Self::Disabled => "Disabled",
+            Self::SecurId => "RSA SecurID",
+            Self::Totp => "TOTP",
+        }
+    }
+
+    pub fn from_label(label: &str) -> Self {
+        match label.to_ascii_lowercase().as_str() {
+            "securid" | "rsa securid" | "stoken" => Self::SecurId,
+            "totp" => Self::Totp,
+            _ => Self::Disabled,
+        }
+    }
+}
+
+/// ics-openconnect `split_tunnel_mode` values.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum SplitTunnelMode {
+    /// Use server split-includes; default route if none.
+    #[default]
+    Auto,
+    /// Custom networks; DNS via VPN.
+    OnVpnDns,
+    /// Custom networks; DNS via uplink (no VPN DNS).
+    OnUplinkDns,
+}
+
+impl SplitTunnelMode {
+    pub fn as_label(self) -> &'static str {
+        match self {
+            Self::Auto => "Auto",
+            Self::OnVpnDns => "Split + VPN DNS",
+            Self::OnUplinkDns => "Split + uplink DNS",
+        }
+    }
+
+    pub fn from_label(label: &str) -> Self {
+        match label.to_ascii_lowercase().as_str() {
+            "on_vpn_dns" | "split + vpn dns" | "onvpndns" => Self::OnVpnDns,
+            "on_uplink_dns" | "split + uplink dns" | "onuplinkdns" => Self::OnUplinkDns,
+            _ => Self::Auto,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum AuthMethod {
+    #[default]
+    Password,
+    Certificate,
+    PasswordAndCertificate,
+    Saml,
+}
+
+impl AuthMethod {
+    pub fn as_label(self) -> &'static str {
+        match self {
+            Self::Password => "Password",
+            Self::Certificate => "Certificate",
+            Self::PasswordAndCertificate => "Password+Cert",
+            Self::Saml => "SAML",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConnectionProfile {
+    pub id: String,
+    pub name: String,
+    pub server: String,
+    pub group: String,
+    pub username: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub password: String,
+    #[serde(default)]
+    pub protocol: ProtocolKind,
+    pub auth_method: AuthMethod,
+    /// Client certificate path (PEM/P12) or alias.
+    pub certificate: String,
+    /// Optional separate private key path (ics `private_key`).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub private_key: String,
+    /// Secondary user certificate for Cisco multiple-certificate authentication.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub secondary_certificate: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub secondary_private_key: String,
+    /// Optional CA file path (ics `ca_certificate`).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub ca_certificate: String,
+    /// PKCS#12 / encrypted PEM passphrase persisted with the local profile.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub key_password: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub secondary_key_password: String,
+    /// HTTP proxy URL for CSTP (openconnect `--proxy` / ics `http_proxy`).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub http_proxy: String,
+    /// Peer cert pin: pin-sha256:… / sha1:… / sha256:… (openconnect `--servercert`).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub server_cert_hash: String,
+    pub backup_servers: String,
+    #[serde(default = "default_true")]
+    pub strict_certificate_trust: bool,
+    #[serde(default = "default_true")]
+    pub block_untrusted_servers: bool,
+    pub allow_local_lan: bool,
+    /// Ignore server split-include and push a default route so all IPv4 traffic
+    /// goes through the VPN (plus system VPN DNS).
+    #[serde(default)]
+    pub force_global: bool,
+    /// ics `split_tunnel_mode` (used when `force_global` is false).
+    #[serde(default)]
+    pub split_tunnel_mode: SplitTunnelMode,
+    /// Comma/space separated CIDRs for custom split (ics `split_tunnel_networks`).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub split_tunnel_networks: String,
+    pub connect_on_demand: bool,
+    pub external_browser_auth: bool,
+    pub fips_mode: bool,
+    /// Explicit OpenConnect `--allow-insecure-crypto`; independent from
+    /// certificate trust and disabled by default.
+    #[serde(default)]
+    pub allow_insecure_crypto: bool,
+    /// ics `use_dtls` (default true).
+    #[serde(default = "default_true")]
+    pub use_dtls: bool,
+    /// ics `reported_os` (android / linux / win / mac-intel / apple-ios).
+    #[serde(default = "default_reported_os")]
+    pub reported_os: String,
+    /// Optional exact User-Agent override (empty = AnyConnect default).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub user_agent: String,
+    /// Version reported in AnyConnect XML independently from the HTTP UA.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub client_version: String,
+    /// TLS SNI override (ics `sni`).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub sni: String,
+    /// ics `require_pfs`.
+    #[serde(default)]
+    pub require_pfs: bool,
+    /// ics `disable_xml_post`.
+    #[serde(default)]
+    pub disable_xml_post: bool,
+    /// Dead-peer detection seconds; 0 = protocol default (ics `dpd_value`).
+    #[serde(default)]
+    pub dpd_seconds: u32,
+    /// ics software token mode.
+    #[serde(default)]
+    pub software_token: SoftwareToken,
+    /// Token secret / string (ics `token_string`).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub token_string: String,
+    /// Optional CSD wrapper script path (ics `custom_csd_wrapper`).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub csd_wrapper: String,
+    /// OHOS VpnConfig.trustedApplications (package names; empty = all apps).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub trusted_applications: String,
+    /// OHOS VpnConfig.blockedApplications (package names excluded from VPN).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub blocked_applications: String,
+    pub mtu: u32,
+    pub favorite: bool,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+fn default_reported_os() -> String {
+    "android".to_owned()
+}
+
+/// Private / link-local IPv4 prefixes kept off-tunnel when allow_local_lan.
+const RFC1918_EXCLUDES: &[&str] = &[
+    "10.0.0.0/8",
+    "172.16.0.0/12",
+    "192.168.0.0/16",
+    "169.254.0.0/16",
+];
+
+fn split_package_list(raw: &str) -> Vec<String> {
+    raw.split(|c: char| c.is_whitespace() || c == ',' || c == ';')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_owned)
+        .collect()
+}
+
+fn split_server_list(raw: &str) -> Vec<String> {
+    raw.split(|character: char| character.is_whitespace() || character == ',' || character == ';')
+        .map(str::trim)
+        .filter(|server| !server.is_empty())
+        .map(|server| {
+            if server.starts_with("https://") || server.starts_with("http://") {
+                server.to_owned()
+            } else {
+                format!("https://{server}")
+            }
+        })
+        .collect()
+}
+
+impl ConnectionProfile {
+    pub fn new_draft() -> Self {
+        Self {
+            id: String::new(),
+            name: String::new(),
+            server: String::new(),
+            group: String::new(),
+            username: String::new(),
+            password: String::new(),
+            protocol: ProtocolKind::AnyConnect,
+            auth_method: AuthMethod::Password,
+            certificate: String::new(),
+            private_key: String::new(),
+            secondary_certificate: String::new(),
+            secondary_private_key: String::new(),
+            ca_certificate: String::new(),
+            key_password: String::new(),
+            secondary_key_password: String::new(),
+            http_proxy: String::new(),
+            server_cert_hash: String::new(),
+            backup_servers: String::new(),
+            strict_certificate_trust: true,
+            block_untrusted_servers: true,
+            allow_local_lan: false,
+            force_global: false,
+            split_tunnel_mode: SplitTunnelMode::Auto,
+            split_tunnel_networks: String::new(),
+            connect_on_demand: false,
+            external_browser_auth: false,
+            fips_mode: false,
+            allow_insecure_crypto: false,
+            use_dtls: true,
+            reported_os: default_reported_os(),
+            user_agent: String::new(),
+            client_version: String::new(),
+            sni: String::new(),
+            require_pfs: false,
+            disable_xml_post: false,
+            dpd_seconds: 0,
+            software_token: SoftwareToken::Disabled,
+            token_string: String::new(),
+            csd_wrapper: String::new(),
+            trusted_applications: String::new(),
+            blocked_applications: String::new(),
+            mtu: 0,
+            favorite: false,
+        }
+    }
+
+    pub fn server_url(&self) -> String {
+        let server = self.server.trim();
+        if server.starts_with("https://") || server.starts_with("http://") {
+            server.to_owned()
+        } else if server.is_empty() {
+            String::new()
+        } else {
+            format!("https://{server}")
+        }
+    }
+
+    pub fn summary_auth(&self) -> String {
+        match self.auth_method {
+            AuthMethod::Password => {
+                if self.username.is_empty() {
+                    "Password".to_owned()
+                } else {
+                    format!("Password · {}", self.username)
+                }
+            }
+            AuthMethod::Certificate => {
+                if self.certificate.is_empty() {
+                    "Certificate".to_owned()
+                } else {
+                    format!("Cert · {}", self.certificate)
+                }
+            }
+            AuthMethod::PasswordAndCertificate => "Password + Certificate".to_owned(),
+            AuthMethod::Saml => "SAML".to_owned(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionStats {
+    pub bytes_sent: u64,
+    pub bytes_received: u64,
+    pub packets_sent: u64,
+    pub packets_received: u64,
+    pub connected_seconds: u64,
+    pub assigned_ip: String,
+    pub gateway: String,
+    pub mtu: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct NetworkSnapshot {
+    pub address: Option<String>,
+    pub netmask: Option<String>,
+    /// IPv6 address when headend pushes one (ics addAddress v6).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub address_v6: Option<String>,
+    /// IPv6 prefix or `addr/prefix` string from OpenConnect.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub netmask_v6: Option<String>,
+    pub gateway: Option<String>,
+    pub dns: Vec<String>,
+    pub mtu: i32,
+    #[serde(default)]
+    pub routes: Vec<String>,
+    #[serde(default)]
+    pub split_excludes: Vec<String>,
+    #[serde(default)]
+    pub domain: Option<String>,
+    /// AnyConnect split-DNS suffixes, in headend order.
+    #[serde(default)]
+    pub split_dns: Vec<String>,
+}
+
+/// Kind of an OpenConnect auth-form field surfaced to the UI.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum AuthFieldKind {
+    #[default]
+    Text,
+    Password,
+    Select,
+    Token,
+    /// Hidden options stay server-owned; never rendered.
+    Hidden,
+    Unknown,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct AuthFieldChoice {
+    pub name: String,
+    pub label: String,
+}
+
+/// Authentication groups advertised by the headend's initial AnyConnect form.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct AuthGroupDiscovery {
+    /// Exact protocol value of the server-selected group, when present.
+    #[serde(default)]
+    pub selected: Option<String>,
+    /// Display labels plus their exact protocol values.
+    #[serde(default)]
+    pub groups: Vec<AuthFieldChoice>,
+}
+
+/// One input on an authentication form / challenge page.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct AuthField {
+    pub name: String,
+    pub label: String,
+    pub kind: AuthFieldKind,
+    /// Prefill (username/password from profile, or prior value).
+    #[serde(default)]
+    pub value: String,
+    #[serde(default)]
+    pub choices: Vec<AuthFieldChoice>,
+    /// The protocol-designated authentication-group selector. Changing this
+    /// field requires `OC_FORM_RESULT_NEWGROUP`, not a normal form submit.
+    #[serde(default)]
+    pub auth_group: bool,
+    /// True when the UI must collect this field (empty required interactive).
+    #[serde(default)]
+    pub required: bool,
+}
+
+/// A single OpenConnect authentication form awaiting user input.
+///
+/// OpenConnect may present multiple challenges in sequence; each round gets a
+/// new `id`. The auth worker blocks until [`AuthChallengeReply`] arrives.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct AuthChallenge {
+    pub id: u64,
+    pub round: u32,
+    #[serde(default)]
+    pub banner: Option<String>,
+    #[serde(default)]
+    pub message: Option<String>,
+    #[serde(default)]
+    pub error: Option<String>,
+    #[serde(default)]
+    pub form_id: Option<String>,
+    #[serde(default)]
+    pub method: Option<String>,
+    pub fields: Vec<AuthField>,
+}
+
+/// User response to a pending [`AuthChallenge`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct AuthChallengeReply {
+    pub id: u64,
+    /// Field name → value. Hidden fields need not be included.
+    #[serde(default)]
+    pub values: Vec<AuthFieldValue>,
+    #[serde(default)]
+    pub cancelled: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct AuthFieldValue {
+    pub name: String,
+    pub value: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionSnapshot {
+    pub lifecycle: ConnectionLifecycle,
+    pub active_connection_id: Option<String>,
+    pub connections: Vec<ConnectionProfile>,
+    pub stats: SessionStats,
+    pub network: NetworkSnapshot,
+    pub last_error: Option<String>,
+    pub diagnostics: Vec<DiagnosticEntry>,
+    pub app_version: String,
+    pub sdk_ready: bool,
+    pub anyconnect_version: Option<String>,
+    pub backend: String,
+    /// Present while OpenConnect is blocked on an interactive auth form.
+    #[serde(default)]
+    pub pending_auth: Option<AuthChallenge>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct DiagnosticEntry {
+    pub level: String,
+    pub message: String,
+    pub timestamp: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct VpnOptions {
+    pub addresses: Vec<String>,
+    pub routes: Vec<String>,
+    /// Split-exclude prefixes (OHOS RouteInfo.isExcludedRoute when supported).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub excluded_routes: Vec<String>,
+    pub dns_addresses: Vec<String>,
+    /// DNS search domains for the system resolver (HarmonyOS VpnConfig.searchDomains).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub search_domains: Vec<String>,
+    pub mtu: u32,
+    pub allow_bypass: bool,
+    /// When true, system VPN uses a full default route regardless of split-include.
+    #[serde(default)]
+    pub force_global: bool,
+    /// Handoff fields for the isolated VPN-extension process (same UID, new process).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub server: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub username: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub password: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group: Option<String>,
+    /// OpenConnect cookie from UI-process auth; extension reuses it for CSTP.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cookie: Option<String>,
+    #[serde(default)]
+    pub accept_untrusted: bool,
+    /// Whether the authentication request may advertise browser-based SSO.
+    #[serde(default)]
+    pub external_auth_allowed: bool,
+    /// Stable privacy-scoped identifier reported as AnyConnect mobile metadata.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub mobile_unique_id: String,
+    /// Ordered failover URLs from the profile.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub backup_servers: Vec<String>,
+    // --- prefs mirrored for extension rebuild (ics setPreferences) ---
+    #[serde(default = "default_true")]
+    pub use_dtls: bool,
+    #[serde(default = "default_reported_os")]
+    pub reported_os: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub sni: String,
+    #[serde(default)]
+    pub require_pfs: bool,
+    #[serde(default)]
+    pub disable_xml_post: bool,
+    #[serde(default)]
+    pub dpd_seconds: u32,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub vpn_protocol: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub user_agent: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub client_version: String,
+    #[serde(default)]
+    pub allow_insecure_crypto: bool,
+    #[serde(default)]
+    pub fips_mode: bool,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub ca_certificate: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub certificate: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub private_key: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub secondary_certificate: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub secondary_private_key: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub key_password: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub secondary_key_password: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub http_proxy: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub server_cert_hash: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub csd_wrapper: String,
+    #[serde(default)]
+    pub software_token: SoftwareToken,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub token_string: String,
+    #[serde(default)]
+    pub split_tunnel_mode: SplitTunnelMode,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub split_tunnel_networks: String,
+    /// Package names for OHOS VpnConfig.trustedApplications.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub trusted_applications: Vec<String>,
+    /// Package names for OHOS VpnConfig.blockedApplications.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub blocked_applications: Vec<String>,
+}
+
+impl VpnOptions {
+    /// Build system VPN options from OpenConnect network info.
+    ///
+    /// Routing / DNS follows [ics-openconnect](https://gitlab.com/openconnect/ics-openconnect)
+    /// `OpenConnectManagementThread.setIPInfo`:
+    /// 1. `addAddress(addr, netmask)` — CIDR from headend (not forced /32)
+    /// 2. Routes = split-includes, or `0.0.0.0/0` when forced / empty IPv4 splits
+    /// 3. **Always** `addDnsServer` + host route `/32` for each DNS
+    /// 4. **Always** search domain when the headend pushes one
+    pub fn from_network(network: &NetworkSnapshot, profile: &ConnectionProfile) -> Self {
+        let host = network
+            .address
+            .as_deref()
+            .unwrap_or("10.0.0.2")
+            .split('/')
+            .next()
+            .unwrap_or("10.0.0.2")
+            .trim()
+            .to_owned();
+
+        // ics: CIDRIP(ip.addr, ip.netmask). OpenHarmony VpnConfig ParseAddress
+        // rejects IPv4 prefixLength >= 32 (see communication_netmanager_ext).
+        let mut addresses = Vec::new();
+        if host.contains(':') {
+            addresses.push(format!("{host}/128"));
+        } else {
+            let mut prefix = network
+                .netmask
+                .as_deref()
+                .and_then(ipv4_netmask_prefix)
+                .unwrap_or(24);
+            if prefix == 0 {
+                prefix = 24;
+            }
+            if prefix >= 32 {
+                prefix = 31;
+            }
+            addresses.push(format!("{host}/{prefix}"));
+        }
+        // ics IPv6 address when present.
+        if let Some(v6) = network
+            .address_v6
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
+            if let Some(mask6) = network.netmask_v6.as_deref() {
+                if mask6.contains('/') {
+                    addresses.push(mask6.trim().to_owned());
+                } else if let Ok(bits) = mask6.trim().parse::<u8>() {
+                    addresses.push(format!("{v6}/{bits}"));
+                } else {
+                    addresses.push(format!("{v6}/64"));
+                }
+            } else if v6.contains('/') {
+                addresses.push(v6.to_owned());
+            } else {
+                addresses.push(format!("{v6}/64"));
+            }
+        }
+
+        let has_ipv6 = network
+            .address_v6
+            .as_deref()
+            .is_some_and(|s| !s.trim().is_empty())
+            || addresses.iter().any(|a| a.contains(':'));
+
+        // ics: min MTU 576 IPv4 / 1280 when IPv6 present (RFC 2460 / KK floor).
+        let mtu = if network.mtu > 0 {
+            network.mtu as u32
+        } else if profile.mtu > 0 {
+            profile.mtu
+        } else {
+            1400
+        }
+        .max(if has_ipv6 { 1280 } else { 576 });
+
+        // ics uses exactly the resolvers supplied by the headend. When none
+        // are supplied, leave the list empty so the platform keeps its
+        // uplink resolver instead of inventing a DNS server inside the tunnel.
+        let dns = network.dns.clone();
+
+        // Cisco AnyConnect constructs the suffix list in this order:
+        // default domain first, then every headend split-DNS suffix.
+        let mut search_domains = Vec::new();
+        if let Some(domain) = network.domain.as_deref() {
+            append_search_domains(&mut search_domains, domain);
+        }
+        for domain in &network.split_dns {
+            append_search_domains(&mut search_domains, domain);
+        }
+
+        // --- routing (ics setIPInfo + addDefaultRoutes + addSubnetRoutes) ---
+        let server_split: Vec<String> = network
+            .routes
+            .iter()
+            .filter_map(|r| normalize_route_cidr(r))
+            .collect();
+        let custom_split: Vec<String> = profile
+            .split_tunnel_networks
+            .split([',', ' ', '\n', ';'])
+            .filter_map(|s| normalize_route_cidr(s.trim()))
+            .collect();
+
+        let (mut routes, dns_out, use_default) =
+            match (profile.force_global, profile.split_tunnel_mode) {
+                // ics full tunnel: default IPv4 (+ IPv6 when configured).
+                (true, _) => {
+                    let mut r = vec!["0.0.0.0/0".to_owned()];
+                    if has_ipv6 {
+                        r.push("::/0".to_owned());
+                    }
+                    (r, dns.clone(), true)
+                }
+                (false, SplitTunnelMode::OnVpnDns) if !custom_split.is_empty() => {
+                    (custom_split, dns.clone(), false)
+                }
+                (false, SplitTunnelMode::OnUplinkDns) if !custom_split.is_empty() => {
+                    // ics: custom routes but empty DNS list (use uplink resolver).
+                    (custom_split, Vec::new(), false)
+                }
+                _ => {
+                    // Auto: server includes; default when empty (ics addDefaultRoutes).
+                    if server_split.is_empty() {
+                        let mut r = vec!["0.0.0.0/0".to_owned()];
+                        if has_ipv6 {
+                            r.push("::/0".to_owned());
+                        }
+                        (r, dns.clone(), true)
+                    } else {
+                        (server_split, dns.clone(), false)
+                    }
+                }
+            };
+
+        // ics ALWAYS (when VPN DNS is used): addRoute(dns, /32 or /128).
+        for server in &dns_out {
+            let dns_host = server.split('%').next().unwrap_or(server).trim();
+            if dns_host.is_empty() {
+                continue;
+            }
+            let host_route = if dns_host.contains(':') {
+                format!("{dns_host}/128")
+            } else {
+                format!("{dns_host}/32")
+            };
+            if !routes.iter().any(|r| r == &host_route) {
+                routes.insert(0, host_route);
+            }
+        }
+
+        let excluded_routes: Vec<String> = network
+            .split_excludes
+            .iter()
+            .filter_map(|r| normalize_route_cidr(r))
+            .collect();
+
+        let accept_untrusted =
+            !profile.strict_certificate_trust && !profile.block_untrusted_servers;
+        let mut options = Self {
+            addresses,
+            routes,
+            excluded_routes,
+            dns_addresses: dns_out,
+            search_domains: if matches!(profile.split_tunnel_mode, SplitTunnelMode::OnUplinkDns)
+                && !profile.force_global
+            {
+                Vec::new()
+            } else {
+                search_domains
+            },
+            mtu,
+            allow_bypass: profile.allow_local_lan && !use_default,
+            force_global: use_default,
+            server: Some(profile.server_url()),
+            username: Some(profile.username.clone()),
+            password: Some(profile.password.clone()),
+            group: Some(profile.group.clone()),
+            cookie: None,
+            accept_untrusted,
+            external_auth_allowed: profile.external_browser_auth
+                || matches!(profile.auth_method, AuthMethod::Saml),
+            mobile_unique_id: profile.id.clone(),
+            backup_servers: split_server_list(&profile.backup_servers),
+            use_dtls: profile.use_dtls,
+            reported_os: profile.reported_os.clone(),
+            sni: profile.sni.clone(),
+            require_pfs: profile.require_pfs,
+            disable_xml_post: profile.disable_xml_post,
+            dpd_seconds: profile.dpd_seconds,
+            vpn_protocol: profile.protocol.as_openconnect().to_owned(),
+            user_agent: profile.user_agent.clone(),
+            client_version: profile.client_version.clone(),
+            allow_insecure_crypto: profile.allow_insecure_crypto,
+            fips_mode: profile.fips_mode,
+            ca_certificate: profile.ca_certificate.clone(),
+            certificate: profile.certificate.clone(),
+            private_key: profile.private_key.clone(),
+            secondary_certificate: profile.secondary_certificate.clone(),
+            secondary_private_key: profile.secondary_private_key.clone(),
+            key_password: profile.key_password.clone(),
+            secondary_key_password: profile.secondary_key_password.clone(),
+            http_proxy: profile.http_proxy.clone(),
+            server_cert_hash: profile.server_cert_hash.clone(),
+            csd_wrapper: profile.csd_wrapper.clone(),
+            software_token: profile.software_token,
+            token_string: profile.token_string.clone(),
+            split_tunnel_mode: profile.split_tunnel_mode,
+            split_tunnel_networks: profile.split_tunnel_networks.clone(),
+            trusted_applications: split_package_list(&profile.trusted_applications),
+            blocked_applications: split_package_list(&profile.blocked_applications),
+        };
+        // OHOS has no Android allowBypass: approximate ics allow_local_lan by
+        // excluding RFC1918 + link-local when the tunnel carries a default route.
+        // (Under pure split-include, LAN is already off-tunnel unless listed.)
+        if profile.allow_local_lan && use_default {
+            for lan in RFC1918_EXCLUDES {
+                if !options.excluded_routes.iter().any(|r| r == lan) {
+                    options.excluded_routes.push((*lan).to_owned());
+                }
+            }
+        }
+        options.normalize_routes();
+        options
+    }
+
+    /// Re-apply full-tunnel routes (ics force path): defaults + DNS host routes.
+    pub fn apply_force_global(&mut self) {
+        if !self.force_global {
+            return;
+        }
+        let has_ipv6 = self.addresses.iter().any(|a| a.contains(':'));
+        let mut routes = vec!["0.0.0.0/0".to_owned()];
+        if has_ipv6 {
+            routes.push("::/0".to_owned());
+        }
+        for s in &self.dns_addresses {
+            let host = s.split('%').next().unwrap_or(s).trim();
+            if host.is_empty() {
+                continue;
+            }
+            let host_route = if host.contains(':') {
+                format!("{host}/128")
+            } else {
+                format!("{host}/32")
+            };
+            if !routes.iter().any(|r| r == &host_route) {
+                routes.insert(0, host_route);
+            }
+        }
+        self.routes = routes;
+        self.allow_bypass = false;
+        self.normalize_routes();
+    }
+
+    /// Convert any dotted-netmask routes to CIDR; normalise network bits (ics CIDRIP).
+    pub fn normalize_routes(&mut self) {
+        self.routes = self
+            .routes
+            .iter()
+            .filter_map(|r| normalize_route_cidr(r))
+            .collect();
+        let mut seen = std::collections::HashSet::new();
+        self.routes.retain(|r| seen.insert(r.clone()));
+    }
+}
+
+/// Accept `a.b.c.d/24`, `a.b.c.d/255.255.255.0`, or bare `a.b.c.d` → CIDR string.
+/// Matches ics-openconnect `CIDRIP` (including network-bit normalisation).
+pub fn normalize_route_cidr(route: &str) -> Option<String> {
+    let route = route.trim();
+    if route.is_empty() {
+        return None;
+    }
+    let (ip, suffix) = match route.split_once('/') {
+        Some((ip, suffix)) => (ip.trim(), suffix.trim()),
+        None => return Some(format!("{route}/32")),
+    };
+    if ip.is_empty() {
+        return None;
+    }
+    if ip.contains(':') {
+        // IPv6: keep numeric prefix only
+        let bits: u8 = if suffix.contains('.') {
+            return None;
+        } else {
+            suffix.parse().ok()?
+        };
+        if bits > 128 {
+            return None;
+        }
+        return Some(format!("{ip}/{bits}"));
+    }
+    let bits = if suffix.contains('.') {
+        ipv4_netmask_prefix(suffix)?
+    } else {
+        let b: u8 = suffix.parse().ok()?;
+        if b > 32 {
+            return None;
+        }
+        b
+    };
+    // ics CIDRIP.normalise(): zero host bits for the network address
+    let net = ipv4_network_cidr(ip, bits)?;
+    Some(net)
+}
+
+fn append_search_domains(domains: &mut Vec<String>, value: &str) {
+    for domain in value
+        .split(&[',', ' ', ';'][..])
+        .map(str::trim)
+        .filter(|domain| !domain.is_empty())
+    {
+        if !domains
+            .iter()
+            .any(|existing| existing.eq_ignore_ascii_case(domain))
+        {
+            domains.push(domain.to_owned());
+        }
+    }
+}
+
+fn ipv4_netmask_prefix(mask: &str) -> Option<u8> {
+    let mut parts = mask.split('.');
+    let mut value: u32 = 0;
+    for _ in 0..4 {
+        let octet: u8 = parts.next()?.parse().ok()?;
+        value = (value << 8) | u32::from(octet);
+    }
+    if parts.next().is_some() {
+        return None;
+    }
+    // Require a contiguous prefix mask.
+    let leading = value.leading_ones();
+    let trailing = value.trailing_zeros();
+    if leading + trailing == 32 || value == 0 {
+        Some(leading as u8)
+    } else {
+        None
+    }
+}
+
+/// `host` + prefix → network address in CIDR form (e.g. 11.36.23.173/19 → 11.36.0.0/19).
+fn ipv4_network_cidr(host: &str, bits: u8) -> Option<String> {
+    if bits > 32 {
+        return None;
+    }
+    let mut octets = [0u8; 4];
+    for (i, part) in host.split('.').enumerate() {
+        if i >= 4 {
+            return None;
+        }
+        octets[i] = part.parse().ok()?;
+    }
+    let mut value = u32::from_be_bytes(octets);
+    if bits == 0 {
+        value = 0;
+    } else {
+        let mask = u32::MAX << (32 - bits);
+        value &= mask;
+    }
+    let net = value.to_be_bytes();
+    Some(format!(
+        "{}.{}.{}.{}/{}",
+        net[0], net[1], net[2], net[3], bits
+    ))
+}
+
+#[derive(Debug, Clone)]
+pub struct ConnectRequest {
+    pub profile: ConnectionProfile,
+    /// When true, skip full AnyConnect auth and only run platform/mock path
+    /// (used by device UI E2E without a real headend).
+    pub dry_run: bool,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn new_profiles_use_strict_certificate_defaults() {
+        let profile = ConnectionProfile::new_draft();
+        assert!(profile.strict_certificate_trust);
+        assert!(profile.block_untrusted_servers);
+        assert!(!profile.allow_insecure_crypto);
+    }
+
+    #[test]
+    fn handoff_preserves_normalized_backup_servers_and_client_identity() {
+        let mut profile = ConnectionProfile::new_draft();
+        profile.id = "privacy-scoped-profile".to_owned();
+        profile.backup_servers =
+            "backup-a.example.test, https://backup-b.example.test/group".to_owned();
+        profile.client_version = "5.1.2".to_owned();
+        let options = VpnOptions::from_network(&NetworkSnapshot::default(), &profile);
+        assert_eq!(
+            options.backup_servers,
+            vec![
+                "https://backup-a.example.test".to_owned(),
+                "https://backup-b.example.test/group".to_owned()
+            ]
+        );
+        assert_eq!(options.mobile_unique_id, "privacy-scoped-profile");
+        assert_eq!(options.client_version, "5.1.2");
+    }
+
+    #[test]
+    fn normalize_dotted_netmask_routes() {
+        assert_eq!(
+            normalize_route_cidr("11.0.0.0/255.0.0.0").as_deref(),
+            Some("11.0.0.0/8")
+        );
+        assert_eq!(
+            normalize_route_cidr("10.20.205.51/255.255.255.255").as_deref(),
+            Some("10.20.205.51/32")
+        );
+        assert_eq!(
+            normalize_route_cidr("0.0.0.0/0").as_deref(),
+            Some("0.0.0.0/0")
+        );
+        assert_eq!(
+            normalize_route_cidr("192.168.1.0/24").as_deref(),
+            Some("192.168.1.0/24")
+        );
+    }
+
+    #[test]
+    fn from_network_follows_ics_dns_and_cidr() {
+        let mut profile = ConnectionProfile::new_draft();
+        profile.force_global = false;
+        let network = NetworkSnapshot {
+            address: Some("11.36.1.2".into()),
+            netmask: Some("255.255.224.0".into()),
+            address_v6: None,
+            netmask_v6: None,
+            gateway: None,
+            dns: vec!["11.11.11.11".into(), "11.11.11.12".into()],
+            mtu: 1300,
+            routes: vec![
+                "11.0.0.0/255.0.0.0".into(),
+                "10.20.205.51/255.255.255.255".into(),
+            ],
+            split_excludes: vec![],
+            domain: Some("sslvpn.sankuai.info".into()),
+            split_dns: vec!["sankuai.com".into(), "meituan.net".into()],
+        };
+        let options = VpnOptions::from_network(&network, &profile);
+        // ics addAddress(addr, netmask bits) — 255.255.224.0 → /19
+        assert_eq!(options.addresses, vec!["11.36.1.2/19".to_owned()]);
+        assert!(options.routes.iter().any(|r| r == "11.0.0.0/8"));
+        assert!(options.routes.iter().any(|r| r == "10.20.205.51/32"));
+        // ics always adds DNS host routes.
+        assert!(options.routes.iter().any(|r| r == "11.11.11.11/32"));
+        assert!(options.routes.iter().any(|r| r == "11.11.11.12/32"));
+        assert!(!options.routes.iter().any(|r| r.contains("255.")));
+        assert_eq!(
+            options.search_domains,
+            vec![
+                "sslvpn.sankuai.info".to_owned(),
+                "sankuai.com".to_owned(),
+                "meituan.net".to_owned(),
+            ]
+        );
+    }
+
+    #[test]
+    fn force_global_keeps_dns_host_routes() {
+        let mut profile = ConnectionProfile::new_draft();
+        profile.force_global = true;
+        let network = NetworkSnapshot {
+            address: Some("11.36.1.2".into()),
+            netmask: Some("255.255.224.0".into()),
+            address_v6: None,
+            netmask_v6: None,
+            gateway: None,
+            dns: vec!["11.11.11.11".into()],
+            mtu: 1300,
+            routes: vec!["11.0.0.0/255.0.0.0".into()],
+            split_excludes: vec![],
+            domain: None,
+            split_dns: vec![],
+        };
+        let options = VpnOptions::from_network(&network, &profile);
+        assert_eq!(options.addresses, vec!["11.36.1.2/19".to_owned()]);
+        assert!(options.routes.iter().any(|r| r == "0.0.0.0/0"));
+        assert!(options.routes.iter().any(|r| r == "11.11.11.11/32"));
+        // force_global is full tunnel only (ics), not server split list
+        assert!(!options.routes.iter().any(|r| r == "11.0.0.0/8"));
+    }
+
+    #[test]
+    fn apply_force_global_sets_default_and_dns() {
+        let mut options = VpnOptions::default();
+        options.force_global = true;
+        options.dns_addresses = vec!["11.11.11.11".into()];
+        options.routes = vec!["11.0.0.0/8".into(), "10.20.205.51/32".into()];
+        options.apply_force_global();
+        assert!(options.routes.iter().any(|r| r == "0.0.0.0/0"));
+        assert!(options.routes.iter().any(|r| r == "11.11.11.11/32"));
+        assert_eq!(options.routes.len(), 2);
+    }
+
+    #[test]
+    fn slash32_netmask_clamped_for_platform() {
+        let mut profile = ConnectionProfile::new_draft();
+        profile.force_global = false;
+        let network = NetworkSnapshot {
+            address: Some("10.1.2.3".into()),
+            netmask: Some("255.255.255.255".into()),
+            address_v6: None,
+            netmask_v6: None,
+            gateway: None,
+            dns: vec!["10.0.0.53".into()],
+            mtu: 1400,
+            routes: vec![],
+            split_excludes: vec![],
+            domain: None,
+            split_dns: vec![],
+        };
+        let options = VpnOptions::from_network(&network, &profile);
+        // OpenHarmony ParseAddress rejects prefix >= 32
+        assert_eq!(options.addresses, vec!["10.1.2.3/31".to_owned()]);
+        assert!(options.routes.iter().any(|r| r == "0.0.0.0/0"));
+        assert!(options.routes.iter().any(|r| r == "10.0.0.53/32"));
+    }
+}

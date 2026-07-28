@@ -1,0 +1,30 @@
+[package]
+name = "hanyconnect_ui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "H-AnyConnect Arkit UI + NAPI shell over hanyconnect_core / anyconnect-rs"
+
+[lib]
+crate-type = ["cdylib"]
+doctest = false
+test = false
+
+[features]
+default = []
+# Full OpenConnect session (auth + CSTP + TUN mainloop) via anyconnect-rs.
+native-anyconnect = ["hanyconnect_core/native-anyconnect"]
+
+[dependencies]
+arkit.workspace = true
+dioxus.workspace = true
+hanyconnect_core.workspace = true
+napi-derive-ohos.workspace = true
+napi-ohos.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+
+[build-dependencies]
+napi-build-ohos.workspace = true

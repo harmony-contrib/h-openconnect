@@ -1,0 +1,37 @@
+//! Session engine for H-AnyConnect.
+//!
+//! Architecture (aligned with paws):
+//! - UI (`hanyconnect_ui`) owns presentation and dispatches connect/disconnect.
+//! - This crate owns profile persistence, lifecycle, diagnostics markers, and
+//!   the AnyConnect protocol path (`anyconnect-rs`) when enabled.
+//! - HarmonyOS VpnExtensionAbility owns the TUN fd and notifies native code.
+
+mod auth_bridge;
+mod e2e;
+mod engine;
+mod error;
+mod model;
+#[cfg(feature = "native-anyconnect")]
+mod native_session;
+mod platform_browser;
+mod platform_protect;
+mod platform_state;
+mod store;
+
+pub use platform_browser::{
+    clear_pending as clear_browser_open_pending, set_handler as set_external_browser_handler,
+    take_pending as take_browser_open_pending, BrowserOpenRequest,
+};
+pub use platform_protect::set_handler as set_socket_protect_handler;
+
+pub use auth_bridge::AuthInteraction;
+pub use e2e::{e2e_marker, E2eConfig, E2E_TAG};
+pub use engine::{shared_engine, SessionEngine};
+pub use error::{CoreError, CoreResult};
+pub use model::{
+    AuthChallenge, AuthChallengeReply, AuthField, AuthFieldChoice, AuthFieldKind, AuthFieldValue,
+    AuthGroupDiscovery, AuthMethod, ConnectRequest, ConnectionLifecycle, ConnectionProfile,
+    NetworkSnapshot, ProtocolKind, SessionSnapshot, SessionStats, SoftwareToken, SplitTunnelMode,
+    VpnOptions,
+};
+pub use store::ProfileStore;

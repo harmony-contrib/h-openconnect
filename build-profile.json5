@@ -1,0 +1,57 @@
+{
+  "app": {
+    "signingConfigs": [
+      {
+        "name": "default",
+        "type": "HarmonyOS",
+        "material": {
+          "certpath": "/Users/ranger/.ohos/config/default_h-anyconnect_ZKOZ--96B6uBEoc43gOK2rwizvxZw1okeiv4qJb80aY=.cer",
+          "keyAlias": "debugKey",
+          "keyPassword": "0000001AD81135F6F471CABD199845F83A791AFD018A59ECEF39F8833A441057F7EF4169D6A44D953283",
+          "profile": "/Users/ranger/.ohos/config/default_h-anyconnect_ZKOZ--96B6uBEoc43gOK2rwizvxZw1okeiv4qJb80aY=.p7b",
+          "signAlg": "SHA256withECDSA",
+          "storeFile": "/Users/ranger/.ohos/config/default_h-anyconnect_ZKOZ--96B6uBEoc43gOK2rwizvxZw1okeiv4qJb80aY=.p12",
+          "storePassword": "0000001AB133FD7FAA99E21112D3ABBA888DD48D75C760A457900126E13912E65166CB065B6179853D81"
+        }
+      }
+    ],
+    "products": [
+      {
+        "name": "default",
+        "signingConfig": "default",
+        "targetSdkVersion": "6.1.0(23)",
+        "compatibleSdkVersion": "6.0.2(22)",
+        "runtimeOS": "HarmonyOS",
+        "buildOption": {
+          "nativeCompiler": "BiSheng",
+          "strictMode": {
+            "caseSensitiveCheck": true,
+            "useNormalizedOHMUrl": true
+          }
+        }
+      }
+    ],
+    "buildModeSet": [
+      {
+        "name": "debug"
+      },
+      {
+        "name": "release"
+      }
+    ]
+  },
+  "modules": [
+    {
+      "name": "entry",
+      "srcPath": "./entry",
+      "targets": [
+        {
+          "name": "default",
+          "applyToProducts": [
+            "default"
+          ]
+        }
+      ]
+    }
+  ]
+}

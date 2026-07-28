@@ -1,0 +1,29 @@
+/node_modules
+/oh_modules
+/local.properties
+/.idea
+**/build
+/.hvigor
+.cxx
+/.clangd
+/.clang-format
+/.clang-tidy
+**/.test
+/.appanalyzer
+
+/target
+.DS_Store
+**/.DS_Store
+
+**/dist
+*.so
+!entry/libs/**/*.so
+
+/smoke-logs
+
+# Local ocserv headend state (certs, passwd) from scripts/dev-ocserv.sh
+/.dev-ocserv/
+
+# Cross-built native prefixes (regenerate with scripts/build-libxml2-ohos.sh)
+/third_party/libxml2-ohos-aarch64/
+

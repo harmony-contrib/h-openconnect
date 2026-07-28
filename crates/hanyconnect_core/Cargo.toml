@@ -1,0 +1,29 @@
+[package]
+name = "hanyconnect_core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "H-AnyConnect session engine (anyconnect-rs + platform VPN orchestration)"
+
+[features]
+default = []
+# Link source-built OpenConnect via anyconnect-rs (vendored OpenSSL).
+# For OHOS set OHOS_SDK_NATIVE + ANYCONNECT_LIBXML2_DIR (see scripts/env-ohos-anyconnect.sh).
+native-anyconnect = ["dep:anyconnect", "anyconnect/vendored-openssl"]
+
+[dependencies]
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+thiserror = "2"
+tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread", "sync", "time"] }
+tracing = "0.1"
+libc = "0.2"
+
+anyconnect = { path = "../../../anyconnect-rs/crates/anyconnect", optional = true, default-features = true }
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints]
+workspace = true

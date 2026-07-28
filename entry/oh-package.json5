@@ -1,0 +1,12 @@
+{
+  "name": "entry",
+  "version": "1.0.0",
+  "description": "H-AnyConnect entry module",
+  "main": "",
+  "author": "",
+  "license": "",
+  "dependencies": {
+    "@ohos-rs/ability": "0.4.0-beta.7",
+    "libhanyconnect_ui.so": "file:./src/main/cpp/types/libhanyconnect_ui"
+  }
+}
