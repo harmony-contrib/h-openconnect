@@ -99,7 +99,9 @@ App 内需同时关闭「严格证书信任」和「阻止不可信服务器」�
 
 ## Arkit
 
-本地依赖：`../../ohos-rs/arkit`（CSS-style RSX）。
+Arkit 依赖固定到
+[`richerfu/arkit@9f15744`](https://github.com/richerfu/arkit/commit/9f15744d891539635b22128b171bab3cb985dd22)
+（CSS-style RSX）；AnyConnect 使用 crates.io 的 `anyconnect 0.1.0`。
 
 | 旧写法 | 新写法 |
 | --- | --- |

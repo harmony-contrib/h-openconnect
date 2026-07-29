@@ -11,7 +11,6 @@
 #   Optional prebuilt: OPENSSL_PREFIX / ohos-openssl arm64-v8a.
 
 ROOT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
-ANYCONNECT_RS_DIR="${ANYCONNECT_RS_DIR:-$ROOT_DIR/../anyconnect-rs}"
 
 export OHOS_NDK_HOME="${OHOS_NDK_HOME:-/Applications/DevEco-Studio.app/Contents/sdk/default/openharmony}"
 export OHOS_SDK_NATIVE="${OHOS_SDK_NATIVE:-$OHOS_NDK_HOME/native}"
@@ -22,21 +21,16 @@ if [ ! -d "$OHOS_SDK_NATIVE/sysroot" ] || [ ! -x "$OHOS_SDK_NATIVE/llvm/bin/clan
   return 1 2>/dev/null || exit 1
 fi
 
-# Prefer anyconnect-rs official OHOS libxml2 prefix, then project third_party.
+# Use the project-owned OHOS libxml2 prefix. The Rust AnyConnect implementation
+# itself is resolved from crates.io and does not require a sibling checkout.
 LIBXML2_PREFIX="${LIBXML2_PREFIX:-}"
-if [ -z "$LIBXML2_PREFIX" ]; then
-  if [ -f "$ANYCONNECT_RS_DIR/target/ohos-deps/aarch64-unknown-linux-ohos/lib/libxml2.a" ]; then
-    LIBXML2_PREFIX="$ANYCONNECT_RS_DIR/target/ohos-deps/aarch64-unknown-linux-ohos"
-  elif [ -f "$ROOT_DIR/third_party/libxml2-ohos-aarch64/lib/libxml2.a" ]; then
-    LIBXML2_PREFIX="$ROOT_DIR/third_party/libxml2-ohos-aarch64"
-  fi
+if [ -z "$LIBXML2_PREFIX" ] &&
+  [ -f "$ROOT_DIR/third_party/libxml2-ohos-aarch64/lib/libxml2.a" ]; then
+  LIBXML2_PREFIX="$ROOT_DIR/third_party/libxml2-ohos-aarch64"
 fi
 
 if [ -z "$LIBXML2_PREFIX" ] || [ ! -f "$LIBXML2_PREFIX/include/libxml2/libxml/parser.h" ]; then
-  if [ -x "$ANYCONNECT_RS_DIR/tests/platform/ohos/build-libxml2.sh" ]; then
-    echo "building libxml2 for aarch64-unknown-linux-ohos via anyconnect-rs…"
-    LIBXML2_PREFIX="$("$ANYCONNECT_RS_DIR/tests/platform/ohos/build-libxml2.sh" aarch64-unknown-linux-ohos | tail -n 1)"
-  elif [ -x "$ROOT_DIR/scripts/build-libxml2-ohos.sh" ]; then
+  if [ -x "$ROOT_DIR/scripts/build-libxml2-ohos.sh" ]; then
     echo "building libxml2 via scripts/build-libxml2-ohos.sh…"
     "$ROOT_DIR/scripts/build-libxml2-ohos.sh"
     LIBXML2_PREFIX="$ROOT_DIR/third_party/libxml2-ohos-aarch64"

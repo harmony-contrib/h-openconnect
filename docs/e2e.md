@@ -76,7 +76,7 @@ FEATURES= ./scripts/package-hap.sh
 | OpenHarmony NDK | `OHOS_SDK_NATIVE` / `OHOS_NDK_HOME` |
 | zlib | NDK sysroot（自动） |
 | OpenSSL | `vendored-openssl`（默认）或 ohos-openssl prebuilt |
-| libxml2 | anyconnect-rs `target/ohos-deps/…` 或 `third_party/libxml2-ohos-aarch64` |
+| libxml2 | `third_party/libxml2-ohos-aarch64`，缺失时由项目脚本构建 |
 
 连接行为：
 

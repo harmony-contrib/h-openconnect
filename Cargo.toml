@@ -10,7 +10,7 @@ rust-version = "1.89"
 
 [workspace.dependencies]
 hanyconnect_core = { path = "crates/hanyconnect_core", default-features = false }
-arkit = { path = "../../ohos-rs/arkit/crates/arkit", package = "arkit", features = ["router", "shadcn"] }
+arkit = { git = "https://github.com/richerfu/arkit.git", rev = "9f15744d891539635b22128b171bab3cb985dd22", package = "arkit", features = ["router", "shadcn"] }
 dioxus = { version = "0.7", default-features = false, features = ["signals", "hooks", "macro"] }
 napi-build-ohos = "1.1"
 napi-derive-ohos = "1.1"
