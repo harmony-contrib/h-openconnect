@@ -203,13 +203,15 @@ pub async fn e2e_connect_active() -> Result<String> {
         .await
         .map_err(to_napi_error)?;
     let options_json = serde_json::to_string(&options).map_err(to_napi_error)?;
+    if dry_run {
+        engine
+            .set_platform_vpn_running(true)
+            .map_err(to_napi_error)?;
+        return engine.snapshot_json().map_err(to_napi_error);
+    }
     // Ask platform to start VPN extension when callbacks exist.
     match platform_callbacks::request_start_vpn(options_json) {
         Ok(()) => {}
-        Err(err) if dry_run => {
-            let _ = engine.set_platform_vpn_running(true);
-            let _ = err;
-        }
         Err(err) => return Err(to_napi_error(err)),
     }
     engine.snapshot_json().map_err(to_napi_error)

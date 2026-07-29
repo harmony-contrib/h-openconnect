@@ -10,7 +10,11 @@ description = "H-AnyConnect session engine (anyconnect-rs + platform VPN orchest
 default = []
 # Link source-built OpenConnect via anyconnect-rs (vendored OpenSSL).
 # For OHOS set OHOS_SDK_NATIVE + ANYCONNECT_LIBXML2_DIR (see scripts/env-ohos-anyconnect.sh).
-native-anyconnect = ["dep:anyconnect", "anyconnect/vendored-openssl"]
+native-anyconnect = [
+    "dep:anyconnect",
+    "anyconnect/vendored-openssl",
+    "anyconnect/rediect-tun-dns",
+]
 
 [dependencies]
 serde = { workspace = true, features = ["derive"] }

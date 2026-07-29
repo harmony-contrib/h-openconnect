@@ -14,6 +14,9 @@ pub struct E2eConfig {
     pub group: Option<String>,
     pub username: Option<String>,
     pub password: Option<String>,
+    /// Explicit opt-in used only by device tests against a private/self-signed
+    /// lab headend. The production profile default remains strict trust.
+    pub accept_untrusted: bool,
     pub auto_connect: bool,
     pub dry_run: bool,
     pub expect_connected: bool,

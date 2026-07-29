@@ -323,10 +323,10 @@ impl SessionEngine {
             profile.group = config.group.clone().unwrap_or_default();
             profile.username = config.username.clone().unwrap_or_default();
             profile.password = config.password.clone().unwrap_or_default();
-            // Local/lab headends (e.g. scripts/dev-ocserv.sh) use self-signed
-            // certs; reject-by-default would always fail obtain_cookie.
-            profile.strict_certificate_trust = false;
-            profile.block_untrusted_servers = false;
+            if config.accept_untrusted {
+                profile.strict_certificate_trust = false;
+                profile.block_untrusted_servers = false;
+            }
             if let Some(existing) = inner
                 .snapshot
                 .connections
@@ -1198,7 +1198,7 @@ impl SessionEngine {
 
     /// Read platform VPN flags written by the sibling process (UI ↔ extension).
     fn sync_platform_locked(&self, inner: &mut Inner) {
-        let Some(file) = PlatformVpnState::load(&inner.home) else {
+        let Some(mut file) = PlatformVpnState::load(&inner.home) else {
             return;
         };
 
@@ -1209,7 +1209,25 @@ impl SessionEngine {
 
         let was_running = inner.platform_vpn_running;
         let was_starting = inner.platform_vpn_starting;
-        let owner_alive = file.owner_is_alive();
+        let mut owner_alive = file.owner_is_alive();
+        let file_claims_active =
+            file.running || file.starting || file.lifecycle.is_active();
+        if file_claims_active && !owner_alive && !local_mainloop {
+            // The VPN extension can be killed without receiving onDestroy.
+            // Do not leave a durable connected/establishing record behind:
+            // apart from confusing the next UI process, a later PID reuse
+            // could make owner_is_alive() accept the stale session.
+            file = PlatformVpnState {
+                owner_pid: std::process::id(),
+                lifecycle: ConnectionLifecycle::Disconnected,
+                updated_at: PlatformVpnState::now_nanos(),
+                ..PlatformVpnState::default()
+            };
+            let _ = file.save(&inner.home);
+            SessionHandoff::clear(&inner.home);
+            owner_alive = true;
+            e2e_marker("platform_vpn_sync", "discarded_stale_owner");
+        }
         let running = local_mainloop || (file.running && owner_alive);
         let starting = !running && file.starting && owner_alive;
         inner.platform_vpn_starting = starting;
@@ -1682,11 +1700,26 @@ mod tests {
             updated_at: PlatformVpnState::now_nanos(),
         };
         platform.save(dir.path()).unwrap();
+        SessionHandoff {
+            options: crate::model::VpnOptions {
+                cookie: Some("stale-session-cookie".to_owned()),
+                ..crate::model::VpnOptions::default()
+            },
+            network: NetworkSnapshot::default(),
+            updated_at: PlatformVpnState::now_nanos(),
+        }
+        .save(dir.path())
+        .unwrap();
 
         let restarted = SessionEngine::new();
         restarted.configure_home(dir.path()).unwrap();
         let snap = restarted.snapshot().unwrap();
         assert_eq!(snap.lifecycle, ConnectionLifecycle::Disconnected);
         assert!(snap.last_error.is_none());
+        let cleaned = PlatformVpnState::load(dir.path()).unwrap();
+        assert!(!cleaned.starting);
+        assert!(!cleaned.running);
+        assert_eq!(cleaned.lifecycle, ConnectionLifecycle::Disconnected);
+        assert!(SessionHandoff::load(dir.path()).is_none());
     }
 }

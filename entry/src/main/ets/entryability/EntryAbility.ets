@@ -17,6 +17,7 @@ interface HAnyE2eParams {
   hanyGroup?: string;
   hanyUsername?: string;
   hanyPassword?: string;
+  hanyAcceptUntrusted?: string | boolean;
   hanyAutoConnect?: string | boolean;
   hanyDryRun?: string | boolean;
   hanyExpectConnected?: string | boolean;
@@ -29,6 +30,7 @@ interface HAnyE2eConfigPayload {
   group?: string;
   username?: string;
   password?: string;
+  acceptUntrusted: boolean;
   autoConnect: boolean;
   dryRun: boolean;
   expectConnected: boolean;
@@ -138,27 +140,10 @@ export default class EntryAbility extends NativeAbility {
     try {
       hilog.info(LOG_DOMAIN, LOG_TAG, 'request VPN start received');
       hanyconnectUi.setPlatformVpnStarting(true);
-      let timeoutId: number = -1;
-      const startupTimeout = new Promise<void>((_resolve, reject) => {
-        timeoutId = setTimeout(() => {
-          try {
-            hanyconnectUi.expirePlatformVpnStart();
-          } catch (err) {
-            hilog.error(LOG_DOMAIN, LOG_TAG, 'expire VPN start failed %{public}s', describeError(err));
-          }
-          reject(new Error('VPN extension startup timed out'));
-        }, 15000);
-      });
-      try {
-        await Promise.race([
-          vpnExtension.startVpnExtensionAbility(buildVpnWant(optionsJson)),
-          startupTimeout,
-        ]);
-      } finally {
-        if (timeoutId >= 0) {
-          clearTimeout(timeoutId);
-        }
-      }
+      // The first standards-compliant VpnExtension start is intentionally
+      // gated by the system consent dialog. Await the platform result instead
+      // of imposing an application timeout while the user is deciding.
+      await vpnExtension.startVpnExtensionAbility(buildVpnWant(optionsJson));
       hilog.info(LOG_DOMAIN, LOG_TAG, 'requested VPN start');
     } catch (err) {
       const message = describeError(err) || 'request VPN start failed';
@@ -356,6 +341,7 @@ export default class EntryAbility extends NativeAbility {
       group: typeof params.hanyGroup === 'string' ? params.hanyGroup : '',
       username: typeof params.hanyUsername === 'string' ? params.hanyUsername : '',
       password: typeof params.hanyPassword === 'string' ? params.hanyPassword : '',
+      acceptUntrusted: asBool(params.hanyAcceptUntrusted),
       autoConnect: autoConnect,
       dryRun: dryRun,
       expectConnected: asBool(params.hanyExpectConnected),

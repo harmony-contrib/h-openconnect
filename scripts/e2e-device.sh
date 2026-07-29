@@ -17,7 +17,7 @@ set -eu
 
 ROOT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 HDC="${HDC:-hdc}"
-BUNDLE_NAME="${BUNDLE_NAME:-com.southorange.hanyconnect}"
+BUNDLE_NAME="${BUNDLE_NAME:-com.richerfu.hanyconnect}"
 ABILITY_NAME="${ABILITY_NAME:-EntryAbility}"
 HAP_PATH="${HAP_PATH:-$ROOT_DIR/entry/build/default/outputs/default/entry-default-unsigned.hap}"
 LOG_DIR="${LOG_DIR:-$ROOT_DIR/smoke-logs}"
@@ -32,6 +32,7 @@ NAME="${NAME:-E2E Connection}"
 GROUP="${GROUP:-}"
 USERNAME="${USERNAME:-}"
 PASSWORD="${PASSWORD:-}"
+ACCEPT_UNTRUSTED=0
 AUTO_CONNECT=0
 DRY_RUN=1
 EXPECT_CONNECTED=0
@@ -54,6 +55,7 @@ Options:
   --group GROUP              Tunnel group
   --user NAME                Username
   --password SECRET          Password
+  --accept-untrusted         Explicitly trust a private/self-signed lab server
   --auto-connect             Trigger connect after applying config
   --dry-run / --no-dry-run   Dry-run session (default on)
   --expect-connected         Require lifecycle connected marker
@@ -74,6 +76,7 @@ while [ "$#" -gt 0 ]; do
     --group) GROUP="${2:?}"; shift 2 ;;
     --user) USERNAME="${2:?}"; shift 2 ;;
     --password) PASSWORD="${2:?}"; shift 2 ;;
+    --accept-untrusted) ACCEPT_UNTRUSTED=1; shift ;;
     --auto-connect) AUTO_CONNECT=1; shift ;;
     --dry-run) DRY_RUN=1; shift ;;
     --no-dry-run) DRY_RUN=0; shift ;;
@@ -156,6 +159,9 @@ if [ -n "$USERNAME" ]; then
 fi
 if [ -n "$PASSWORD" ]; then
   set -- "$@" --ps hanyPassword "$PASSWORD"
+fi
+if [ "$ACCEPT_UNTRUSTED" -eq 1 ]; then
+  set -- "$@" --pb hanyAcceptUntrusted true
 fi
 if [ "$AUTO_CONNECT" -eq 1 ]; then
   set -- "$@" --pb hanyAutoConnect true

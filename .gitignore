@@ -17,7 +17,7 @@
 
 **/dist
 *.so
-!entry/libs/**/*.so
+entry/libs/**/*.so
 
 /smoke-logs
 
@@ -26,4 +26,3 @@
 
 # Cross-built native prefixes (regenerate with scripts/build-libxml2-ohos.sh)
 /third_party/libxml2-ohos-aarch64/
-
