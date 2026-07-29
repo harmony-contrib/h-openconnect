@@ -369,7 +369,9 @@ pub(crate) fn reduce(state: &mut State, action: Action) -> Command<Action> {
     match action {
         Action::Bootstrap => {
             state.sync_engine();
-            Command::perform(session_tick_delay(), |_| Action::TickSession)
+            Command::perform(session_tick_delay(Duration::from_secs(1)), |_| {
+                Action::TickSession
+            })
         }
         Action::SetLanguagePreference(preference) => {
             state.language_preference = preference;
@@ -496,12 +498,9 @@ pub(crate) fn reduce(state: &mut State, action: Action) -> Command<Action> {
                         | ConnectionLifecycle::Establishing
                 );
             let delay_ms = if fast_poll { 250 } else { 1_000 };
-            Command::perform(
-                async move {
-                    tokio::time::sleep(Duration::from_millis(delay_ms)).await;
-                },
-                |_| Action::TickSession,
-            )
+            Command::perform(session_tick_delay(Duration::from_millis(delay_ms)), |_| {
+                Action::TickSession
+            })
         }
         Action::SetChallengeField { name, value } => {
             state.challenge_values.insert(name, value);
@@ -1068,8 +1067,8 @@ async fn engine_disconnect(dry_run: bool) -> Result<SessionOutcome, String> {
     }
 }
 
-async fn session_tick_delay() {
-    tokio::time::sleep(Duration::from_secs(1)).await;
+async fn session_tick_delay(timeout: Duration) {
+    let _ = shared_engine().wait_for_platform_change(timeout).await;
 }
 
 async fn group_discovery_delay() {

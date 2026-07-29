@@ -16,6 +16,7 @@ import hanyconnectUi from 'libhanyconnect_ui.so';
 import {
   buildVpnConfig,
   parseOptions,
+  readPlatformSharedMemoryFds,
   readOptionsJson,
   setHAnyBundleName,
 } from './VpnConfig';
@@ -44,6 +45,7 @@ export default class HAnyConnectVpnExtensionAbility extends VpnExtensionAbility 
   private vpnConnection?: vpnExtension.VpnConnection;
   private tunFd: number = -1;
   private starting: boolean = false;
+  private platformSubscriptionActive: boolean = false;
 
   public onCreate(want: Want): void {
     super.onCreate(want);
@@ -121,20 +123,67 @@ export default class HAnyConnectVpnExtensionAbility extends VpnExtensionAbility 
   }
 
   private startFromWant(want: Want): void {
-    if (this.starting || this.tunFd >= 0) {
+    try {
+      this.configureNativeHome();
+    } catch (err) {
+      hilog.error(LOG_DOMAIN, LOG_TAG, 'VPN request rejected %{public}s', describeError(err));
+      return;
+    }
+    const sharedMemory = readPlatformSharedMemoryFds(want);
+    if (!sharedMemory) {
+      const message = 'VPN start is missing platform shared memory descriptors';
+      hilog.error(LOG_DOMAIN, LOG_TAG, message);
+      try {
+        hanyconnectUi.setPlatformVpnFailed(message);
+      } catch (_inner) {
+        // No ashmem session is available to publish this failure.
+      }
+      return;
+    }
+    try {
+      hanyconnectUi.attachPlatformSharedMemory(sharedMemory.ashmemFd, sharedMemory.notificationFd);
+      hilog.info(LOG_DOMAIN, LOG_TAG, 'attached platform shared memory');
+      this.startPlatformSubscription();
+    } catch (err) {
+      const message = `attach platform shared memory failed: ${describeError(err)}`;
+      try {
+        hanyconnectUi.setPlatformVpnFailed(message);
+      } catch (_inner) {
+        // ignore
+      }
+      hilog.error(LOG_DOMAIN, LOG_TAG, 'VPN request rejected %{public}s', message);
+      this.starting = false;
+      return;
+    }
+    if (this.tunFd >= 0) {
+      this.starting = false;
+      try {
+        hanyconnectUi.setPlatformVpnRunning(true);
+        hilog.info(LOG_DOMAIN, LOG_TAG, 'reported existing VPN to rebound platform shared memory');
+      } catch (err) {
+        hilog.error(LOG_DOMAIN, LOG_TAG, 'report existing VPN state failed %{public}s', describeError(err));
+      }
+      return;
+    }
+    if (this.starting) {
+      try {
+        hanyconnectUi.setPlatformVpnStarting(true);
+        hilog.info(LOG_DOMAIN, LOG_TAG, 'reported pending VPN to rebound platform shared memory');
+      } catch (err) {
+        hilog.error(LOG_DOMAIN, LOG_TAG, 'report pending VPN state failed %{public}s', describeError(err));
+      }
       return;
     }
     this.starting = true;
     let optionsJson: string;
     try {
-      this.configureNativeHome();
       optionsJson = readOptionsJson(want);
     } catch (err) {
       const message = describeError(err) || 'VPN request has no valid options';
       try {
         hanyconnectUi.setPlatformVpnFailed(message);
       } catch (_inner) {
-        // The request is still rejected even if native state is unavailable.
+        // ignore
       }
       hilog.error(LOG_DOMAIN, LOG_TAG, 'VPN request rejected %{public}s', message);
       this.starting = false;
@@ -152,6 +201,32 @@ export default class HAnyConnectVpnExtensionAbility extends VpnExtensionAbility 
       this.destroyVpn();
       this.starting = false;
     });
+  }
+
+  private startPlatformSubscription(): void {
+    if (this.platformSubscriptionActive) {
+      return;
+    }
+    this.platformSubscriptionActive = true;
+    this.runPlatformSubscription();
+  }
+
+  private stopPlatformSubscription(): void {
+    this.platformSubscriptionActive = false;
+  }
+
+  private async runPlatformSubscription(): Promise<void> {
+    while (this.platformSubscriptionActive) {
+      try {
+        const changed = await hanyconnectUi.waitForPlatformChange(1000);
+        if (changed && this.platformSubscriptionActive) {
+          hanyconnectUi.syncPlatformChanges();
+        }
+      } catch (err) {
+        hilog.error(LOG_DOMAIN, LOG_TAG, 'platform subscription failed %{public}s', describeError(err));
+        this.platformSubscriptionActive = false;
+      }
+    }
   }
 
   private async performStart(optionsJson: string): Promise<void> {
@@ -240,6 +315,7 @@ export default class HAnyConnectVpnExtensionAbility extends VpnExtensionAbility 
   }
 
   private destroyVpn(): void {
+    this.stopPlatformSubscription();
     const connection = this.vpnConnection;
     this.tunFd = -1;
     this.vpnConnection = undefined;

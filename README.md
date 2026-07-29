@@ -30,7 +30,7 @@ HAnyConnectVpnExtensionAbility (ArkTS)
     |  HarmonyOS-owned TUN fd
     v
 hanyconnect_core (Rust)
-    |  profile store, auth forms, session handoff, lifecycle
+    |  profile store, auth forms, session handoff, ashmem lifecycle IPC
     v
 anyconnect crate / OpenConnect 9.20
     |  XML auth, cookie, CSTP, optional DTLS, routes, DNS, mainloop
@@ -50,8 +50,8 @@ processes:
    creates the system TUN.
 4. Rust attaches the TUN fd to OpenConnect, optionally enables DTLS, and runs
    the packet mainloop.
-5. The UI observes the extension-owned lifecycle and traffic statistics through
-   private cross-process state.
+5. The UI observes extension-owned lifecycle and traffic statistics through
+   checksummed, double-buffered ashmem frames with socket change notifications.
 
 Missing or malformed headend network configuration fails the connection. The
 app does not synthesize fallback tunnel addresses, public DNS servers, or
@@ -95,8 +95,8 @@ default routes.
   - Ordered backup gateways for eligible network, TLS, and connection failures.
   - OpenConnect mainloop reconnect plus profile-controlled reconnect after an
     unexpected disconnect while the app is active.
-  - Cross-process lifecycle ownership checks prevent stale state or PID reuse
-    from showing a false connected session.
+  - Session-scoped ashmem state disappears with its owning processes, so stale
+    files or PID reuse cannot revive a false connected session.
 - **Native application experience**
   - Native ArkUI interface for phone, tablet, and 2-in-1 targets.
   - Connection profiles, favorites, live status, traffic statistics,
@@ -121,8 +121,8 @@ accept credentials, trust overrides, or auto-connect instructions through
 - A HarmonyOS signing profile when producing a HAP for a physical device.
 - Docker Desktop only when using the optional local `ocserv` headend.
 
-The project targets HarmonyOS 6.1, is compatible with HarmonyOS 6.0.2, and
-currently packages an `arm64-v8a` native library.
+The project targets HarmonyOS 6.1.1 / API 24, is compatible with HarmonyOS
+6.0.2, and currently packages an `arm64-v8a` native library.
 
 The default native build uses:
 

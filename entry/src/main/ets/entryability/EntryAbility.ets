@@ -6,7 +6,11 @@ import { picker, fileIo as fs } from '@kit.CoreFileKit';
 import { NativeAbility } from '@ohos-rs/ability';
 import hanyconnectUi from 'libhanyconnect_ui.so';
 import window from '@ohos.window';
-import { buildVpnWant, setHAnyBundleName } from '../vpnability/VpnConfig';
+import {
+  buildVpnWant,
+  HAnyPlatformSharedMemoryFds,
+  setHAnyBundleName,
+} from '../vpnability/VpnConfig';
 
 const LOG_DOMAIN: number = 0x0000;
 const LOG_TAG: string = 'HAnyConnectEntry';
@@ -37,6 +41,7 @@ export default class EntryAbility extends NativeAbility {
   public moduleName: string | string[] = 'hanyconnect_ui';
   public defaultPage: boolean = false;
   private vpnStartRequest: Promise<void> | undefined = undefined;
+  private platformSharedMemory?: HAnyPlatformSharedMemoryFds;
 
   private configureNativeHome(): void {
     try {
@@ -48,6 +53,18 @@ export default class EntryAbility extends NativeAbility {
       hilog.error(LOG_DOMAIN, LOG_TAG, 'configure native home failed %{private}s', message);
       throw new Error(message);
     }
+  }
+
+  private initializePlatformSharedMemory(): void {
+    const fields = hanyconnectUi.initializePlatformSharedMemory().split(',');
+    const ashmemFd = Number(fields[0]);
+    const notificationFd = Number(fields[1]);
+    if (fields.length !== 2 || !Number.isInteger(ashmemFd) || ashmemFd < 0 ||
+      !Number.isInteger(notificationFd) || notificationFd < 0) {
+      throw new Error('native platform shared memory returned invalid file descriptors');
+    }
+    this.platformSharedMemory = { ashmemFd, notificationFd };
+    hilog.info(LOG_DOMAIN, LOG_TAG, 'initialized platform shared memory');
   }
 
   private configureNativeLocale(language?: string): void {
@@ -115,7 +132,7 @@ export default class EntryAbility extends NativeAbility {
       // The first standards-compliant VpnExtension start is intentionally
       // gated by the system consent dialog. Await the platform result instead
       // of imposing an application timeout while the user is deciding.
-      await vpnExtension.startVpnExtensionAbility(buildVpnWant(optionsJson));
+      await vpnExtension.startVpnExtensionAbility(buildVpnWant(optionsJson, this.platformSharedMemory));
       hilog.info(LOG_DOMAIN, LOG_TAG, 'requested VPN start');
     } catch (err) {
       const message = describeError(err) || 'request VPN start failed';
@@ -308,6 +325,7 @@ export default class EntryAbility extends NativeAbility {
   public async onCreate(want: Want, launchParam: AbilityConstant.LaunchParam): Promise<void> {
     try {
       this.configureNativeHome();
+      this.initializePlatformSharedMemory();
       this.configureNativeLocale();
       this.configureNativeAppearance();
       hanyconnectUi.registerPlatformCallbacks({

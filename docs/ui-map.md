@@ -7,7 +7,7 @@
 | Disconnected | 未连接 |
 | Connecting / Authenticating | UI 进程 obtain_cookie + CSTP（取网络配置） |
 | Establishing | 已请求系统 VPN 扩展；扩展进程 re-auth + create TUN |
-| Connected | 扩展进程 mainloop 运行；UI 通过 `platform-vpn-state.json` 同步 |
+| Connected | 扩展进程 mainloop 运行；UI 通过 ashmem 状态帧与变更通知同步 |
 | Disconnecting / Failed | 断开或失败 |
 
 ## 用户操作 → 实现
@@ -44,7 +44,7 @@
 | --- | --- |
 | **anyconnect-rs** | `AuthForm` 多轮回调；预选 auth group 在首个 XML POST 中发送，后续切组返回 `NewGroup` 获取对应 AAA/RADIUS 表单 |
 | **core `AuthInteraction`** | form handler 自动填 username/password/group；Token/SSO 字段留给 OpenConnect 生成；不足则 `wait_for_reply` 阻塞；UI `submit` / `cancel` 解锁 |
-| **UI** | 连接中 250ms 轮询；`pending_auth` 时弹出底部 sheet；支持 text/password/token/select；多轮自动再弹 |
+| **UI** | 连接中使用最长 250ms 的事件等待；`pending_auth` 时弹出底部 sheet；支持 text/password/token/select；多轮自动再弹 |
 | **VPN 扩展** | 非交互 autofill（密码/cookie re-auth）；不弹 UI |
 
 NAPI：`pending_auth_challenge` / `submit_auth_challenge` / `cancel_auth_challenge`。
@@ -94,6 +94,6 @@ SSO 的首次请求读取服务器分组；成功后使用服务器协议值填�
 | 主页密码 | 连接前可填写并随 profile 持久化，不再使用“仅本次”弹窗 |
 | 允许局域网 | OHOS 无 `allowBypass` → 全隧道时把 RFC1918/link-local 标 `isExcludedRoute` |
 | 按应用分流 | `trustedApplications` / `blockedApplications` 写入系统 VpnConfig |
-| 主循环重连 | 使用 OpenConnect 主循环的标准重连机制；App 轮询共享平台状态，不写测试标记 |
+| 主循环重连 | 使用 OpenConnect 主循环的标准重连机制；App 通过 ashmem 通知与有界等待同步平台状态，不写测试标记 |
 
 后续可选：通过设备密钥服务加密静态凭据、内嵌 WebView SAML。

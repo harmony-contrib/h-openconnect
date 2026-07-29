@@ -15,6 +15,7 @@ dioxus = { version = "0.7", default-features = false, features = ["signals", "ho
 napi-build-ohos = "1.1"
 napi-derive-ohos = "1.1"
 napi-ohos = { version = "1.1", features = ["napi8", "tokio_rt"] }
+ohos-ashmem-binding = "0.1.0"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["macros", "rt", "rt-multi-thread", "sync", "time"] }

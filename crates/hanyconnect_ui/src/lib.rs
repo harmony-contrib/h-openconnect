@@ -27,13 +27,44 @@ pub fn configure_app_home(home_dir: String) -> Result<()> {
         .map_err(to_napi_error)
 }
 
-/// VPN-extension process entry. UI and extension use the same paws-aligned
-/// shared state directory.
+/// VPN-extension process entry. Persistent profiles and the short-lived
+/// authenticated session handoff use the shared app-private directory; live
+/// lifecycle state is exchanged through ashmem.
 #[napi]
 pub fn configure_app_home_for_extension(home_dir: String) -> Result<()> {
     std::env::set_var("HANYCONNECT_HOME", &home_dir);
     shared_engine()
         .configure_home(home_dir)
+        .map_err(to_napi_error)
+}
+
+#[napi]
+pub fn initialize_platform_shared_memory() -> Result<String> {
+    let fds = shared_engine()
+        .initialize_platform_shared_memory()
+        .map_err(to_napi_error)?;
+    Ok(format!("{},{}", fds.ashmem_fd, fds.notification_fd))
+}
+
+#[napi]
+pub fn attach_platform_shared_memory(ashmem_fd: i32, notification_fd: i32) -> Result<()> {
+    shared_engine()
+        .attach_platform_shared_memory(ashmem_fd, notification_fd)
+        .map_err(to_napi_error)
+}
+
+#[napi]
+pub async fn wait_for_platform_change(timeout_ms: u32) -> Result<bool> {
+    shared_engine()
+        .wait_for_platform_change(std::time::Duration::from_millis(u64::from(timeout_ms)))
+        .await
+        .map_err(to_napi_error)
+}
+
+#[napi]
+pub fn sync_platform_changes() -> Result<()> {
+    shared_engine()
+        .sync_platform_changes()
         .map_err(to_napi_error)
 }
 

@@ -190,17 +190,53 @@ export function readOptionsJson(want?: Want): string {
   throw new Error('VPN extension request is missing optionsJson');
 }
 
-export function buildVpnWant(optionsJson?: string): Want {
-  const want: Want = {
+const HANY_ASHMEM_FD_KEY = 'hanyconnectPlatformAshmem';
+const HANY_NOTIFICATION_FD_KEY = 'hanyconnectPlatformNotification';
+
+export interface HAnyPlatformSharedMemoryFds {
+  ashmemFd: number;
+  notificationFd: number;
+}
+
+class HAnyWantFileDescriptor {
+  public type: string = 'FD';
+  public value: number;
+
+  constructor(value: number) {
+    this.value = value;
+  }
+}
+
+interface HAnyVpnWantParameters extends Record<string, Object> {
+  optionsJson: string;
+}
+
+export function buildVpnWant(
+  optionsJson?: string,
+  sharedMemory?: HAnyPlatformSharedMemoryFds,
+): Want {
+  const parameters: HAnyVpnWantParameters = {
+    optionsJson: optionsJson ?? '',
+  };
+  if (sharedMemory) {
+    parameters[HANY_ASHMEM_FD_KEY] = new HAnyWantFileDescriptor(sharedMemory.ashmemFd);
+    parameters[HANY_NOTIFICATION_FD_KEY] = new HAnyWantFileDescriptor(sharedMemory.notificationFd);
+  }
+  return {
     deviceId: '',
     bundleName: currentHAnyBundleName(),
     moduleName: HANY_MODULE_NAME,
     abilityName: HANY_VPN_ABILITY,
+    parameters,
   };
-  if (optionsJson !== undefined) {
-    want.parameters = {
-      optionsJson: optionsJson,
-    };
+}
+
+export function readPlatformSharedMemoryFds(want: Want): HAnyPlatformSharedMemoryFds | undefined {
+  const ashmemFd = want.fds?.[HANY_ASHMEM_FD_KEY];
+  const notificationFd = want.fds?.[HANY_NOTIFICATION_FD_KEY];
+  if (typeof ashmemFd !== 'number' || ashmemFd < 0 ||
+    typeof notificationFd !== 'number' || notificationFd < 0) {
+    return undefined;
   }
-  return want;
+  return { ashmemFd, notificationFd };
 }

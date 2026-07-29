@@ -1043,6 +1043,7 @@ version = "1.0.0"
 dependencies = [
  "anyconnect",
  "libc",
+ "ohos-ashmem-binding",
  "serde",
  "serde_json",
  "tempfile",
@@ -1628,6 +1629,16 @@ dependencies = [
  "ohos-image-native-sys",
  "ohos-native-drawing-sys",
  "ohos-udmf-sys",
+]
+
+[[package]]
+name = "ohos-ashmem-binding"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a0341c866ff5fcb51dfa30f583f68d0434f965fdbcc9d67d92b4fcd53a07dabd"
+dependencies = [
+ "bitflags",
+ "libc",
 ]
 
 [[package]]
@@ -2439,7 +2450,7 @@ dependencies = [
  "getrandom 0.4.3",
  "once_cell",
  "rustix",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2803,7 +2814,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

@@ -13,6 +13,7 @@ mod model;
 #[cfg(feature = "native-anyconnect")]
 mod native_session;
 mod platform_browser;
+mod platform_ipc;
 mod platform_protect;
 mod platform_state;
 mod private_fs;

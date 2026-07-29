@@ -4,7 +4,8 @@ use crate::model::{
     AuthChallenge, AuthChallengeReply, AuthGroupDiscovery, ConnectRequest, ConnectionLifecycle,
     ConnectionProfile, DiagnosticEntry, NetworkSnapshot, SessionSnapshot, SessionStats, VpnOptions,
 };
-use crate::platform_state::{current_process_start_ticks, PlatformVpnState, SessionHandoff};
+use crate::platform_ipc::{PlatformIpc, PlatformIpcError};
+use crate::platform_state::{PlatformVpnState, SessionHandoff};
 use crate::store::{Preferences, ProfileStore};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, OnceLock};
@@ -41,6 +42,7 @@ struct Inner {
     generation: u64,
     platform_vpn_running: bool,
     platform_vpn_starting: bool,
+    platform_vpn_state_updated_at: u128,
     last_vpn_options: VpnOptions,
     #[cfg(feature = "native-anyconnect")]
     pending_native: Option<PendingNativeSession>,
@@ -50,8 +52,15 @@ struct Inner {
 
 pub struct SessionEngine {
     inner: Mutex<Inner>,
+    platform_ipc: Mutex<Option<Arc<PlatformIpc>>>,
     lifecycle_tx: watch::Sender<ConnectionLifecycle>,
     auth: Arc<AuthInteraction>,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct PlatformSharedMemoryFds {
+    pub ashmem_fd: i32,
+    pub notification_fd: i32,
 }
 
 impl SessionEngine {
@@ -68,15 +77,92 @@ impl SessionEngine {
                 generation: 0,
                 platform_vpn_running: false,
                 platform_vpn_starting: false,
+                platform_vpn_state_updated_at: 0,
                 last_vpn_options: VpnOptions::default(),
                 #[cfg(feature = "native-anyconnect")]
                 pending_native: None,
                 #[cfg(feature = "native-anyconnect")]
                 running_native: None,
             }),
+            platform_ipc: Mutex::new(None),
             lifecycle_tx,
             auth,
         }
+    }
+
+    pub fn initialize_platform_shared_memory(&self) -> CoreResult<PlatformSharedMemoryFds> {
+        {
+            let platform = self
+                .platform_ipc
+                .lock()
+                .map_err(|_| CoreError::msg("platform IPC lock poisoned"))?;
+            if let Some(platform) = platform.as_ref() {
+                let fds = platform.ui_fds().map_err(platform_ipc_error)?;
+                return Ok(PlatformSharedMemoryFds {
+                    ashmem_fd: fds.ashmem,
+                    notification_fd: fds.notification,
+                });
+            }
+        }
+
+        let (platform, fds) = PlatformIpc::create_ui().map_err(platform_ipc_error)?;
+        {
+            let mut slot = self
+                .platform_ipc
+                .lock()
+                .map_err(|_| CoreError::msg("platform IPC lock poisoned"))?;
+            *slot = Some(platform);
+        }
+        let mut inner = self.lock()?;
+        self.persist_platform_locked(&mut inner)?;
+        Ok(PlatformSharedMemoryFds {
+            ashmem_fd: fds.ashmem,
+            notification_fd: fds.notification,
+        })
+    }
+
+    pub fn attach_platform_shared_memory(
+        &self,
+        ashmem_fd: i32,
+        notification_fd: i32,
+    ) -> CoreResult<()> {
+        let platform =
+            PlatformIpc::attach_vpn_raw(ashmem_fd, notification_fd).map_err(platform_ipc_error)?;
+        let previous = {
+            let mut slot = self
+                .platform_ipc
+                .lock()
+                .map_err(|_| CoreError::msg("platform IPC lock poisoned"))?;
+            slot.replace(platform)
+        };
+        // The extension process may be reused after the UI process restarts.
+        // Always bind the latest Want descriptors before checking VPN state.
+        drop(previous);
+        self.sync_platform_changes()
+    }
+
+    pub fn sync_platform_changes(&self) -> CoreResult<()> {
+        let mut inner = self.lock()?;
+        self.sync_platform_locked(&mut inner);
+        Ok(())
+    }
+
+    pub async fn wait_for_platform_change(&self, timeout: Duration) -> CoreResult<bool> {
+        let Some(platform) = self.platform_ipc()? else {
+            tokio::time::sleep(timeout).await;
+            return Ok(false);
+        };
+        tokio::task::spawn_blocking(move || platform.wait_for_change(timeout))
+            .await
+            .map_err(|error| CoreError::msg(format!("platform subscription task failed: {error}")))?
+            .map_err(platform_ipc_error)
+    }
+
+    fn platform_ipc(&self) -> CoreResult<Option<Arc<PlatformIpc>>> {
+        self.platform_ipc
+            .lock()
+            .map(|platform| platform.clone())
+            .map_err(|_| CoreError::msg("platform IPC lock poisoned"))
     }
 
     pub fn configure_home(&self, home: impl Into<PathBuf>) -> CoreResult<()> {
@@ -109,7 +195,8 @@ impl SessionEngine {
             .or_else(|| inner.snapshot.connections.first().map(|p| p.id.clone()));
         inner.snapshot.active_connection_id = resolved_active;
         self.persist_preferences_locked(&inner)?;
-        // Absorb VPN-extension process state written under the same home.
+        // Absorb a sibling-process frame when this process has already
+        // attached to the current ashmem session.
         self.sync_platform_locked(&mut inner);
         Ok(())
     }
@@ -416,7 +503,7 @@ impl SessionEngine {
             self.set_lifecycle_locked(&mut inner, ConnectionLifecycle::Establishing, None);
             self.push_diag_locked(&mut inner, "info", "platform VPN extension starting");
         }
-        self.persist_platform_locked(&inner)?;
+        self.persist_platform_locked(&mut inner)?;
         Ok(())
     }
 
@@ -426,7 +513,7 @@ impl SessionEngine {
             let mut inner = self.lock()?;
             self.sync_platform_locked(&mut inner);
             let stop = self.apply_platform_vpn_running_locked(&mut inner, running)?;
-            self.persist_platform_locked(&inner)?;
+            self.persist_platform_locked(&mut inner)?;
             stop
         };
         #[cfg(not(feature = "native-anyconnect"))]
@@ -434,7 +521,7 @@ impl SessionEngine {
             let mut inner = self.lock()?;
             self.sync_platform_locked(&mut inner);
             self.apply_platform_vpn_running_locked(&mut inner, running)?;
-            self.persist_platform_locked(&inner)?;
+            self.persist_platform_locked(&mut inner)?;
         }
         #[cfg(feature = "native-anyconnect")]
         if let Some(session) = stop_native {
@@ -450,7 +537,7 @@ impl SessionEngine {
             let mut inner = self.lock()?;
             self.sync_platform_locked(&mut inner);
             let stop = self.apply_platform_vpn_failed_locked(&mut inner, error)?;
-            self.persist_platform_locked(&inner)?;
+            self.persist_platform_locked(&mut inner)?;
             stop
         };
         #[cfg(not(feature = "native-anyconnect"))]
@@ -458,7 +545,7 @@ impl SessionEngine {
             let mut inner = self.lock()?;
             self.sync_platform_locked(&mut inner);
             self.apply_platform_vpn_failed_locked(&mut inner, error)?;
-            self.persist_platform_locked(&inner)?;
+            self.persist_platform_locked(&mut inner)?;
         }
         #[cfg(feature = "native-anyconnect")]
         if let Some(session) = stop_native {
@@ -555,7 +642,7 @@ impl SessionEngine {
 
     pub fn expire_platform_vpn_start(&self) -> CoreResult<bool> {
         let mut inner = self.lock()?;
-        // VPN extension may have already written running=true to the shared file.
+        // VPN extension may already have published running=true to ashmem.
         self.sync_platform_locked(&mut inner);
         if !inner.platform_vpn_starting || inner.platform_vpn_running {
             return Ok(false);
@@ -576,7 +663,7 @@ impl SessionEngine {
             ConnectionLifecycle::Failed,
             Some("VPN extension startup timed out".to_owned()),
         );
-        self.persist_platform_locked(&inner)?;
+        self.persist_platform_locked(&mut inner)?;
         Ok(true)
     }
 
@@ -597,26 +684,10 @@ impl SessionEngine {
             // Fresh interactive-auth session for this connect attempt.
             self.auth.begin_session();
             inner.snapshot.pending_auth = None;
-            // Drop stale platform-vpn-state.json from a previous session so the
-            // UI does not flash "connected" before the extension is up.
+            // Reset the UI lane for a fresh ashmem session attempt.
             inner.platform_vpn_running = false;
             inner.platform_vpn_starting = false;
             SessionHandoff::clear(&inner.home);
-            let _ = PlatformVpnState {
-                starting: false,
-                running: false,
-                owner_pid: std::process::id(),
-                owner_start_ticks: current_process_start_ticks(),
-                lifecycle: ConnectionLifecycle::Connecting,
-                last_error: None,
-                assigned_ip: String::new(),
-                gateway: String::new(),
-                mtu: 0,
-                network: NetworkSnapshot::default(),
-                stats: SessionStats::default(),
-                updated_at: PlatformVpnState::now_nanos(),
-            }
-            .save(&inner.home);
             inner.generation += 1;
             let generation = inner.generation;
             self.set_lifecycle_locked(&mut inner, ConnectionLifecycle::Connecting, None);
@@ -629,6 +700,7 @@ impl SessionEngine {
                     request.profile.server, request.dry_run
                 ),
             );
+            self.persist_platform_locked(&mut inner)?;
             generation
         };
 
@@ -684,7 +756,7 @@ impl SessionEngine {
                     updated_at: PlatformVpnState::now_nanos(),
                 };
                 handoff.save(&inner.home)?;
-                self.persist_platform_locked(&inner)?;
+                self.persist_platform_locked(&mut inner)?;
                 // Prefer compact options for Want (network only is enough for TUN create).
                 Ok(prepared.options)
             }
@@ -704,9 +776,9 @@ impl SessionEngine {
                     Some(message.clone()),
                 );
                 self.push_diag_locked(&mut inner, "error", message.clone());
-                // Persist so device file pull / next snapshot sees Failed + lastError
-                // (previously left lifecycle stuck at "connecting").
-                let _ = self.persist_platform_locked(&inner);
+                // Publish the terminal state so the UI does not remain in
+                // "connecting" when authentication or negotiation fails.
+                let _ = self.persist_platform_locked(&mut inner);
                 let _ = write_last_error(&inner.home, &message);
                 Err(err)
             }
@@ -754,7 +826,7 @@ impl SessionEngine {
             inner.pending_native = Some(pending);
             inner.platform_vpn_starting = true;
             self.set_lifecycle_locked(&mut inner, ConnectionLifecycle::Establishing, None);
-            self.persist_platform_locked(&inner)?;
+            self.persist_platform_locked(&mut inner)?;
             Ok(json)
         }
         #[cfg(not(feature = "native-anyconnect"))]
@@ -836,8 +908,9 @@ impl SessionEngine {
                 "info",
                 format!("OpenConnect mainloop attached to TUN fd {fd}"),
             );
-            // Critical: UI process reads this file to leave "establishing".
-            self.persist_platform_locked(&inner)?;
+            // Critical: the UI consumes this ashmem frame to leave
+            // "establishing".
+            self.persist_platform_locked(&mut inner)?;
             SessionHandoff::clear(&inner.home);
             return Ok(());
         }
@@ -855,7 +928,7 @@ impl SessionEngine {
                 "info",
                 format!("platform TUN fd {fd} accepted (no native OpenConnect)"),
             );
-            self.persist_platform_locked(&inner)?;
+            self.persist_platform_locked(&mut inner)?;
             Ok(())
         }
     }
@@ -906,7 +979,7 @@ impl SessionEngine {
                 inner.snapshot.stats = SessionStats::default();
                 inner.snapshot.network = NetworkSnapshot::default();
                 SessionHandoff::clear(&inner.home);
-                let _ = self.persist_platform_locked(&inner);
+                let _ = self.persist_platform_locked(&mut inner);
             }
         }
         Ok(())
@@ -936,7 +1009,7 @@ impl SessionEngine {
             self.set_lifecycle_locked(&mut inner, ConnectionLifecycle::Disconnected, None);
         }
         inner.connected_at = None;
-        self.persist_platform_locked(&inner)?;
+        self.persist_platform_locked(&mut inner)?;
         Ok(())
     }
 
@@ -962,7 +1035,7 @@ impl SessionEngine {
                                 );
                                 inner.platform_vpn_running = false;
                                 inner.connected_at = None;
-                                let _ = self.persist_platform_locked(&inner);
+                                let _ = self.persist_platform_locked(&mut inner);
                             }
                             Err(err) => {
                                 let message = err.to_string();
@@ -973,7 +1046,7 @@ impl SessionEngine {
                                 );
                                 inner.platform_vpn_running = false;
                                 inner.connected_at = None;
-                                let _ = self.persist_platform_locked(&inner);
+                                let _ = self.persist_platform_locked(&mut inner);
                             }
                         }
                     }
@@ -988,7 +1061,7 @@ impl SessionEngine {
                     }
                     inner.snapshot.stats = traffic;
                     // Publish telemetry for the UI process.
-                    let _ = self.persist_platform_locked(&inner);
+                    let _ = self.persist_platform_locked(&mut inner);
                 }
                 return Ok(inner.snapshot.clone());
             }
@@ -1113,9 +1186,27 @@ impl SessionEngine {
         }
     }
 
-    /// Read platform VPN flags written by the sibling process (UI ↔ extension).
+    /// Read the newest sibling-process frame from the opposite ashmem lane.
     fn sync_platform_locked(&self, inner: &mut Inner) {
-        let Some(mut file) = PlatformVpnState::load(&inner.home) else {
+        let Some(platform) = self.platform_ipc().ok().flatten() else {
+            return;
+        };
+        let envelope = match platform.read_remote() {
+            Ok(Some(envelope)) => envelope,
+            Ok(None) => return,
+            Err(error) => {
+                self.push_diag_locked(
+                    inner,
+                    "warn",
+                    format!("read platform shared memory failed: {error}"),
+                );
+                return;
+            }
+        };
+        let Some(remote) = envelope
+            .state
+            .filter(|state| state.updated_at > inner.platform_vpn_state_updated_at)
+        else {
             return;
         };
 
@@ -1126,47 +1217,30 @@ impl SessionEngine {
 
         let was_running = inner.platform_vpn_running;
         let was_starting = inner.platform_vpn_starting;
-        let mut owner_alive = file.owner_is_alive();
-        let file_claims_active = file.running || file.starting || file.lifecycle.is_active();
-        if file_claims_active && !owner_alive && !local_mainloop {
-            // The VPN extension can be killed without receiving onDestroy.
-            // Do not leave a durable connected/establishing record behind:
-            // apart from confusing the next UI process, a later PID reuse
-            // could make owner_is_alive() accept the stale session.
-            file = PlatformVpnState {
-                owner_pid: std::process::id(),
-                owner_start_ticks: current_process_start_ticks(),
-                lifecycle: ConnectionLifecycle::Disconnected,
-                updated_at: PlatformVpnState::now_nanos(),
-                ..PlatformVpnState::default()
-            };
-            let _ = file.save(&inner.home);
-            SessionHandoff::clear(&inner.home);
-            owner_alive = true;
-        }
-        let running = local_mainloop || (file.running && owner_alive);
-        let starting = !running && file.starting && owner_alive;
+        let running = local_mainloop || remote.running;
+        let starting = !running && remote.starting;
         inner.platform_vpn_starting = starting;
         inner.platform_vpn_running = running;
+        inner.platform_vpn_state_updated_at = remote.updated_at;
 
         if running {
-            if !file.assigned_ip.is_empty() {
-                inner.snapshot.stats.assigned_ip = file.assigned_ip.clone();
+            if !remote.assigned_ip.is_empty() {
+                inner.snapshot.stats.assigned_ip = remote.assigned_ip.clone();
             }
-            if !file.gateway.is_empty() {
-                inner.snapshot.stats.gateway = file.gateway.clone();
+            if !remote.gateway.is_empty() {
+                inner.snapshot.stats.gateway = remote.gateway.clone();
             }
-            if file.mtu > 0 {
-                inner.snapshot.stats.mtu = file.mtu;
+            if remote.mtu > 0 {
+                inner.snapshot.stats.mtu = remote.mtu;
             }
-            if file.network.address.is_some() || !file.network.dns.is_empty() {
-                inner.snapshot.network = file.network.clone();
+            if remote.network.address.is_some() || !remote.network.dns.is_empty() {
+                inner.snapshot.network = remote.network.clone();
             }
             // Prefer richer stats from the extension (bytes counters).
-            if file.stats.bytes_sent > inner.snapshot.stats.bytes_sent
-                || file.stats.bytes_received > inner.snapshot.stats.bytes_received
+            if remote.stats.bytes_sent > inner.snapshot.stats.bytes_sent
+                || remote.stats.bytes_received > inner.snapshot.stats.bytes_received
             {
-                let mut stats = file.stats.clone();
+                let mut stats = remote.stats.clone();
                 if stats.assigned_ip.is_empty() {
                     stats.assigned_ip = inner.snapshot.stats.assigned_ip.clone();
                 }
@@ -1192,7 +1266,8 @@ impl SessionEngine {
             {
                 self.set_lifecycle_locked(inner, ConnectionLifecycle::Establishing, None);
             }
-        } else if matches!(file.lifecycle, ConnectionLifecycle::Failed) || file.last_error.is_some()
+        } else if matches!(remote.lifecycle, ConnectionLifecycle::Failed)
+            || remote.last_error.is_some()
         {
             if !matches!(
                 inner.snapshot.lifecycle,
@@ -1201,7 +1276,7 @@ impl SessionEngine {
                 self.set_lifecycle_locked(
                     inner,
                     ConnectionLifecycle::Failed,
-                    file.last_error.clone(),
+                    remote.last_error.clone(),
                 );
             }
         } else if (was_running || was_starting)
@@ -1215,7 +1290,14 @@ impl SessionEngine {
         }
     }
 
-    fn persist_platform_locked(&self, inner: &Inner) -> CoreResult<()> {
+    fn persist_platform_locked(&self, inner: &mut Inner) -> CoreResult<()> {
+        // Device SystemTime can be coarser than nanoseconds. Always advance the
+        // revision so a terminal state cannot be discarded as a duplicate.
+        inner.platform_vpn_state_updated_at = PlatformVpnState::now_nanos()
+            .max(inner.platform_vpn_state_updated_at.saturating_add(1));
+        let Some(platform) = self.platform_ipc()? else {
+            return Ok(());
+        };
         let state = PlatformVpnState {
             starting: inner.platform_vpn_starting,
             running: inner.platform_vpn_running || {
@@ -1228,8 +1310,6 @@ impl SessionEngine {
                     false
                 }
             },
-            owner_pid: std::process::id(),
-            owner_start_ticks: current_process_start_ticks(),
             lifecycle: inner.snapshot.lifecycle,
             last_error: inner.snapshot.last_error.clone(),
             assigned_ip: inner.snapshot.stats.assigned_ip.clone(),
@@ -1237,10 +1317,9 @@ impl SessionEngine {
             mtu: inner.snapshot.stats.mtu,
             network: inner.snapshot.network.clone(),
             stats: inner.snapshot.stats.clone(),
-            updated_at: PlatformVpnState::now_nanos(),
+            updated_at: inner.platform_vpn_state_updated_at,
         };
-        state.save(&inner.home)?;
-        Ok(())
+        platform.publish_state(state).map_err(platform_ipc_error)
     }
 
     fn set_lifecycle_locked(
@@ -1282,6 +1361,10 @@ impl SessionEngine {
             .lock()
             .map_err(|_| CoreError::msg("session engine lock poisoned"))
     }
+}
+
+fn platform_ipc_error(error: PlatformIpcError) -> CoreError {
+    CoreError::msg(error.to_string())
 }
 
 impl Default for SessionEngine {
@@ -1448,25 +1531,20 @@ mod tests {
     }
 
     #[test]
-    fn platform_vpn_state_is_shared_between_ui_and_extension_handles() {
+    fn platform_vpn_state_revision_is_strictly_monotonic() {
         let dir = tempfile::tempdir().unwrap();
-        let ui = SessionEngine::new();
-        let extension = SessionEngine::new();
-        ui.configure_home(dir.path()).unwrap();
-        extension.configure_home(dir.path()).unwrap();
+        let engine = SessionEngine::new();
+        engine.configure_home(dir.path()).unwrap();
+        let future_revision = PlatformVpnState::now_nanos().saturating_add(3_600_000_000_000);
+        {
+            let mut inner = engine.lock().unwrap();
+            inner.platform_vpn_state_updated_at = future_revision;
+        }
 
-        ui.set_platform_vpn_starting(true).unwrap();
-        let ext_snap = extension.snapshot().unwrap();
-        assert_eq!(ext_snap.lifecycle, ConnectionLifecycle::Establishing);
+        engine.set_platform_vpn_starting(true).unwrap();
 
-        extension.set_platform_vpn_running(true).unwrap();
-        let ui_snap = ui.snapshot().unwrap();
-        assert_eq!(ui_snap.lifecycle, ConnectionLifecycle::Connected);
-        assert!(!ui.expire_platform_vpn_start().unwrap());
-
-        extension.set_platform_vpn_running(false).unwrap();
-        let ui_snap = ui.snapshot().unwrap();
-        assert_eq!(ui_snap.lifecycle, ConnectionLifecycle::Disconnected);
+        let revision = engine.lock().unwrap().platform_vpn_state_updated_at;
+        assert_eq!(revision, future_revision + 1);
     }
 
     #[test]
@@ -1521,48 +1599,11 @@ mod tests {
     }
 
     #[test]
-    fn configure_home_preserves_live_platform_starting_state() {
+    fn configure_home_ignores_legacy_platform_state_file() {
         let dir = tempdir().unwrap();
-        let engine = SessionEngine::new();
-        engine.configure_home(dir.path()).unwrap();
-        let platform = PlatformVpnState {
+        let legacy = PlatformVpnState {
             starting: true,
-            running: false,
-            owner_pid: std::process::id(),
-            owner_start_ticks: current_process_start_ticks(),
-            lifecycle: ConnectionLifecycle::Establishing,
-            last_error: None,
-            assigned_ip: String::new(),
-            gateway: String::new(),
-            mtu: 0,
-            network: NetworkSnapshot::default(),
-            stats: SessionStats::default(),
-            updated_at: PlatformVpnState::now_nanos(),
-        };
-        platform.save(dir.path()).unwrap();
-
-        let restarted = SessionEngine::new();
-        restarted.configure_home(dir.path()).unwrap();
-        let snap = restarted.snapshot().unwrap();
-        assert_eq!(snap.lifecycle, ConnectionLifecycle::Establishing);
-        assert!(snap.last_error.is_none());
-        let file = PlatformVpnState::load(dir.path()).unwrap();
-        assert!(file.starting);
-        assert!(!file.running);
-        assert_eq!(file.lifecycle, ConnectionLifecycle::Establishing);
-    }
-
-    #[test]
-    fn configure_home_preserves_platform_connected_state_and_handoff() {
-        let dir = tempdir().unwrap();
-        let engine = SessionEngine::new();
-        engine.configure_home(dir.path()).unwrap();
-
-        let platform = PlatformVpnState {
-            starting: false,
             running: true,
-            owner_pid: std::process::id(),
-            owner_start_ticks: current_process_start_ticks(),
             lifecycle: ConnectionLifecycle::Connected,
             last_error: None,
             assigned_ip: "10.1.2.3".to_owned(),
@@ -1572,47 +1613,26 @@ mod tests {
             stats: SessionStats::default(),
             updated_at: PlatformVpnState::now_nanos(),
         };
-        platform.save(dir.path()).unwrap();
-        SessionHandoff {
-            options: crate::model::VpnOptions::default(),
-            network: NetworkSnapshot::default(),
-            updated_at: PlatformVpnState::now_nanos(),
-        }
-        .save(dir.path())
+        std::fs::write(
+            dir.path().join("platform-vpn-state.json"),
+            serde_json::to_vec(&legacy).unwrap(),
+        )
         .unwrap();
 
         let restarted = SessionEngine::new();
         restarted.configure_home(dir.path()).unwrap();
-        let snap = restarted.snapshot().unwrap();
-        assert_eq!(snap.lifecycle, ConnectionLifecycle::Connected);
-        assert!(snap.last_error.is_none());
-        assert!(snap.pending_auth.is_none());
-        assert_eq!(snap.stats.assigned_ip, "10.1.2.3");
-        assert!(PlatformVpnState::load(dir.path()).unwrap().running);
-        assert!(SessionHandoff::load(dir.path()).is_some());
+        assert_eq!(
+            restarted.snapshot().unwrap().lifecycle,
+            ConnectionLifecycle::Disconnected
+        );
     }
 
     #[test]
-    fn configure_home_discards_active_state_from_dead_extension() {
+    fn session_handoff_remains_private_file_payload() {
         let dir = tempdir().unwrap();
-        let platform = PlatformVpnState {
-            starting: true,
-            running: false,
-            owner_pid: u32::MAX,
-            owner_start_ticks: 0,
-            lifecycle: ConnectionLifecycle::Establishing,
-            last_error: None,
-            assigned_ip: String::new(),
-            gateway: String::new(),
-            mtu: 0,
-            network: NetworkSnapshot::default(),
-            stats: SessionStats::default(),
-            updated_at: PlatformVpnState::now_nanos(),
-        };
-        platform.save(dir.path()).unwrap();
         SessionHandoff {
             options: crate::model::VpnOptions {
-                cookie: Some("stale-session-cookie".to_owned()),
+                cookie: Some("session-cookie".to_owned()),
                 ..crate::model::VpnOptions::default()
             },
             network: NetworkSnapshot::default(),
@@ -1621,15 +1641,7 @@ mod tests {
         .save(dir.path())
         .unwrap();
 
-        let restarted = SessionEngine::new();
-        restarted.configure_home(dir.path()).unwrap();
-        let snap = restarted.snapshot().unwrap();
-        assert_eq!(snap.lifecycle, ConnectionLifecycle::Disconnected);
-        assert!(snap.last_error.is_none());
-        let cleaned = PlatformVpnState::load(dir.path()).unwrap();
-        assert!(!cleaned.starting);
-        assert!(!cleaned.running);
-        assert_eq!(cleaned.lifecycle, ConnectionLifecycle::Disconnected);
-        assert!(SessionHandoff::load(dir.path()).is_none());
+        let loaded = SessionHandoff::load(dir.path()).unwrap();
+        assert_eq!(loaded.options.cookie.as_deref(), Some("session-cookie"));
     }
 }
