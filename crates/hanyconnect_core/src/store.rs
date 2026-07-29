@@ -1,5 +1,6 @@
-use crate::error::{CoreError, CoreResult};
+use crate::error::CoreResult;
 use crate::model::ConnectionProfile;
+use crate::private_fs::{ensure_private_dir, write_atomic_private};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -7,11 +8,29 @@ use std::path::{Path, PathBuf};
 const PROFILES_FILE: &str = "connections.json";
 const PREFERENCES_FILE: &str = "preferences.json";
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Preferences {
     #[serde(default)]
     pub active_connection_id: Option<String>,
+    #[serde(default = "default_system_preference")]
+    pub language: String,
+    #[serde(default = "default_system_preference")]
+    pub theme: String,
+}
+
+fn default_system_preference() -> String {
+    "system".to_owned()
+}
+
+impl Default for Preferences {
+    fn default() -> Self {
+        Self {
+            active_connection_id: None,
+            language: default_system_preference(),
+            theme: default_system_preference(),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -22,7 +41,7 @@ pub struct ProfileStore {
 impl ProfileStore {
     pub fn open(root: impl Into<PathBuf>) -> CoreResult<Self> {
         let root = root.into();
-        fs::create_dir_all(&root)?;
+        ensure_private_dir(&root)?;
         Ok(Self { root })
     }
 
@@ -48,14 +67,9 @@ impl ProfileStore {
 
     pub fn save(&self, profiles: &[ConnectionProfile]) -> CoreResult<()> {
         let file = self.root.join(PROFILES_FILE);
-        let tmp = self.root.join(format!("{PROFILES_FILE}.tmp"));
         // Credentials are profile fields and persist in the app-private sandbox.
         let raw = serde_json::to_string_pretty(profiles)?;
-        fs::write(&tmp, raw)?;
-        fs::rename(&tmp, file).map_err(|err| {
-            let _ = fs::remove_file(&tmp);
-            CoreError::from(err)
-        })
+        write_atomic_private(&file, raw.as_bytes())
     }
 
     pub fn load_preferences(&self) -> CoreResult<Preferences> {
@@ -69,13 +83,8 @@ impl ProfileStore {
 
     pub fn save_preferences(&self, preferences: &Preferences) -> CoreResult<()> {
         let file = self.root.join(PREFERENCES_FILE);
-        let tmp = self.root.join(format!("{PREFERENCES_FILE}.tmp"));
         let raw = serde_json::to_string_pretty(preferences)?;
-        fs::write(&tmp, raw)?;
-        fs::rename(&tmp, file).map_err(|err| {
-            let _ = fs::remove_file(&tmp);
-            CoreError::from(err)
-        })
+        write_atomic_private(&file, raw.as_bytes())
     }
 }
 
@@ -99,5 +108,31 @@ mod tests {
         store.save(&[profile.clone()]).unwrap();
 
         assert_eq!(store.load().unwrap(), vec![profile]);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = fs::metadata(dir.path().join(PROFILES_FILE))
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777;
+            assert_eq!(mode, 0o600);
+        }
+    }
+
+    #[test]
+    fn appearance_preferences_round_trip() {
+        let dir = tempdir().unwrap();
+        let store = ProfileStore::open(dir.path()).unwrap();
+        let preferences = Preferences {
+            active_connection_id: Some("vpn".to_owned()),
+            language: "zh-CN".to_owned(),
+            theme: "dark".to_owned(),
+        };
+        store.save_preferences(&preferences).unwrap();
+        let loaded = store.load_preferences().unwrap();
+        assert_eq!(loaded.active_connection_id.as_deref(), Some("vpn"));
+        assert_eq!(loaded.language, "zh-CN");
+        assert_eq!(loaded.theme, "dark");
     }
 }

@@ -26,6 +26,22 @@ impl LanguagePreference {
             Self::En => UiLocale::En,
         }
     }
+
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::System => "system",
+            Self::ZhCn => "zh-CN",
+            Self::En => "en",
+        }
+    }
+
+    fn from_str(value: &str) -> Self {
+        match value {
+            "zh-CN" => Self::ZhCn,
+            "en" => Self::En,
+            _ => Self::System,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -42,6 +58,22 @@ impl ThemePreference {
             Self::System => 0,
             Self::Light => 1,
             Self::Dark => 2,
+        }
+    }
+
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::System => "system",
+            Self::Light => "light",
+            Self::Dark => "dark",
+        }
+    }
+
+    fn from_str(value: &str) -> Self {
+        match value {
+            "light" => Self::Light,
+            "dark" => Self::Dark,
+            _ => Self::System,
         }
     }
 }
@@ -86,7 +118,6 @@ pub(crate) enum Action {
     OpenEditor {
         id: Option<String>,
     },
-    CloseEditor,
     SetDraftName(String),
     SetDraftServer(String),
     DiscoverGroups {
@@ -151,7 +182,6 @@ pub(crate) enum Action {
     ClearDiagnostics,
     /// Remove a toast by id (Sonner timer / swipe / close).
     DismissToast(u64),
-    RefreshFromEngine,
     /// Update one field on the in-progress auth challenge form.
     SetChallengeField {
         name: String,
@@ -173,7 +203,6 @@ pub(crate) struct FeedbackToast {
 pub(crate) enum SessionOutcome {
     Connected(SessionStats),
     Disconnected,
-    Failed(String),
     PlatformStartRequested,
 }
 
@@ -201,7 +230,7 @@ pub(crate) struct State {
     pub challenge_values: HashMap<String, String>,
     /// Last challenge id we seeded `challenge_values` from.
     challenge_seed_id: Option<u64>,
-    /// User initiated disconnect (skip ics-style connect_on_demand auto-reconnect).
+    /// User initiated disconnect (skip the unexpected-drop auto-reconnect).
     user_disconnect: bool,
     /// Previous lifecycle for detecting unexpected drops.
     last_lifecycle: ConnectionLifecycle,
@@ -235,11 +264,20 @@ impl State {
                 pending_auth: None,
             });
         let last_lifecycle = snapshot.lifecycle;
+        let (language_preference, theme_preference) = shared_engine()
+            .appearance_preferences()
+            .map(|(language, theme)| {
+                (
+                    LanguagePreference::from_str(&language),
+                    ThemePreference::from_str(&theme),
+                )
+            })
+            .unwrap_or_default();
         Self {
-            locale: system_locale,
+            locale: language_preference.resolve(system_locale),
             system_locale,
-            language_preference: LanguagePreference::System,
-            theme_preference: ThemePreference::System,
+            language_preference,
+            theme_preference,
             system_dark,
             snapshot,
             editor_open: false,
@@ -329,17 +367,27 @@ impl State {
 pub(crate) fn reduce(state: &mut State, action: Action) -> Command<Action> {
     let s = strings(state.locale);
     match action {
-        Action::Bootstrap | Action::RefreshFromEngine => {
+        Action::Bootstrap => {
             state.sync_engine();
-            Command::none()
+            Command::perform(session_tick_delay(), |_| Action::TickSession)
         }
         Action::SetLanguagePreference(preference) => {
             state.language_preference = preference;
             state.locale = preference.resolve(state.system_locale);
+            if let Err(err) = shared_engine()
+                .set_appearance_preferences(preference.as_str(), state.theme_preference.as_str())
+            {
+                state.push_toast(err.to_string());
+            }
             Command::none()
         }
         Action::SetThemePreference(preference) => {
             state.theme_preference = preference;
+            if let Err(err) = shared_engine()
+                .set_appearance_preferences(state.language_preference.as_str(), preference.as_str())
+            {
+                state.push_toast(err.to_string());
+            }
             Command::none()
         }
         Action::SelectConnection(id) => {
@@ -368,19 +416,19 @@ pub(crate) fn reduce(state: &mut State, action: Action) -> Command<Action> {
                 state.sync_engine();
                 state.snapshot.stats = stats;
                 state.push_toast(s.feedback_connected);
-                Command::perform(session_tick_delay(), |_| Action::TickSession)
+                Command::none()
             }
             Ok(SessionOutcome::PlatformStartRequested) => {
                 state.sync_engine();
                 // No toast: lifecycle UI already shows connecting/authenticating.
-                Command::perform(challenge_poll_delay(), |_| Action::TickSession)
+                Command::none()
             }
             Ok(SessionOutcome::Disconnected) => {
                 state.sync_engine();
                 state.push_toast(s.feedback_disconnected);
                 Command::none()
             }
-            Ok(SessionOutcome::Failed(message)) | Err(message) => {
+            Err(message) => {
                 state.sync_engine();
                 state.snapshot.lifecycle = ConnectionLifecycle::Failed;
                 // Prefer engine message (already localized for cancel / protocol hints).
@@ -395,6 +443,12 @@ pub(crate) fn reduce(state: &mut State, action: Action) -> Command<Action> {
             }
         },
         Action::TickSession => {
+            let system_locale = detect_system_locale();
+            if system_locale != state.system_locale {
+                state.system_locale = system_locale;
+                state.locale = state.language_preference.resolve(system_locale);
+            }
+            state.system_dark = detect_system_dark();
             // SAML/SSO: extension queues browser-request.json; open system browser here.
             if let Some(req) = hanyconnect_core::take_browser_open_pending() {
                 if let Err(err) = platform_callbacks::open_external_browser(req.uri.clone()) {
@@ -407,7 +461,7 @@ pub(crate) fn reduce(state: &mut State, action: Action) -> Command<Action> {
             let prev = state.last_lifecycle;
             state.sync_engine();
             let now = state.snapshot.lifecycle;
-            // ics-style connect_on_demand: auto-reconnect after unexpected drop.
+            // Profile-level auto-reconnect after an unexpected drop while the app is active.
             let want_reconnect = !state.user_disconnect
                 && !state.dry_run
                 && prev.is_active()
@@ -422,17 +476,12 @@ pub(crate) fn reduce(state: &mut State, action: Action) -> Command<Action> {
             state.last_lifecycle = now;
             if want_reconnect {
                 // Silent reconnect; home status already updates via lifecycle.
-                return start_connect(state, &s);
-            }
-            if !state.snapshot.lifecycle.is_active()
-                && !matches!(
-                    state.snapshot.lifecycle,
-                    ConnectionLifecycle::Connecting
-                        | ConnectionLifecycle::Establishing
-                        | ConnectionLifecycle::Authenticating
-                )
-            {
-                return Command::none();
+                return start_connect(state, &s).and(Command::perform(
+                    async {
+                        tokio::time::sleep(Duration::from_millis(250)).await;
+                    },
+                    |_| Action::TickSession,
+                ));
             }
             let _ = shared_engine().tick();
             state.sync_engine();
@@ -525,7 +574,7 @@ pub(crate) fn reduce(state: &mut State, action: Action) -> Command<Action> {
                 Err(err) => state.push_toast(err.to_string()),
             }
             // Keep polling for the next MFA round or connect result.
-            Command::perform(challenge_poll_delay(), |_| Action::TickSession)
+            Command::none()
         }
         Action::CancelChallenge => {
             // Authentication runs in the UI process; abort its waiter. The
@@ -562,15 +611,6 @@ pub(crate) fn reduce(state: &mut State, action: Action) -> Command<Action> {
                     server,
                 })
             }
-        }
-        Action::CloseEditor => {
-            state.editor_open = false;
-            state.editor_show_advanced = false;
-            state.draft = VpnConnection::new_draft();
-            state.group_choices.clear();
-            state.group_discovery_loading = false;
-            state.group_discovery_error = None;
-            Command::none()
         }
         Action::SetDraftName(value) => {
             state.draft.name = value;
@@ -917,7 +957,10 @@ pub(crate) fn reduce(state: &mut State, action: Action) -> Command<Action> {
             Command::none()
         }
         Action::ClearDiagnostics => {
-            state.snapshot.diagnostics.clear();
+            if let Err(err) = shared_engine().clear_diagnostics() {
+                state.push_toast(err.to_string());
+            }
+            state.sync_engine();
             Command::none()
         }
         Action::DismissToast(id) => {
@@ -927,7 +970,7 @@ pub(crate) fn reduce(state: &mut State, action: Action) -> Command<Action> {
     }
 }
 
-/// Shared connect path for user toggle and ics connect_on_demand auto-reconnect.
+/// Shared connect path for user toggle and unexpected-drop auto-reconnect.
 fn start_connect(state: &mut State, s: &crate::l10n::UiStrings) -> Command<Action> {
     let Some(active) = state.active_connection().cloned() else {
         state.push_toast(s.no_connection);
@@ -975,9 +1018,7 @@ fn start_connect(state: &mut State, s: &crate::l10n::UiStrings) -> Command<Actio
     state.last_lifecycle = ConnectionLifecycle::Connecting;
     hanyconnect_core::clear_browser_open_pending();
     let dry_run = state.dry_run;
-    Command::perform(engine_connect(active, dry_run), Action::ConnectionFinished).and(
-        Command::perform(challenge_poll_delay(), |_| Action::TickSession),
-    )
+    Command::perform(engine_connect(active, dry_run), Action::ConnectionFinished)
 }
 
 async fn engine_connect(profile: VpnConnection, dry_run: bool) -> Result<SessionOutcome, String> {
@@ -992,7 +1033,7 @@ async fn engine_connect(profile: VpnConnection, dry_run: bool) -> Result<Session
     match platform_callbacks::request_start_vpn(options_json) {
         Ok(()) => Ok(SessionOutcome::PlatformStartRequested),
         // Host/unit paths without ArkTS callbacks may use dry-run only.
-        Err(err) if dry_run => {
+        Err(_err) if dry_run => {
             let _ = engine.set_platform_vpn_running(true);
             let snap = engine.snapshot().map_err(|e| e.to_string())?;
             Ok(SessionOutcome::Connected(snap.stats))
@@ -1029,10 +1070,6 @@ async fn engine_disconnect(dry_run: bool) -> Result<SessionOutcome, String> {
 
 async fn session_tick_delay() {
     tokio::time::sleep(Duration::from_secs(1)).await;
-}
-
-async fn challenge_poll_delay() {
-    tokio::time::sleep(Duration::from_millis(250)).await;
 }
 
 async fn group_discovery_delay() {

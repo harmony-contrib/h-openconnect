@@ -11,32 +11,6 @@ import { buildVpnWant, setHAnyBundleName } from '../vpnability/VpnConfig';
 const LOG_DOMAIN: number = 0x0000;
 const LOG_TAG: string = 'HAnyConnectEntry';
 
-interface HAnyE2eParams {
-  hanyServer?: string;
-  hanyName?: string;
-  hanyGroup?: string;
-  hanyUsername?: string;
-  hanyPassword?: string;
-  hanyAcceptUntrusted?: string | boolean;
-  hanyAutoConnect?: string | boolean;
-  hanyDryRun?: string | boolean;
-  hanyExpectConnected?: string | boolean;
-  hanyExpectFailure?: string | boolean;
-}
-
-interface HAnyE2eConfigPayload {
-  server?: string;
-  name?: string;
-  group?: string;
-  username?: string;
-  password?: string;
-  acceptUntrusted: boolean;
-  autoConnect: boolean;
-  dryRun: boolean;
-  expectConnected: boolean;
-  expectFailure: boolean;
-}
-
 interface HAnyPickCertRequest {
   id?: number;
   kind?: string;
@@ -44,7 +18,7 @@ interface HAnyPickCertRequest {
 
 function describeError(err: Error | Object | string | number | boolean | null | undefined): string {
   if (err instanceof Error) {
-    return `${err.name}: ${err.message}${err.stack ? ` ${err.stack}` : ''}`;
+    return `${err.name}: ${err.message}`;
   }
   if (typeof err === 'string') {
     return err;
@@ -59,10 +33,6 @@ function describeError(err: Error | Object | string | number | boolean | null | 
   return json && json !== '{}' ? json : err.toString();
 }
 
-function asBool(value: string | boolean | undefined): boolean {
-  return value === true || value === 'true' || value === '1' || value === 'yes';
-}
-
 export default class EntryAbility extends NativeAbility {
   public moduleName: string | string[] = 'hanyconnect_ui';
   public defaultPage: boolean = false;
@@ -74,7 +44,9 @@ export default class EntryAbility extends NativeAbility {
       hanyconnectUi.configureAppHome(`${this.context.filesDir}/h-anyconnect`);
       hilog.info(LOG_DOMAIN, LOG_TAG, 'configured native home');
     } catch (err) {
-      hilog.error(LOG_DOMAIN, LOG_TAG, 'configure native home failed %{public}s', describeError(err));
+      const message = describeError(err) || 'configure native home failed';
+      hilog.error(LOG_DOMAIN, LOG_TAG, 'configure native home failed %{private}s', message);
+      throw new Error(message);
     }
   }
 
@@ -276,6 +248,7 @@ export default class EntryAbility extends NativeAbility {
   private async copyUriToPath(srcUri: string, destPath: string): Promise<void> {
     let srcFile: fs.File | undefined = undefined;
     let destFile: fs.File | undefined = undefined;
+    let completed = false;
     try {
       srcFile = fs.openSync(srcUri, fs.OpenMode.READ_ONLY);
       destFile = fs.openSync(
@@ -305,6 +278,8 @@ export default class EntryAbility extends NativeAbility {
       if (total === 0) {
         throw new Error('selected certificate file is empty');
       }
+      hanyconnectUi.securePrivateFile(destPath);
+      completed = true;
     } finally {
       if (srcFile) {
         try {
@@ -320,48 +295,12 @@ export default class EntryAbility extends NativeAbility {
           // ignore
         }
       }
-    }
-  }
-
-  private e2eParams(want: Want): HAnyE2eParams {
-    return (want.parameters as HAnyE2eParams | undefined) ?? {};
-  }
-
-  private async runE2eAutomation(want: Want): Promise<void> {
-    const params = this.e2eParams(want);
-    const server = typeof params.hanyServer === 'string' ? params.hanyServer : '';
-    const autoConnect = asBool(params.hanyAutoConnect);
-    if (server.length === 0 && !autoConnect) {
-      return;
-    }
-    const dryRun = params.hanyDryRun === undefined ? true : asBool(params.hanyDryRun);
-    const config: HAnyE2eConfigPayload = {
-      server: server.length > 0 ? server : undefined,
-      name: typeof params.hanyName === 'string' ? params.hanyName : 'E2E Connection',
-      group: typeof params.hanyGroup === 'string' ? params.hanyGroup : '',
-      username: typeof params.hanyUsername === 'string' ? params.hanyUsername : '',
-      password: typeof params.hanyPassword === 'string' ? params.hanyPassword : '',
-      acceptUntrusted: asBool(params.hanyAcceptUntrusted),
-      autoConnect: autoConnect,
-      dryRun: dryRun,
-      expectConnected: asBool(params.hanyExpectConnected),
-      expectFailure: asBool(params.hanyExpectFailure),
-    };
-    try {
-      // NAPI renames e2e → e2E (applyE2EConfig / e2EConnectActive).
-      const applied: string = hanyconnectUi.applyE2EConfig(JSON.stringify(config));
-      hilog.info(LOG_DOMAIN, LOG_TAG, 'e2e config applied %{public}s', applied);
-      if (autoConnect) {
-        const snapshot: string = await hanyconnectUi.e2EConnectActive();
-        hilog.info(LOG_DOMAIN, LOG_TAG, 'e2e connect result %{public}s', snapshot);
-        if (config.expectFailure) {
-          hilog.info(LOG_DOMAIN, LOG_TAG, 'e2e expect failure mode');
+      if (!completed) {
+        try {
+          fs.unlinkSync(destPath);
+        } catch (_e) {
+          // The destination may not have been created.
         }
-      }
-    } catch (err) {
-      hilog.error(LOG_DOMAIN, LOG_TAG, 'e2e automation failed %{public}s', describeError(err));
-      if (!asBool(params.hanyExpectFailure)) {
-        throw new Error(describeError(err) || 'e2e automation failed');
       }
     }
   }
@@ -380,19 +319,11 @@ export default class EntryAbility extends NativeAbility {
       });
       hilog.info(LOG_DOMAIN, LOG_TAG, 'registered native platform callbacks');
     } catch (err) {
-      hilog.error(LOG_DOMAIN, LOG_TAG, 'register callbacks failed %{public}s', describeError(err));
+      const message = describeError(err) || 'native initialization failed';
+      hilog.error(LOG_DOMAIN, LOG_TAG, 'native initialization failed %{private}s', message);
+      throw new Error(message);
     }
     await super.onCreate(want, launchParam);
-    this.runE2eAutomation(want).catch((err: Error) => {
-      hilog.error(LOG_DOMAIN, LOG_TAG, 'create Want automation failed %{public}s', err.message);
-    });
-  }
-
-  public onNewWant(want: Want, launchParam: AbilityConstant.LaunchParam): void {
-    super.onNewWant(want, launchParam);
-    this.runE2eAutomation(want).catch((err: Error) => {
-      hilog.error(LOG_DOMAIN, LOG_TAG, 'new Want automation failed %{public}s', err.message);
-    });
   }
 
   public onConfigurationUpdate(newConfig: Configuration): void {

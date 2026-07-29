@@ -1,7 +1,7 @@
 {
-  "allowToBackupRestore": true,
-  "includes": [
+  "allowToBackupRestore": false,
+  "includes": [],
+  "excludes": [
     "/data/storage/el2/base/files/h-anyconnect"
-  ],
-  "excludes": []
+  ]
 }

@@ -82,9 +82,11 @@ export default class HAnyConnectVpnExtensionAbility extends VpnExtensionAbility 
       } else {
         hanyconnectUi.configureAppHome(home);
       }
-      hilog.info(LOG_DOMAIN, LOG_TAG, 'configured native home (extension) %{public}s', home);
+      hilog.info(LOG_DOMAIN, LOG_TAG, 'configured native home (extension)');
     } catch (err) {
-      hilog.error(LOG_DOMAIN, LOG_TAG, 'configure native home failed %{public}s', describeError(err));
+      const message = describeError(err) || 'configure native home failed';
+      hilog.error(LOG_DOMAIN, LOG_TAG, 'configure native home failed %{private}s', message);
+      throw new Error(message);
     }
   }
 
@@ -123,8 +125,21 @@ export default class HAnyConnectVpnExtensionAbility extends VpnExtensionAbility 
       return;
     }
     this.starting = true;
-    this.configureNativeHome();
-    const optionsJson = readOptionsJson(want);
+    let optionsJson: string;
+    try {
+      this.configureNativeHome();
+      optionsJson = readOptionsJson(want);
+    } catch (err) {
+      const message = describeError(err) || 'VPN request has no valid options';
+      try {
+        hanyconnectUi.setPlatformVpnFailed(message);
+      } catch (_inner) {
+        // The request is still rejected even if native state is unavailable.
+      }
+      hilog.error(LOG_DOMAIN, LOG_TAG, 'VPN request rejected %{public}s', message);
+      this.starting = false;
+      return;
+    }
     hilog.info(LOG_DOMAIN, LOG_TAG, 'optionsJson length=%{public}d', optionsJson.length);
     this.performStart(optionsJson).catch((err: Error) => {
       const message = describeError(err) || 'vpn start failed';
@@ -134,6 +149,7 @@ export default class HAnyConnectVpnExtensionAbility extends VpnExtensionAbility 
         // ignore
       }
       hilog.error(LOG_DOMAIN, LOG_TAG, 'VPN start failed %{public}s', message);
+      this.destroyVpn();
       this.starting = false;
     });
   }
@@ -182,23 +198,12 @@ export default class HAnyConnectVpnExtensionAbility extends VpnExtensionAbility 
 
     // 2) paws-shaped system VPN config (see VpnConfig.ets).
     const config: vpnExtension.VpnConfig = buildVpnConfig(options);
-    const addr0 = (config.addresses && config.addresses.length > 0)
-      ? `${config.addresses[0].address.address}/${config.addresses[0].prefixLength}`
-      : 'none';
-    const routeSample = (config.routes ?? []).map((r) =>
-      `${r.interface}:${r.destination.address.address}/${r.destination.prefixLength}` +
-        (r.isDefaultRoute ? '*' : '')
-    ).join(',') || 'none';
-    const dns0 = (config.dnsAddresses && config.dnsAddresses.length > 0)
-      ? config.dnsAddresses[0]
-      : 'none';
     hilog.info(LOG_DOMAIN, LOG_TAG,
-      'create VpnConfig mtu=%{public}d addr=%{public}s routes=%{public}d sample=%{public}s dns0=%{public}s',
+      'create VpnConfig mtu=%{public}d addresses=%{public}d routes=%{public}d dns=%{public}d',
       config.mtu ?? 0,
-      addr0,
+      config.addresses ? config.addresses.length : 0,
       config.routes ? config.routes.length : 0,
-      routeSample,
-      dns0);
+      config.dnsAddresses ? config.dnsAddresses.length : 0);
 
     try {
       const fd = await this.vpnConnection.create(config);

@@ -16,9 +16,9 @@
 | --- | --- | --- |
 | Home | 连接 | `prepare_connect` → 写 `session-handoff.json` → `requestStartVpn` → 扩展 `prepareVpnInExtension` + `startVpn(fd)` |
 | Home | 断开 | `requestStopVpn` → 扩展 destroy + `Command::Cancel` / platform state clear |
-| Connections | 保存 | `ProfileStore`（**测试阶段写密码**到本地沙箱） |
+| Connections | 保存 | `ProfileStore`（密码持久化在禁止备份、权限收紧的应用私有目录） |
 | Statistics | 刷新 | `tick` + 共享 platform state 流量 |
-| More / Diagnostics | 诊断 | `snapshot.diagnostics` + E2E 标记 |
+| More / Diagnostics | 诊断 | `snapshot.diagnostics` + 受限大小的 OpenConnect 日志 |
 
 ## 入口一致性
 
@@ -26,18 +26,16 @@
 | --- | --- | --- |
 | UI 连接按钮 | 默认关（native 构建） | 是 |
 | NAPI `prepareVpn` | 同 env | 是 |
-| E2E Want `hanyDryRun=false` | 关 | 是 |
-| E2E `hanyDryRun=true` | 开 | 仅生命周期（测试用） |
 | 扩展 `prepareVpnInExtension` | — | 扩展进程只使用 UI 认证得到的 cookie 建立 CSTP |
 
 ## 持久化
 
 | 文件 | 内容 |
 | --- | --- |
-| `connections.json` | 连接列表（当前测试阶段会写入密码/密钥口令，仅限应用沙箱） |
-| `preferences.json` | `activeConnectionId`（选中连接跨重启） |
+| `connections.json` | 连接列表与持久化凭据；应用私有、`0600`、禁止系统备份 |
+| `preferences.json` | 选中连接、语言与主题 |
 
-- 首次无 `connections.json` 时才写入 demo 种子；空文件表示用户已清空，**不会**再次注入 mock。
+- 首次启动创建空配置文件，不向正式应用注入 demo 连接。
 - 选中连接变更 / 删除后都会写 `preferences.json`。
 
 ## 动态认证表单 / 连续 challenge（已实现）
@@ -80,7 +78,7 @@ SSO 的首次请求读取服务器分组；成功后使用服务器协议值填�
 | --- | --- |
 | Challenge 输入 | 多轮表单一律**明文可见**（含 password/token 类型） |
 | 连接编辑 | 常用字段常显；`显示高级选项` 开关控制非常用项；枚举用 **Select** |
-| 密码存储 | 与 profile 一并写入 `connections.json`（测试用；生产需再收紧） |
+| 密码存储 | 与 profile 一并写入应用私有目录的 `connections.json`，文件权限 `0600`，目录权限 `0700`，并禁止系统备份 |
 | Toast | 仅关键状态/错误；**顶部**、最多 2 条、短时消失 |
 
 ## 本轮对齐（ics / OpenConnect / OHOS 系统 VPN）
@@ -93,9 +91,9 @@ SSO 的首次请求读取服务器分组；成功后使用服务器协议值填�
 | 外部认证通告 | 未启用浏览器 SSO 时使用 `--no-external-auth` 等价语义 |
 | 备份网关 | 主网关仅在网络/TLS/连接失败时按配置顺序故障转移，不重试密码或用户取消 |
 | 服务端 XML profile | 原子写入应用沙箱中的 `anyconnect-server-profile.xml` |
-| 主页密码 | 连接前可在主页填写密码（仅内存） |
+| 主页密码 | 连接前可填写并随 profile 持久化，不再使用“仅本次”弹窗 |
 | 允许局域网 | OHOS 无 `allowBypass` → 全隧道时把 RFC1918/link-local 标 `isExcludedRoute` |
 | 按应用分流 | `trustedApplications` / `blockedApplications` 写入系统 VpnConfig |
-| 主循环重连 | `reconnected_handler` 记 e2e 标记 |
+| 主循环重连 | 使用 OpenConnect 主循环的标准重连机制；App 轮询共享平台状态，不写测试标记 |
 
-后续可选：密码 Input 安全样式、内嵌 WebView SAML。
+后续可选：通过设备密钥服务加密静态凭据、内嵌 WebView SAML。

@@ -2,7 +2,6 @@ use super::super::*;
 
 pub(crate) fn more_page(state: Signal<State>) -> Element {
     let current = state.read().clone();
-    let s = strings(current.locale);
     let body = rsx! {
         column {
             width: "100%",

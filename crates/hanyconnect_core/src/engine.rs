@@ -1,12 +1,11 @@
 use crate::auth_bridge::AuthInteraction;
-use crate::e2e::{e2e_marker, E2eConfig};
 use crate::error::{CoreError, CoreResult};
 use crate::model::{
     AuthChallenge, AuthChallengeReply, AuthGroupDiscovery, ConnectRequest, ConnectionLifecycle,
     ConnectionProfile, DiagnosticEntry, NetworkSnapshot, SessionSnapshot, SessionStats, VpnOptions,
 };
-use crate::platform_state::{PlatformVpnState, SessionHandoff};
-use crate::store::ProfileStore;
+use crate::platform_state::{current_process_start_ticks, PlatformVpnState, SessionHandoff};
+use crate::store::{Preferences, ProfileStore};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -37,12 +36,12 @@ struct Inner {
     home: PathBuf,
     snapshot: SessionSnapshot,
     store: Option<ProfileStore>,
+    preferences: Preferences,
     connected_at: Option<Instant>,
     generation: u64,
     platform_vpn_running: bool,
     platform_vpn_starting: bool,
     last_vpn_options: VpnOptions,
-    e2e: E2eConfig,
     #[cfg(feature = "native-anyconnect")]
     pending_native: Option<PendingNativeSession>,
     #[cfg(feature = "native-anyconnect")]
@@ -64,12 +63,12 @@ impl SessionEngine {
                 home: PathBuf::from("."),
                 snapshot: seed_snapshot(),
                 store: None,
+                preferences: Preferences::default(),
                 connected_at: None,
                 generation: 0,
                 platform_vpn_running: false,
                 platform_vpn_starting: false,
                 last_vpn_options: VpnOptions::default(),
-                e2e: E2eConfig::default(),
                 #[cfg(feature = "native-anyconnect")]
                 pending_native: None,
                 #[cfg(feature = "native-anyconnect")]
@@ -83,18 +82,17 @@ impl SessionEngine {
     pub fn configure_home(&self, home: impl Into<PathBuf>) -> CoreResult<()> {
         let home = home.into();
         let store = ProfileStore::open(&home)?;
-        // Seed demo profiles only on first run (file missing). An empty
-        // connections.json is intentional (user deleted everything) and must
-        // not re-inject mock Corporate HQ / Lab Network entries.
-        let mut profiles = store.load()?;
+        // Production starts empty. Demo/test profiles must be created by test
+        // fixtures instead of leaking into the real application.
+        let profiles = store.load()?;
         if !store.profiles_file_exists() {
-            profiles = seed_profiles();
             store.save(&profiles)?;
         }
         let preferences = store.load_preferences().unwrap_or_default();
         let mut inner = self.lock()?;
         inner.home = home;
         inner.store = Some(store);
+        inner.preferences = preferences.clone();
         inner.snapshot.connections = profiles;
         // Prefer persisted selection; fall back to first profile; never keep a
         // stale seed id (e.g. "demo-hq") that is not in the loaded list.
@@ -113,7 +111,6 @@ impl SessionEngine {
         self.persist_preferences_locked(&inner)?;
         // Absorb VPN-extension process state written under the same home.
         self.sync_platform_locked(&mut inner);
-        e2e_marker("home_configured", inner.home.display().to_string());
         Ok(())
     }
 
@@ -125,6 +122,27 @@ impl SessionEngine {
         Ok(inner.snapshot.clone())
     }
 
+    pub fn appearance_preferences(&self) -> CoreResult<(String, String)> {
+        let inner = self.lock()?;
+        Ok((
+            inner.preferences.language.clone(),
+            inner.preferences.theme.clone(),
+        ))
+    }
+
+    pub fn set_appearance_preferences(&self, language: &str, theme: &str) -> CoreResult<()> {
+        if !matches!(language, "system" | "zh-CN" | "en") {
+            return Err(CoreError::msg("unsupported language preference"));
+        }
+        if !matches!(theme, "system" | "light" | "dark") {
+            return Err(CoreError::msg("unsupported theme preference"));
+        }
+        let mut inner = self.lock()?;
+        inner.preferences.language = language.to_owned();
+        inner.preferences.theme = theme.to_owned();
+        self.persist_preferences_locked(&inner)
+    }
+
     /// Pending interactive auth form, if the OpenConnect worker is blocked on UI.
     pub fn pending_auth(&self) -> Option<AuthChallenge> {
         self.auth.pending()
@@ -133,7 +151,6 @@ impl SessionEngine {
     /// Submit field values for the current challenge (unblocks the auth worker).
     pub fn submit_auth_challenge(&self, reply: AuthChallengeReply) -> CoreResult<()> {
         self.auth.submit(reply)?;
-        e2e_marker("auth_challenge_submitted", "ok");
         Ok(())
     }
 
@@ -143,12 +160,24 @@ impl SessionEngine {
         if let Ok(mut inner) = self.lock() {
             inner.snapshot.pending_auth = None;
         }
-        e2e_marker("auth_challenge_cancelled", "ok");
         Ok(())
     }
 
     pub fn snapshot_json(&self) -> CoreResult<String> {
         Ok(serde_json::to_string(&self.snapshot()?)?)
+    }
+
+    pub fn clear_diagnostics(&self) -> CoreResult<()> {
+        let mut inner = self.lock()?;
+        inner.snapshot.diagnostics.clear();
+        for name in [
+            "openconnect-progress.log",
+            "openconnect-progress.log.1",
+            "last-connect-error.txt",
+        ] {
+            let _ = std::fs::remove_file(inner.home.join(name));
+        }
+        Ok(())
     }
 
     pub fn set_profiles(&self, profiles: Vec<ConnectionProfile>) -> CoreResult<()> {
@@ -161,7 +190,22 @@ impl SessionEngine {
     }
 
     pub fn upsert_profile(&self, profile: ConnectionProfile) -> CoreResult<()> {
+        profile.validate().map_err(CoreError::msg)?;
         let mut inner = self.lock()?;
+        let previous = inner
+            .snapshot
+            .connections
+            .iter()
+            .find(|item| item.id == profile.id)
+            .cloned();
+        let edits_live_profile = inner.snapshot.active_connection_id.as_deref()
+            == Some(profile.id.as_str())
+            && (inner.snapshot.lifecycle.is_busy() || inner.snapshot.lifecycle.is_active());
+        if edits_live_profile {
+            return Err(CoreError::msg(
+                "disconnect before editing the active connection",
+            ));
+        }
         if let Some(existing) = inner
             .snapshot
             .connections
@@ -170,10 +214,10 @@ impl SessionEngine {
         {
             *existing = profile;
         } else {
-            // New profiles become the active selection (AnyConnect-like).
+            // New profiles become active unless another profile owns a live session.
             let new_id = profile.id.clone();
             inner.snapshot.connections.insert(0, profile);
-            if inner.snapshot.active_connection_id.is_none() {
+            if !inner.snapshot.lifecycle.is_busy() && !inner.snapshot.lifecycle.is_active() {
                 inner.snapshot.active_connection_id = Some(new_id);
             }
         }
@@ -181,7 +225,9 @@ impl SessionEngine {
             store.save(&inner.snapshot.connections)?;
         }
         self.persist_preferences_locked(&inner)?;
-        e2e_marker("profile_saved", "ok");
+        if let Some(previous) = previous {
+            cleanup_unreferenced_profile_files(&inner, &previous);
+        }
         Ok(())
     }
 
@@ -266,21 +312,28 @@ impl SessionEngine {
                 format!("force_global={force_global} routes={first_route:?}"),
             );
         }
-        e2e_marker(
-            "force_global_set",
-            format!("value={force_global} live={session_live}"),
-        );
         Ok(session_live)
     }
 
     pub fn delete_profile(&self, id: &str) -> CoreResult<()> {
         let mut inner = self.lock()?;
-        let existed = inner.snapshot.connections.iter().any(|item| item.id == id);
-        if !existed {
-            // Idempotent: UI may re-fire; never panic on a missing id.
-            e2e_marker("profile_deleted", format!("missing:{id}"));
-            return Ok(());
+        if inner.snapshot.active_connection_id.as_deref() == Some(id)
+            && (inner.snapshot.lifecycle.is_busy() || inner.snapshot.lifecycle.is_active())
+        {
+            return Err(CoreError::msg(
+                "disconnect before deleting the active connection",
+            ));
         }
+        let removed = inner
+            .snapshot
+            .connections
+            .iter()
+            .find(|item| item.id == id)
+            .cloned();
+        let Some(removed) = removed else {
+            // Idempotent: UI may re-fire; never panic on a missing id.
+            return Ok(());
+        };
         inner.snapshot.connections.retain(|item| item.id != id);
         if inner.snapshot.active_connection_id.as_deref() == Some(id) {
             inner.snapshot.active_connection_id =
@@ -290,7 +343,7 @@ impl SessionEngine {
             store.save(&inner.snapshot.connections)?;
         }
         self.persist_preferences_locked(&inner)?;
-        e2e_marker("profile_deleted", id);
+        cleanup_unreferenced_profile_files(&inner, &removed);
         Ok(())
     }
 
@@ -306,57 +359,7 @@ impl SessionEngine {
         }
         inner.snapshot.active_connection_id = Some(id.to_owned());
         self.persist_preferences_locked(&inner)?;
-        e2e_marker("profile_selected", id);
         Ok(())
-    }
-
-    pub fn apply_e2e_config(&self, config: E2eConfig) -> CoreResult<String> {
-        let mut inner = self.lock()?;
-        if let Some(server) = config.server.clone() {
-            let mut profile = ConnectionProfile::new_draft();
-            profile.id = "e2e-profile".to_owned();
-            profile.name = config
-                .name
-                .clone()
-                .unwrap_or_else(|| "E2E Connection".to_owned());
-            profile.server = server;
-            profile.group = config.group.clone().unwrap_or_default();
-            profile.username = config.username.clone().unwrap_or_default();
-            profile.password = config.password.clone().unwrap_or_default();
-            if config.accept_untrusted {
-                profile.strict_certificate_trust = false;
-                profile.block_untrusted_servers = false;
-            }
-            if let Some(existing) = inner
-                .snapshot
-                .connections
-                .iter_mut()
-                .find(|item| item.id == profile.id)
-            {
-                *existing = profile.clone();
-            } else {
-                inner.snapshot.connections.insert(0, profile.clone());
-            }
-            inner.snapshot.active_connection_id = Some(profile.id);
-            if let Some(store) = &inner.store {
-                store.save(&inner.snapshot.connections)?;
-            }
-        }
-        inner.e2e = config.clone();
-        e2e_marker(
-            "e2e_config_applied",
-            format!(
-                "server={} auto={} dryRun={}",
-                config.server.as_deref().unwrap_or(""),
-                config.auto_connect,
-                config.dry_run
-            ),
-        );
-        Ok(serde_json::to_string(&config)?)
-    }
-
-    pub fn e2e_config(&self) -> CoreResult<E2eConfig> {
-        Ok(self.lock()?.e2e.clone())
     }
 
     pub fn active_profile(&self) -> CoreResult<Option<ConnectionProfile>> {
@@ -412,7 +415,6 @@ impl SessionEngine {
             inner.platform_vpn_running = false;
             self.set_lifecycle_locked(&mut inner, ConnectionLifecycle::Establishing, None);
             self.push_diag_locked(&mut inner, "info", "platform VPN extension starting");
-            e2e_marker("platform_vpn_starting", "true");
         }
         self.persist_platform_locked(&inner)?;
         Ok(())
@@ -480,8 +482,6 @@ impl SessionEngine {
                 inner.connected_at = Some(Instant::now());
             }
             self.push_diag_locked(inner, "info", "platform VPN TUN is up");
-            e2e_marker("platform_vpn_running", "true");
-            e2e_marker("session_connected", BACKEND);
             return Ok(None);
         }
         let stop = if matches!(
@@ -495,8 +495,6 @@ impl SessionEngine {
             self.set_lifecycle_locked(inner, ConnectionLifecycle::Disconnected, None);
             inner.connected_at = None;
             inner.snapshot.stats = SessionStats::default();
-            e2e_marker("platform_vpn_running", "false");
-            e2e_marker("session_disconnected", "platform");
             session
         } else {
             None
@@ -518,8 +516,6 @@ impl SessionEngine {
                 inner.connected_at = Some(Instant::now());
             }
             self.push_diag_locked(inner, "info", "platform VPN TUN is up");
-            e2e_marker("platform_vpn_running", "true");
-            e2e_marker("session_connected", BACKEND);
         } else if matches!(
             inner.snapshot.lifecycle,
             ConnectionLifecycle::Connected
@@ -529,8 +525,6 @@ impl SessionEngine {
             self.set_lifecycle_locked(inner, ConnectionLifecycle::Disconnected, None);
             inner.connected_at = None;
             inner.snapshot.stats = SessionStats::default();
-            e2e_marker("platform_vpn_running", "false");
-            e2e_marker("session_disconnected", "platform");
         }
         Ok(())
     }
@@ -547,7 +541,6 @@ impl SessionEngine {
         inner.pending_native = None;
         self.set_lifecycle_locked(inner, ConnectionLifecycle::Failed, Some(error.clone()));
         self.push_diag_locked(inner, "error", error.clone());
-        e2e_marker("platform_vpn_failed", error);
         Ok(session)
     }
 
@@ -557,7 +550,6 @@ impl SessionEngine {
         inner.platform_vpn_running = false;
         self.set_lifecycle_locked(inner, ConnectionLifecycle::Failed, Some(error.clone()));
         self.push_diag_locked(inner, "error", error.clone());
-        e2e_marker("platform_vpn_failed", error);
         Ok(())
     }
 
@@ -584,7 +576,6 @@ impl SessionEngine {
             ConnectionLifecycle::Failed,
             Some("VPN extension startup timed out".to_owned()),
         );
-        e2e_marker("platform_vpn_timeout", "true");
         self.persist_platform_locked(&inner)?;
         Ok(true)
     }
@@ -593,6 +584,7 @@ impl SessionEngine {
     /// The Harmony shell must then start VpnExtensionAbility and pass the TUN fd
     /// to [`SessionEngine::attach_tun`].
     pub async fn prepare_connect(&self, request: ConnectRequest) -> CoreResult<VpnOptions> {
+        request.profile.validate().map_err(CoreError::msg)?;
         let generation = {
             let mut inner = self.lock()?;
             if inner.snapshot.lifecycle.is_busy() {
@@ -614,6 +606,7 @@ impl SessionEngine {
                 starting: false,
                 running: false,
                 owner_pid: std::process::id(),
+                owner_start_ticks: current_process_start_ticks(),
                 lifecycle: ConnectionLifecycle::Connecting,
                 last_error: None,
                 assigned_ip: String::new(),
@@ -633,13 +626,6 @@ impl SessionEngine {
                 "info",
                 format!(
                     "prepare connect to {} (backend={BACKEND}, dry_run={})",
-                    request.profile.server, request.dry_run
-                ),
-            );
-            e2e_marker(
-                "connect_prepare",
-                format!(
-                    "server={} dryRun={} backend={BACKEND}",
                     request.profile.server, request.dry_run
                 ),
             );
@@ -690,14 +676,6 @@ impl SessionEngine {
                         prepared.network.address, prepared.options.mtu
                     ),
                 );
-                e2e_marker(
-                    "connect_auth_ok",
-                    format!(
-                        "ip={:?} cookie={}",
-                        prepared.network.address.clone().unwrap_or_default(),
-                        prepared.options.cookie.is_some()
-                    ),
-                );
                 // Write full options (incl. cookie) for the VPN-extension process.
                 // Want parameters are size-limited and may drop large cookies.
                 let handoff = SessionHandoff {
@@ -706,14 +684,6 @@ impl SessionEngine {
                     updated_at: PlatformVpnState::now_nanos(),
                 };
                 handoff.save(&inner.home)?;
-                e2e_marker(
-                    "session_handoff_saved",
-                    format!(
-                        "cookie={} server={}",
-                        handoff.options.cookie.is_some(),
-                        handoff.options.server.as_deref().unwrap_or("")
-                    ),
-                );
                 self.persist_platform_locked(&inner)?;
                 // Prefer compact options for Want (network only is enough for TUN create).
                 Ok(prepared.options)
@@ -734,7 +704,6 @@ impl SessionEngine {
                     Some(message.clone()),
                 );
                 self.push_diag_locked(&mut inner, "error", message.clone());
-                e2e_marker("connect_auth_failed", message.clone());
                 // Persist so device file pull / next snapshot sees Failed + lastError
                 // (previously left lifecycle stuck at "connecting").
                 let _ = self.persist_platform_locked(&inner);
@@ -762,19 +731,6 @@ impl SessionEngine {
             let options = options.ok_or_else(|| {
                 CoreError::msg("extension prepare: no session handoff (connect from UI first)")
             })?;
-            e2e_marker(
-                "extension_prepare_start",
-                format!(
-                    "server={} user={} pass={}",
-                    options.server.as_deref().unwrap_or(""),
-                    options.username.as_deref().unwrap_or(""),
-                    options
-                        .password
-                        .as_ref()
-                        .map(|p| !p.is_empty())
-                        .unwrap_or(false)
-                ),
-            );
             let pending = tokio::task::spawn_blocking(move || resume_from_options(&options))
                 .await
                 .map_err(|err| CoreError::msg(format!("extension prepare join: {err}")))??;
@@ -799,7 +755,6 @@ impl SessionEngine {
             inner.platform_vpn_starting = true;
             self.set_lifecycle_locked(&mut inner, ConnectionLifecycle::Establishing, None);
             self.persist_platform_locked(&inner)?;
-            e2e_marker("extension_prepare_ok", "pending_client_ready");
             Ok(json)
         }
         #[cfg(not(feature = "native-anyconnect"))]
@@ -826,7 +781,6 @@ impl SessionEngine {
             };
 
             let pending = if let Some(pending) = pending {
-                e2e_marker("attach_tun_pending", "same_process");
                 pending
             } else {
                 // Prefer on-disk handoff (full cookie) over Want JSON (may truncate).
@@ -840,26 +794,9 @@ impl SessionEngine {
                         }
                     }
                 }
-                let Some(options) = options else {
-                    let mut inner = self.lock()?;
-                    self.set_lifecycle_locked(&mut inner, ConnectionLifecycle::Connected, None);
-                    inner.connected_at = Some(Instant::now());
-                    inner.platform_vpn_running = true;
-                    inner.platform_vpn_starting = false;
-                    e2e_marker("attach_tun_platform_only", format!("fd={fd}"));
-                    e2e_marker("session_connected", "platform-only");
-                    self.persist_platform_locked(&inner)?;
-                    return Ok(());
-                };
-                e2e_marker(
-                    "attach_tun_resume",
-                    format!(
-                        "cookie={} server={} from_file={}",
-                        options.cookie.is_some(),
-                        options.server.as_deref().unwrap_or(""),
-                        from_file.is_some()
-                    ),
-                );
+                let options = options.ok_or_else(|| {
+                    CoreError::msg("attach TUN refused: authenticated session handoff is missing")
+                })?;
                 tokio::task::spawn_blocking(move || resume_from_options(&options))
                     .await
                     .map_err(|err| CoreError::msg(format!("resume worker join failed: {err}")))??
@@ -899,10 +836,9 @@ impl SessionEngine {
                 "info",
                 format!("OpenConnect mainloop attached to TUN fd {fd}"),
             );
-            e2e_marker("session_connected", "anyconnect-rs");
-            e2e_marker("attach_tun_ok", format!("fd={fd}"));
             // Critical: UI process reads this file to leave "establishing".
             self.persist_platform_locked(&inner)?;
+            SessionHandoff::clear(&inner.home);
             return Ok(());
         }
 
@@ -919,8 +855,6 @@ impl SessionEngine {
                 "info",
                 format!("platform TUN fd {fd} accepted (no native OpenConnect)"),
             );
-            e2e_marker("attach_tun_platform_only", format!("fd={fd}"));
-            e2e_marker("session_connected", "platform");
             self.persist_platform_locked(&inner)?;
             Ok(())
         }
@@ -937,7 +871,6 @@ impl SessionEngine {
             inner.snapshot.pending_auth = None;
             self.set_lifecycle_locked(&mut inner, ConnectionLifecycle::Disconnecting, None);
             self.push_diag_locked(&mut inner, "info", "disconnect requested");
-            e2e_marker("disconnect_requested", "true");
             inner.generation += 1;
         }
 
@@ -951,13 +884,8 @@ impl SessionEngine {
             };
             if let Some(running) = running {
                 running.cancel();
-                let join_result =
+                let _ =
                     tokio::task::spawn_blocking(move || running.join(Duration::from_secs(8))).await;
-                match join_result {
-                    Ok(Ok(())) => e2e_marker("native_mainloop_stopped", "ok"),
-                    Ok(Err(err)) => e2e_marker("native_mainloop_stopped", err.to_string()),
-                    Err(err) => e2e_marker("native_mainloop_stopped", format!("join:{err}")),
-                }
             }
         }
 
@@ -977,7 +905,6 @@ impl SessionEngine {
                 inner.connected_at = None;
                 inner.snapshot.stats = SessionStats::default();
                 inner.snapshot.network = NetworkSnapshot::default();
-                e2e_marker("session_disconnected", "local");
                 SessionHandoff::clear(&inner.home);
                 let _ = self.persist_platform_locked(&inner);
             }
@@ -1005,10 +932,8 @@ impl SessionEngine {
                 Some(message.clone()),
             );
             self.push_diag_locked(&mut inner, "error", message.clone());
-            e2e_marker("session_ended_error", message);
         } else if !matches!(inner.snapshot.lifecycle, ConnectionLifecycle::Disconnected) {
             self.set_lifecycle_locked(&mut inner, ConnectionLifecycle::Disconnected, None);
-            e2e_marker("session_ended", "clean");
         }
         inner.connected_at = None;
         self.persist_platform_locked(&inner)?;
@@ -1037,7 +962,6 @@ impl SessionEngine {
                                 );
                                 inner.platform_vpn_running = false;
                                 inner.connected_at = None;
-                                e2e_marker("session_ended", "mainloop");
                                 let _ = self.persist_platform_locked(&inner);
                             }
                             Err(err) => {
@@ -1049,7 +973,6 @@ impl SessionEngine {
                                 );
                                 inner.platform_vpn_running = false;
                                 inner.connected_at = None;
-                                e2e_marker("session_ended_error", message);
                                 let _ = self.persist_platform_locked(&inner);
                             }
                         }
@@ -1087,7 +1010,6 @@ impl SessionEngine {
     }
 
     async fn prepare_dry_run(&self, profile: &ConnectionProfile) -> CoreResult<PreparedConnect> {
-        e2e_marker("backend_dry_run", profile.server.clone());
         tokio::time::sleep(Duration::from_millis(400)).await;
         if profile.server.contains("invalid") {
             return Err(CoreError::msg(
@@ -1149,7 +1071,6 @@ impl SessionEngine {
         }
         #[cfg(not(feature = "native-anyconnect"))]
         {
-            e2e_marker("backend_platform", profile.server.clone());
             let url = profile.server_url();
             if url.is_empty() {
                 return Err(CoreError::msg("server address is empty"));
@@ -1180,10 +1101,6 @@ impl SessionEngine {
                 split_dns: Vec::new(),
             };
             let options = VpnOptions::from_network(&network, profile);
-            e2e_marker(
-                "backend_platform_ready",
-                format!("url={url} mtu={}", options.mtu),
-            );
             Ok(PreparedConnect { network, options })
         }
     }
@@ -1210,8 +1127,7 @@ impl SessionEngine {
         let was_running = inner.platform_vpn_running;
         let was_starting = inner.platform_vpn_starting;
         let mut owner_alive = file.owner_is_alive();
-        let file_claims_active =
-            file.running || file.starting || file.lifecycle.is_active();
+        let file_claims_active = file.running || file.starting || file.lifecycle.is_active();
         if file_claims_active && !owner_alive && !local_mainloop {
             // The VPN extension can be killed without receiving onDestroy.
             // Do not leave a durable connected/establishing record behind:
@@ -1219,6 +1135,7 @@ impl SessionEngine {
             // could make owner_is_alive() accept the stale session.
             file = PlatformVpnState {
                 owner_pid: std::process::id(),
+                owner_start_ticks: current_process_start_ticks(),
                 lifecycle: ConnectionLifecycle::Disconnected,
                 updated_at: PlatformVpnState::now_nanos(),
                 ..PlatformVpnState::default()
@@ -1226,7 +1143,6 @@ impl SessionEngine {
             let _ = file.save(&inner.home);
             SessionHandoff::clear(&inner.home);
             owner_alive = true;
-            e2e_marker("platform_vpn_sync", "discarded_stale_owner");
         }
         let running = local_mainloop || (file.running && owner_alive);
         let starting = !running && file.starting && owner_alive;
@@ -1270,9 +1186,6 @@ impl SessionEngine {
                     inner.connected_at = Some(Instant::now());
                 }
             }
-            if !was_running {
-                e2e_marker("platform_vpn_sync", "running");
-            }
         } else if starting {
             if !inner.snapshot.lifecycle.is_active()
                 && !matches!(inner.snapshot.lifecycle, ConnectionLifecycle::Failed)
@@ -1290,10 +1203,6 @@ impl SessionEngine {
                     ConnectionLifecycle::Failed,
                     file.last_error.clone(),
                 );
-                e2e_marker(
-                    "platform_vpn_sync",
-                    format!("failed:{}", file.last_error.as_deref().unwrap_or("")),
-                );
             }
         } else if (was_running || was_starting)
             && matches!(
@@ -1303,7 +1212,6 @@ impl SessionEngine {
         {
             self.set_lifecycle_locked(inner, ConnectionLifecycle::Disconnected, None);
             inner.connected_at = None;
-            e2e_marker("platform_vpn_sync", "stopped");
         }
     }
 
@@ -1321,6 +1229,7 @@ impl SessionEngine {
                 }
             },
             owner_pid: std::process::id(),
+            owner_start_ticks: current_process_start_ticks(),
             lifecycle: inner.snapshot.lifecycle,
             last_error: inner.snapshot.last_error.clone(),
             assigned_ip: inner.snapshot.stats.assigned_ip.clone(),
@@ -1363,9 +1272,9 @@ impl SessionEngine {
         let Some(store) = inner.store.as_ref() else {
             return Ok(());
         };
-        store.save_preferences(&crate::store::Preferences {
-            active_connection_id: inner.snapshot.active_connection_id.clone(),
-        })
+        let mut preferences = inner.preferences.clone();
+        preferences.active_connection_id = inner.snapshot.active_connection_id.clone();
+        store.save_preferences(&preferences)
     }
 
     fn lock(&self) -> CoreResult<std::sync::MutexGuard<'_, Inner>> {
@@ -1421,35 +1330,6 @@ fn seed_snapshot() -> SessionSnapshot {
     }
 }
 
-fn seed_profiles() -> Vec<ConnectionProfile> {
-    let mut hq = ConnectionProfile::new_draft();
-    hq.id = "demo-hq".to_owned();
-    hq.name = "Corporate HQ".to_owned();
-    hq.server = "vpn.example.com".to_owned();
-    hq.group = "Employees".to_owned();
-    hq.username = "demo.user".to_owned();
-    hq.backup_servers = "vpn-backup.example.com".to_owned();
-    hq.strict_certificate_trust = true;
-    hq.block_untrusted_servers = true;
-    hq.allow_local_lan = true;
-    hq.mtu = 1400;
-    hq.favorite = true;
-
-    let mut lab = ConnectionProfile::new_draft();
-    lab.id = "demo-lab".to_owned();
-    lab.name = "Lab Network".to_owned();
-    lab.server = "lab-vpn.example.com".to_owned();
-    lab.group = "Engineering".to_owned();
-    lab.username = "lab.user".to_owned();
-    lab.protocol = crate::model::ProtocolKind::Ipsec;
-    lab.auth_method = crate::model::AuthMethod::PasswordAndCertificate;
-    lab.certificate = "Lab Client Cert".to_owned();
-    lab.strict_certificate_trust = true;
-    lab.block_untrusted_servers = true;
-    lab.connect_on_demand = true;
-    vec![hq, lab]
-}
-
 fn now_timestamp() -> String {
     let secs = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -1462,20 +1342,53 @@ fn now_timestamp() -> String {
 }
 
 fn write_last_error(home: &std::path::Path, message: &str) -> CoreResult<()> {
-    use std::io::Write;
-    std::fs::create_dir_all(home)?;
     let path = home.join("last-connect-error.txt");
-    let mut file = std::fs::File::create(path)?;
-    writeln!(
-        file,
-        "{}\n{}",
+    let content = format!(
+        "{}\n{}\n",
         SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map(|d| d.as_secs())
             .unwrap_or(0),
         message
-    )?;
-    Ok(())
+    );
+    crate::private_fs::write_atomic_private(&path, content.as_bytes())
+}
+
+fn cleanup_unreferenced_profile_files(inner: &Inner, removed: &ConnectionProfile) {
+    let cert_root = inner.home.join("certs");
+    let candidates = [
+        removed.certificate.as_str(),
+        removed.private_key.as_str(),
+        removed.secondary_certificate.as_str(),
+        removed.secondary_private_key.as_str(),
+        removed.ca_certificate.as_str(),
+    ];
+    for candidate in candidates {
+        let candidate = candidate.trim();
+        if candidate.is_empty() {
+            continue;
+        }
+        let path = std::path::Path::new(candidate);
+        if path.parent() != Some(cert_root.as_path())
+            || profile_path_is_referenced(&inner.snapshot.connections, candidate)
+        {
+            continue;
+        }
+        let _ = std::fs::remove_file(path);
+    }
+}
+
+fn profile_path_is_referenced(profiles: &[ConnectionProfile], candidate: &str) -> bool {
+    profiles.iter().any(|profile| {
+        [
+            profile.certificate.as_str(),
+            profile.private_key.as_str(),
+            profile.secondary_certificate.as_str(),
+            profile.secondary_private_key.as_str(),
+            profile.ca_certificate.as_str(),
+        ]
+        .contains(&candidate)
+    })
 }
 
 #[cfg(test)]
@@ -1512,6 +1425,7 @@ mod tests {
         let dir = tempdir().unwrap();
         engine.configure_home(dir.path()).unwrap();
         let mut profile = ConnectionProfile::new_draft();
+        profile.name = "Invalid".to_owned();
         profile.server = "invalid.example".to_owned();
         let err = engine
             .prepare_connect(ConnectRequest {
@@ -1524,13 +1438,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn attach_tun_without_pending_marks_connected() {
+    #[cfg(feature = "native-anyconnect")]
+    async fn attach_tun_without_pending_is_rejected() {
         let engine = SessionEngine::new();
         let dir = tempfile::tempdir().unwrap();
         engine.configure_home(dir.path()).unwrap();
-        engine.attach_tun(3, "{}").await.unwrap();
-        let snap = engine.snapshot().unwrap();
-        assert_eq!(snap.lifecycle, ConnectionLifecycle::Connected);
+        let error = engine.attach_tun(3, "{}").await.unwrap_err();
+        assert!(error.to_string().contains("handoff"));
     }
 
     #[test]
@@ -1560,14 +1474,17 @@ mod tests {
         let dir = tempdir().unwrap();
         let engine = SessionEngine::new();
         engine.configure_home(dir.path()).unwrap();
-        let second = engine
-            .snapshot()
-            .unwrap()
-            .connections
-            .get(1)
-            .expect("seed has two demos")
-            .id
-            .clone();
+        let mut first = ConnectionProfile::new_draft();
+        first.id = "first".to_owned();
+        first.name = "First".to_owned();
+        first.server = "vpn-a.example.test".to_owned();
+        engine.upsert_profile(first).unwrap();
+        let mut second_profile = ConnectionProfile::new_draft();
+        second_profile.id = "second".to_owned();
+        second_profile.name = "Second".to_owned();
+        second_profile.server = "vpn-b.example.test".to_owned();
+        let second = second_profile.id.clone();
+        engine.upsert_profile(second_profile).unwrap();
         engine.select_profile(&second).unwrap();
         assert_eq!(
             engine.snapshot().unwrap().active_connection_id.as_deref(),
@@ -1587,20 +1504,10 @@ mod tests {
     }
 
     #[test]
-    fn deleting_all_profiles_does_not_reseed_demos() {
+    fn production_store_starts_empty_and_stays_empty() {
         let dir = tempdir().unwrap();
         let engine = SessionEngine::new();
         engine.configure_home(dir.path()).unwrap();
-        let ids: Vec<String> = engine
-            .snapshot()
-            .unwrap()
-            .connections
-            .into_iter()
-            .map(|p| p.id)
-            .collect();
-        for id in ids {
-            engine.delete_profile(&id).unwrap();
-        }
         assert!(engine.snapshot().unwrap().connections.is_empty());
         // Idempotent delete must not panic.
         engine.delete_profile("missing-id").unwrap();
@@ -1622,6 +1529,7 @@ mod tests {
             starting: true,
             running: false,
             owner_pid: std::process::id(),
+            owner_start_ticks: current_process_start_ticks(),
             lifecycle: ConnectionLifecycle::Establishing,
             last_error: None,
             assigned_ip: String::new(),
@@ -1654,6 +1562,7 @@ mod tests {
             starting: false,
             running: true,
             owner_pid: std::process::id(),
+            owner_start_ticks: current_process_start_ticks(),
             lifecycle: ConnectionLifecycle::Connected,
             last_error: None,
             assigned_ip: "10.1.2.3".to_owned(),
@@ -1690,6 +1599,7 @@ mod tests {
             starting: true,
             running: false,
             owner_pid: u32::MAX,
+            owner_start_ticks: 0,
             lifecycle: ConnectionLifecycle::Establishing,
             last_error: None,
             assigned_ip: String::new(),

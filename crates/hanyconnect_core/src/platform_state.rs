@@ -6,6 +6,7 @@
 
 use crate::error::{CoreError, CoreResult};
 use crate::model::{ConnectionLifecycle, NetworkSnapshot, SessionStats};
+use crate::private_fs::{ensure_private_dir, write_atomic_private};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -15,6 +16,7 @@ pub const PLATFORM_VPN_STATE_FILE: &str = "platform-vpn-state.json";
 /// Session handoff for the VPN-extension process (cookie / credentials).
 /// Want parameters can truncate large cookies; the file is the source of truth.
 pub const SESSION_HANDOFF_FILE: &str = "session-handoff.json";
+const SESSION_HANDOFF_MAX_AGE_NANOS: u128 = 10 * 60 * 1_000_000_000;
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -31,22 +33,29 @@ impl SessionHandoff {
     }
 
     pub fn save(&self, home: &Path) -> CoreResult<()> {
-        fs::create_dir_all(home)?;
+        ensure_private_dir(home)?;
         let path = Self::path(home);
-        let temp = path.with_extension(format!("tmp-{}", std::process::id()));
         let content = serde_json::to_vec_pretty(self)
             .map_err(|err| CoreError::msg(format!("serialize session handoff: {err}")))?;
-        fs::write(&temp, content)?;
-        fs::rename(&temp, &path).map_err(|err| {
-            let _ = fs::remove_file(&temp);
-            CoreError::from(err)
-        })?;
-        Ok(())
+        write_atomic_private(&path, &content)
     }
 
     pub fn load(home: &Path) -> Option<Self> {
-        let content = fs::read(Self::path(home)).ok()?;
-        serde_json::from_slice(&content).ok()
+        let path = Self::path(home);
+        let content = fs::read(&path).ok()?;
+        let handoff: Self = match serde_json::from_slice(&content) {
+            Ok(handoff) => handoff,
+            Err(_) => {
+                let _ = fs::remove_file(path);
+                return None;
+            }
+        };
+        let age = PlatformVpnState::now_nanos().saturating_sub(handoff.updated_at);
+        if handoff.updated_at == 0 || age > SESSION_HANDOFF_MAX_AGE_NANOS {
+            let _ = fs::remove_file(path);
+            return None;
+        }
+        Some(handoff)
     }
 
     pub fn clear(home: &Path) {
@@ -66,6 +75,10 @@ pub struct PlatformVpnState {
     /// active flags are valid only while their owning process is alive.
     #[serde(default)]
     pub owner_pid: u32,
+    /// Linux process start ticks from `/proc/<pid>/stat`; prevents PID reuse
+    /// from reviving state written by a previous VPN extension process.
+    #[serde(default)]
+    pub owner_start_ticks: u64,
     #[serde(default)]
     pub lifecycle: ConnectionLifecycle,
     #[serde(default)]
@@ -97,17 +110,11 @@ impl PlatformVpnState {
     }
 
     pub fn save(&self, home: &Path) -> CoreResult<()> {
-        fs::create_dir_all(home)?;
+        ensure_private_dir(home)?;
         let path = Self::path(home);
-        let temp = path.with_extension(format!("tmp-{}", std::process::id()));
         let content = serde_json::to_vec_pretty(self)
             .map_err(|err| CoreError::msg(format!("serialize platform VPN state: {err}")))?;
-        fs::write(&temp, content)?;
-        fs::rename(&temp, &path).map_err(|err| {
-            let _ = fs::remove_file(&temp);
-            CoreError::from(err)
-        })?;
-        Ok(())
+        write_atomic_private(&path, &content)
     }
 
     pub fn now_nanos() -> u128 {
@@ -121,9 +128,6 @@ impl PlatformVpnState {
         if self.owner_pid == 0 {
             return false;
         }
-        if self.owner_pid == std::process::id() {
-            return true;
-        }
         #[cfg(unix)]
         {
             if self.owner_pid > i32::MAX as u32 {
@@ -132,12 +136,27 @@ impl PlatformVpnState {
             // Signal 0 performs permission/existence checking without sending
             // a signal. The UI and its VPN extension share an application UID.
             let result = unsafe { libc::kill(self.owner_pid as i32, 0) };
-            return result == 0
-                || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM);
+            let alive =
+                result == 0 || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM);
+            if !alive {
+                return false;
+            }
+            return self.owner_start_ticks == 0
+                || process_start_ticks(self.owner_pid) == Some(self.owner_start_ticks);
         }
         #[cfg(not(unix))]
         {
             false
         }
     }
+}
+
+pub fn current_process_start_ticks() -> u64 {
+    process_start_ticks(std::process::id()).unwrap_or(0)
+}
+
+fn process_start_ticks(pid: u32) -> Option<u64> {
+    let raw = fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    let end = raw.rfind(')')?;
+    raw.get(end + 1..)?.split_whitespace().nth(19)?.parse().ok()
 }

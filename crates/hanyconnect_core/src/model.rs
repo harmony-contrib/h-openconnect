@@ -98,15 +98,10 @@ impl ProtocolKind {
     }
 
     pub fn all() -> &'static [Self] {
-        &[
-            Self::AnyConnect,
-            Self::Juniper,
-            Self::GlobalProtect,
-            Self::Pulse,
-            Self::F5,
-            Self::Fortinet,
-            Self::Array,
-        ]
+        // The app product and its compatibility matrix are AnyConnect-only.
+        // Keep deserialization support for migrated OpenConnect profiles, but
+        // do not advertise unverified vendor protocols in production UI.
+        &[Self::AnyConnect]
     }
 }
 
@@ -378,6 +373,57 @@ impl ConnectionProfile {
             mtu: 0,
             favorite: false,
         }
+    }
+
+    pub fn validate(&self) -> Result<(), String> {
+        if self.name.trim().is_empty() {
+            return Err("connection name is required".to_owned());
+        }
+        let server = self.server.trim();
+        if server.is_empty() {
+            return Err("server address is required".to_owned());
+        }
+        if server.chars().any(char::is_whitespace) {
+            return Err("server address must not contain whitespace".to_owned());
+        }
+        let normalized = self.server_url();
+        let authority = normalized
+            .split_once("://")
+            .map(|(_, rest)| rest)
+            .unwrap_or(normalized.as_str())
+            .split('/')
+            .next()
+            .unwrap_or_default();
+        if authority.is_empty() {
+            return Err("server address has no host".to_owned());
+        }
+        if self.mtu != 0 && !(576..=1500).contains(&self.mtu) {
+            return Err("MTU must be between 576 and 1500, or automatic".to_owned());
+        }
+        if self.dpd_seconds > 86_400 {
+            return Err("DPD interval must not exceed 86400 seconds".to_owned());
+        }
+        for route in self
+            .split_tunnel_networks
+            .split([',', ' ', '\n', ';'])
+            .map(str::trim)
+            .filter(|route| !route.is_empty())
+        {
+            if normalize_route_cidr(route).is_none() {
+                return Err(format!("invalid split-tunnel network: {route}"));
+            }
+        }
+        let trusted = split_package_list(&self.trusted_applications);
+        let blocked = split_package_list(&self.blocked_applications);
+        if let Some(package) = trusted
+            .iter()
+            .find(|package| blocked.iter().any(|blocked| blocked == *package))
+        {
+            return Err(format!(
+                "application {package} cannot be both trusted and blocked"
+            ));
+        }
+        Ok(())
     }
 
     pub fn server_url(&self) -> String {
@@ -685,31 +731,30 @@ impl VpnOptions {
         let host = network
             .address
             .as_deref()
-            .unwrap_or("10.0.0.2")
-            .split('/')
-            .next()
-            .unwrap_or("10.0.0.2")
-            .trim()
-            .to_owned();
+            .and_then(|address| address.split('/').next())
+            .map(str::trim)
+            .filter(|address| !address.is_empty());
 
         // ics: CIDRIP(ip.addr, ip.netmask). OpenHarmony VpnConfig ParseAddress
         // rejects IPv4 prefixLength >= 32 (see communication_netmanager_ext).
         let mut addresses = Vec::new();
-        if host.contains(':') {
-            addresses.push(format!("{host}/128"));
-        } else {
-            let mut prefix = network
-                .netmask
-                .as_deref()
-                .and_then(ipv4_netmask_prefix)
-                .unwrap_or(24);
-            if prefix == 0 {
-                prefix = 24;
+        if let Some(host) = host {
+            if host.contains(':') {
+                addresses.push(format!("{host}/128"));
+            } else {
+                let mut prefix = network
+                    .netmask
+                    .as_deref()
+                    .and_then(ipv4_netmask_prefix)
+                    .unwrap_or(24);
+                if prefix == 0 {
+                    prefix = 24;
+                }
+                if prefix >= 32 {
+                    prefix = 31;
+                }
+                addresses.push(format!("{host}/{prefix}"));
             }
-            if prefix >= 32 {
-                prefix = 31;
-            }
-            addresses.push(format!("{host}/{prefix}"));
         }
         // ics IPv6 address when present.
         if let Some(v6) = network
@@ -1044,7 +1089,7 @@ fn ipv4_network_cidr(host: &str, bits: u8) -> Option<String> {
 pub struct ConnectRequest {
     pub profile: ConnectionProfile,
     /// When true, skip full AnyConnect auth and only run platform/mock path
-    /// (used by device UI E2E without a real headend).
+    /// (used by isolated unit and host tests without a real headend).
     pub dry_run: bool,
 }
 
@@ -1058,6 +1103,18 @@ mod tests {
         assert!(profile.strict_certificate_trust);
         assert!(profile.block_untrusted_servers);
         assert!(!profile.allow_insecure_crypto);
+    }
+
+    #[test]
+    fn profile_validation_rejects_invalid_network_settings() {
+        let mut profile = ConnectionProfile::new_draft();
+        profile.name = "Corp".to_owned();
+        profile.server = "vpn.example.test".to_owned();
+        profile.mtu = 500;
+        assert!(profile.validate().unwrap_err().contains("MTU"));
+        profile.mtu = 1400;
+        profile.split_tunnel_networks = "10.0.0.0/not-a-prefix".to_owned();
+        assert!(profile.validate().unwrap_err().contains("split-tunnel"));
     }
 
     #[test]
@@ -1077,6 +1134,10 @@ mod tests {
         );
         assert_eq!(options.mobile_unique_id, "privacy-scoped-profile");
         assert_eq!(options.client_version, "5.1.2");
+        assert!(
+            options.addresses.is_empty(),
+            "an empty network snapshot must not fabricate a tunnel address"
+        );
     }
 
     #[test]

@@ -83,23 +83,17 @@ auth group；选定的协议值会在正式认证的首个 XML POST 中作为
 默认：`https://<本机局域网IP>:4433`，用户 `demo` / 密码 `demo`。  
 App 内需同时关闭「严格证书信任」和「阻止不可信服务器」（仅限该自签名开发环境）。
 
-## E2E
+## 测试
 
 ```bash
-# dry-run 自动连接 + hilog 断言
-./scripts/e2e-device.sh --auto-connect --dry-run
-
-# 连本地 ocserv（先 start）
-./scripts/dev-ocserv.sh start
-BUNDLE_NAME=com.richerfu.hanyconnect \
-./scripts/e2e-device.sh --no-build \
-  --server "$(./scripts/dev-ocserv.sh url | sed 's#https://##')" \
-  --user demo --password demo \
-  --auto-connect --no-dry-run --expect-connected --hilog-seconds 40
+# 正式 HAP 的构建、安装和启动检查
+./scripts/e2e-device.sh
 
 # 主机协议（可选 live headend）
 ./scripts/e2e-host-anyconnect.sh
 ```
+
+设备连接场景通过真实 UI 配置执行；正式 Ability 不提供密码或自动连接 Want 注入入口。
 
 详见 [docs/e2e.md](docs/e2e.md)。
 

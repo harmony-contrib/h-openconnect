@@ -2,12 +2,11 @@
 //!
 //! Architecture (aligned with paws):
 //! - UI (`hanyconnect_ui`) owns presentation and dispatches connect/disconnect.
-//! - This crate owns profile persistence, lifecycle, diagnostics markers, and
+//! - This crate owns profile persistence, lifecycle, diagnostics, and
 //!   the AnyConnect protocol path (`anyconnect-rs`) when enabled.
 //! - HarmonyOS VpnExtensionAbility owns the TUN fd and notifies native code.
 
 mod auth_bridge;
-mod e2e;
 mod engine;
 mod error;
 mod model;
@@ -16,6 +15,7 @@ mod native_session;
 mod platform_browser;
 mod platform_protect;
 mod platform_state;
+mod private_fs;
 mod store;
 
 pub use platform_browser::{
@@ -25,7 +25,6 @@ pub use platform_browser::{
 pub use platform_protect::set_handler as set_socket_protect_handler;
 
 pub use auth_bridge::AuthInteraction;
-pub use e2e::{e2e_marker, E2eConfig, E2E_TAG};
 pub use engine::{shared_engine, SessionEngine};
 pub use error::{CoreError, CoreResult};
 pub use model::{
@@ -34,4 +33,8 @@ pub use model::{
     NetworkSnapshot, ProtocolKind, SessionSnapshot, SessionStats, SoftwareToken, SplitTunnelMode,
     VpnOptions,
 };
-pub use store::ProfileStore;
+pub use store::{Preferences, ProfileStore};
+
+pub fn secure_private_file(path: impl AsRef<std::path::Path>) -> CoreResult<()> {
+    private_fs::secure_existing_file(path.as_ref())
+}

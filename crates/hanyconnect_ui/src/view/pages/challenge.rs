@@ -45,6 +45,7 @@ pub(crate) fn auth_challenge_overlay(state: Signal<State>, challenge: AuthChalle
             justify_content: "end",
             column {
                 width: "100%",
+                height: "82%",
                 background_color: surface(),
                 border_radius: 16.0,
                 padding_top: 18.0,
@@ -85,14 +86,17 @@ pub(crate) fn auth_challenge_overlay(state: Signal<State>, challenge: AuthChalle
                     }
                 }
                 row { height: 14.0 }
-                scroll {
+                column {
                     width: "100%",
-                    height: 280.0,
-                    alignment: "top_start",
-                    column {
+                    layout_weight: 1.0,
+                    scroll {
                         width: "100%",
-                        align_items: "stretch",
-                        {fields.into_iter().map(|field| {
+                        height: "100%",
+                        alignment: "top_start",
+                        column {
+                            width: "100%",
+                            align_items: "stretch",
+                            {fields.into_iter().map(|field| {
                             let name = field.name.clone();
                             let name_for_input = field.name.clone();
                             let label = if field.label.trim().is_empty() {
@@ -193,7 +197,8 @@ pub(crate) fn auth_challenge_overlay(state: Signal<State>, challenge: AuthChalle
                                     }
                                 }
                             }
-                        })}
+                            })}
+                        }
                     }
                 }
                 row { height: 12.0 }

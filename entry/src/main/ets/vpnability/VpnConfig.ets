@@ -83,16 +83,6 @@ export interface VpnOptions {
   blockedApplications?: string[];
 }
 
-const DEFAULT_OPTIONS: VpnOptions = {
-  addresses: ['10.0.0.2/30'],
-  routes: ['0.0.0.0/0'],
-  dnsAddresses: ['1.1.1.1', '8.8.8.8'],
-  mtu: 1400,
-  allowBypass: false,
-};
-
-export const DEFAULT_OPTIONS_JSON: string = JSON.stringify(DEFAULT_OPTIONS);
-
 export class HAnyVpnConfig {
   public addresses: LinkAddress[];
   public routes: RouteInfo[];
@@ -106,13 +96,16 @@ export class HAnyVpnConfig {
   public blockedApplications: string[];
 
   constructor(options: VpnOptions) {
-    const rawAddrs = options.addresses?.length ? options.addresses : ['10.0.0.2/30'];
+    const rawAddrs = options.addresses ?? [];
+    if (rawAddrs.length === 0) {
+      throw new Error('VPN configuration has no assigned address');
+    }
     const dnsList = options.dnsAddresses?.slice() ?? [];
 
     this.addresses = rawAddrs.map((value: string) =>
       parseLinkAddress(value, addressDefaultPrefix(value)));
 
-    const routeStrs = options.routes?.length ? options.routes : ['0.0.0.0/0'];
+    const routeStrs = options.routes ?? [];
     this.routes = routeStrs.map((value: string) =>
       new RouteInfo(parseLinkAddress(value, routeDefaultPrefix(value))));
     const excludedRouteStrs = options.excludedRoutes ?? [];
@@ -165,12 +158,26 @@ export function buildVpnConfig(options: VpnOptions, _vpnId?: string): vpnExtensi
 
 export function parseOptions(optionsJson?: string): VpnOptions {
   if (!optionsJson || optionsJson.length === 0) {
-    return DEFAULT_OPTIONS;
+    throw new Error('VPN options are missing');
   }
   try {
-    return JSON.parse(optionsJson) as VpnOptions;
-  } catch (_err) {
-    return DEFAULT_OPTIONS;
+    const options = JSON.parse(optionsJson) as VpnOptions;
+    if (!options || !Array.isArray(options.addresses) || options.addresses.length === 0) {
+      throw new Error('VPN options contain no assigned address');
+    }
+    if (options.routes !== undefined && !Array.isArray(options.routes)) {
+      throw new Error('VPN routes must be an array');
+    }
+    if (options.excludedRoutes !== undefined && !Array.isArray(options.excludedRoutes)) {
+      throw new Error('VPN excluded routes must be an array');
+    }
+    if (options.dnsAddresses !== undefined && !Array.isArray(options.dnsAddresses)) {
+      throw new Error('VPN DNS addresses must be an array');
+    }
+    return options;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'invalid VPN options JSON';
+    throw new Error(`invalid VPN options: ${message}`);
   }
 }
 
@@ -180,17 +187,20 @@ export function readOptionsJson(want?: Want): string {
   if (typeof value === 'string' && value.length > 0) {
     return value;
   }
-  return DEFAULT_OPTIONS_JSON;
+  throw new Error('VPN extension request is missing optionsJson');
 }
 
 export function buildVpnWant(optionsJson?: string): Want {
-  return {
+  const want: Want = {
     deviceId: '',
     bundleName: currentHAnyBundleName(),
     moduleName: HANY_MODULE_NAME,
     abilityName: HANY_VPN_ABILITY,
-    parameters: {
-      optionsJson: optionsJson ?? DEFAULT_OPTIONS_JSON,
-    },
   };
+  if (optionsJson !== undefined) {
+    want.parameters = {
+      optionsJson: optionsJson,
+    };
+  }
+  return want;
 }

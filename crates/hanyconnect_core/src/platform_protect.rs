@@ -26,7 +26,6 @@ pub fn invoke(fd: i32) {
     if let Ok(mut guard) = PROTECT.lock() {
         if let Some(handler) = guard.as_mut() {
             handler(fd);
-            crate::e2e::e2e_marker("socket_protect", format!("fd={fd}"));
         }
     }
 }

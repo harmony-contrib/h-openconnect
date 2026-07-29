@@ -49,10 +49,6 @@ fn line() -> u32 {
     use_theme().colors.border
 }
 
-fn primary_text() -> u32 {
-    use_theme().colors.primary_foreground
-}
-
 fn destructive_text() -> u32 {
     use_theme().colors.destructive_foreground
 }
@@ -86,7 +82,6 @@ fn accent() -> u32 {
 enum FlatButtonVariant {
     #[default]
     Outline,
-    Primary,
     Destructive,
     Ghost,
     Accent,
@@ -117,7 +112,6 @@ fn FlatButton(props: FlatButtonProps) -> Element {
     };
     let (background, foreground, border_width, border_color) = match props.variant {
         FlatButtonVariant::Outline => (surface(), text_color(), 1.0, line()),
-        FlatButtonVariant::Primary => (text_color(), primary_text(), 0.0, text_color()),
         FlatButtonVariant::Destructive => (danger(), destructive_text(), 0.0, danger()),
         FlatButtonVariant::Ghost => (0x00000000, text_color(), 0.0, 0x00000000),
         FlatButtonVariant::Accent => (accent(), 0xFFFFFFFFu32, 0.0, accent()),

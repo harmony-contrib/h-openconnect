@@ -55,20 +55,11 @@ pub fn open(uri: &str) -> bool {
         false
     };
     if in_process {
-        crate::e2e::e2e_marker(
-            "external_browser",
-            format!("mode=in_process uri_len={}", uri.len()),
-        );
         return true;
     }
 
     // 2) Cross-process: extension → UI via filesDir.
-    let ok = queue_for_ui(uri);
-    crate::e2e::e2e_marker(
-        "external_browser",
-        format!("mode=file_queue ok={ok} uri_len={}", uri.len()),
-    );
-    ok
+    queue_for_ui(uri)
 }
 
 fn home_dir() -> Option<PathBuf> {
@@ -83,7 +74,6 @@ fn queue_for_ui(uri: &str) -> bool {
     let Some(home) = home_dir() else {
         return false;
     };
-    let _ = std::fs::create_dir_all(&home);
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_millis() as u64)
@@ -96,15 +86,7 @@ fn queue_for_ui(uri: &str) -> bool {
         return false;
     };
     let path = request_path(&home);
-    let tmp = home.join(format!("{REQUEST_FILE}.tmp"));
-    if std::fs::write(&tmp, json).is_err() {
-        return false;
-    }
-    if std::fs::rename(&tmp, &path).is_err() {
-        let _ = std::fs::remove_file(&tmp);
-        return false;
-    }
-    true
+    crate::private_fs::write_atomic_private(&path, json.as_bytes()).is_ok()
 }
 
 /// UI poll: take a pending browser-open request, if any.

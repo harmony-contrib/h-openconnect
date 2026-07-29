@@ -158,15 +158,6 @@ impl AuthInteraction {
                 challenge: challenge.clone(),
                 reply_tx: tx,
             });
-            crate::e2e::e2e_marker(
-                "auth_challenge_wait",
-                format!(
-                    "id={} round={} fields={}",
-                    challenge.id,
-                    challenge.round,
-                    challenge.fields.len()
-                ),
-            );
         }
 
         // Poll so abort from another thread is observed even if UI never replies.
@@ -184,15 +175,6 @@ impl AuthInteraction {
                             guard.pending = None;
                         }
                     }
-                    crate::e2e::e2e_marker(
-                        "auth_challenge_reply",
-                        format!(
-                            "id={} cancelled={} values={}",
-                            reply.id,
-                            reply.cancelled,
-                            reply.values.len()
-                        ),
-                    );
                     return reply;
                 }
                 Err(mpsc::RecvTimeoutError::Timeout) => {

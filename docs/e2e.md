@@ -52,7 +52,9 @@ OHOS 交叉编译需要 NDK + 静态 libxml2；OpenSSL 默认走 `vendored-opens
 | 证书 | 自签 → App 关闭严格证书信任 |
 | 状态目录 | `.dev-ocserv/`（已 gitignore） |
 
-真机与 Mac 需同一 Wi‑Fi（或 Mac 开热点）。成功 hilog：`anyconnect_obtain_cookie` → `anyconnect_cstp` → `anyconnect_setup_tun_fd` → `anyconnect_mainloop`。
+真机与 Mac 需同一 Wi‑Fi（或 Mac 开热点）。调试时结合 `HAnyConnectEntry`、
+`HAnyConnectVpn` 的生命周期日志和受限权限的 `openconnect-progress.log` 判断各阶段；
+生产运行链路不再写测试 marker。
 
 ## 设备 HAP（默认完整接入）
 
@@ -96,7 +98,7 @@ HANY_E2E_PASSWORD='***' \
 ./scripts/e2e-host-anyconnect.sh
 ```
 
-## 真机 / 模拟器 E2E
+## 真机 / 模拟器启动检查
 
 前置：`hdc list targets` 能看到设备；DevEco SDK / `ohrs` 可用。
 
@@ -104,57 +106,16 @@ HANY_E2E_PASSWORD='***' \
 export OHOS_NDK_HOME=/Applications/DevEco-Studio.app/Contents/sdk/default/openharmony
 export DEVECO_SDK_HOME=/Applications/DevEco-Studio.app/Contents/sdk
 
-# 1) dry-run 自动连接（不依赖真实 headend，仍打包 native）
-./scripts/e2e-device.sh --auto-connect --dry-run
+# 构建、安装、启动正式 Ability
+./scripts/e2e-device.sh
 
-# 2) 真实 headend（需设备支持 VPN Extension + 可达服务器）
-# --accept-untrusted 仅用于自签名实验头端
-./scripts/e2e-device.sh \
-  --server vpn.corp.example \
-  --user alice \
-  --password '***' \
-  --accept-untrusted \
-  --auto-connect \
-  --no-dry-run \
-  --expect-connected \
-  --allow-vpn-unsupported
-
-# 3) 已有 HAP 时跳过编译
-./scripts/e2e-device.sh --no-build --auto-connect --dry-run
+# 已有 HAP 时跳过编译
+./scripts/e2e-device.sh --no-build
 ```
 
-### Want 参数
-
-| 参数 | 含义 |
-| --- | --- |
-| `hanyServer` | 服务器 |
-| `hanyName` | 配置显示名 |
-| `hanyGroup` | 隧道组 |
-| `hanyUsername` / `hanyPassword` | 账号 |
-| `hanyAcceptUntrusted` | 仅测试私有/自签名头端的显式信任开关；默认仍严格校验证书 |
-| `hanyAutoConnect` | 启动后自动连接 |
-| `hanyDryRun` | dry-run（脚本默认 true；UI 真连默认 false） |
-| `hanyExpectConnected` | 期望已连接 |
-| `hanyExpectFailure` | 期望失败 |
-
-手动：
-
-```bash
-hdc shell aa start -a EntryAbility -b com.richerfu.hanyconnect \
-  --ps hanyServer vpn.example.com \
-  --ps hanyAutoConnect true \
-  --ps hanyDryRun true
-```
-
-### 成功标记（hilog）
-
-脚本会在 `smoke-logs/e2e-device-*.log` 中查找：
-
-- `configured native home` / `registered native platform callbacks`
-- `e2e config applied` 或 `HAnyConnectE2E`
-- `connect_auth_ok` / `session_connected`
-- 真实路径：`backend_anyconnect` · `anyconnect_obtain_cookie` · `anyconnect_cstp` · `anyconnect_setup_tun_fd` · `anyconnect_mainloop`
-- dry-run：`backend_dry_run`
+正式 Ability 不接受服务器、密码、证书信任或自动连接 Want 参数，也不会在运行
+目录写测试 marker。真实连接测试必须通过 UI 创建配置，然后结合系统 VPN 状态、
+应用 UID 网络探针和 headend 侧日志验证。
 
 ## 会话生命周期
 

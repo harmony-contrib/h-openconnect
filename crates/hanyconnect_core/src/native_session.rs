@@ -5,7 +5,6 @@ use crate::auth_bridge::{
     apply_credentials_to_fields, can_autofill_without_ui, merge_reply_values, AuthCredentials,
     AuthInteraction,
 };
-use crate::e2e::e2e_marker;
 use crate::error::{CoreError, CoreResult};
 use crate::model::{
     AuthChallenge, AuthField, AuthFieldChoice, AuthFieldKind, AuthGroupDiscovery,
@@ -92,9 +91,8 @@ pub fn authenticate(
     profile: &ConnectionProfile,
     interaction: Option<Arc<AuthInteraction>>,
 ) -> CoreResult<PendingNativeSession> {
-    use anyconnect::{Client, Statistics};
+    use anyconnect::{Client, LogLevel, Statistics};
 
-    e2e_marker("backend_anyconnect", anyconnect::version());
     let url = auth_url_for_profile(profile);
     if url.is_empty() {
         return Err(CoreError::msg("server address is empty"));
@@ -117,17 +115,6 @@ pub fn authenticate(
     let initial_auth_group = profile.group.trim().to_owned();
     let mut auth_group_initialized = !initial_auth_group.is_empty();
 
-    e2e_marker(
-        "anyconnect_cert_policy",
-        format!(
-            "accept_untrusted={accept_untrusted} strict={} block={} pin={} interactive={}",
-            profile.strict_certificate_trust,
-            profile.block_untrusted_servers,
-            !server_cert_hash.is_empty(),
-            interaction.is_some()
-        ),
-    );
-
     // Stable AnyConnect UA (do not embed our crate version — headends fingerprint it).
     let user_agent = effective_user_agent(profile);
     let mut builder = Client::builder()
@@ -135,15 +122,6 @@ pub fn authenticate(
         .protocol(profile.protocol.as_openconnect())
         .user_agent(user_agent)
         .authentication_handler(move |form| {
-            e2e_marker(
-                "auth_form_enter",
-                format!(
-                    "banner={:?} message={:?} error={:?}",
-                    form.banner(),
-                    form.message(),
-                    form.error()
-                ),
-            );
             handle_auth_form(
                 form,
                 &creds,
@@ -181,22 +159,15 @@ pub fn authenticate(
     // the IdP URL in the system browser (ics `external_browser` / openconnect
     // `openconnect_set_external_browser_callback`).
     if wants_external_browser(profile) {
-        e2e_marker(
-            "external_browser_register",
-            format!(
-                "auth={:?} flag={}",
-                profile.auth_method, profile.external_browser_auth
-            ),
-        );
         builder = builder.external_browser_handler(|uri| crate::platform_browser::open(uri));
     }
 
     let mut client = builder.build()?;
+    client.set_log_level(LogLevel::Info);
     client
         .set_auth_group((!initial_auth_group.is_empty()).then_some(initial_auth_group.as_str()))?;
     apply_openconnect_prefs(&mut client, profile, accept_untrusted)?;
 
-    e2e_marker("anyconnect_obtain_cookie", format!("start url={url}"));
     client.obtain_cookie().map_err(|err| {
         if let Some(detail) = auth_form_error.lock().ok().and_then(|guard| guard.clone()) {
             return CoreError::msg(detail);
@@ -221,11 +192,8 @@ pub fn authenticate(
         }
         CoreError::msg(format!("{msg}{hint}"))
     })?;
-    e2e_marker("anyconnect_obtain_cookie", "ok");
-
     // The UI owns interactive authentication. The VPN extension owns CSTP and
     // the TUN, so hand off the authenticated cookie without opening CSTP here.
-    e2e_marker("ui_defer_cstp", "extension_establishes_tunnel");
     let cookie = client.cookie();
     if cookie.as_ref().map(|c| c.is_empty()).unwrap_or(true) {
         return Err(CoreError::msg(
@@ -234,18 +202,6 @@ pub fn authenticate(
     }
     // Keep the authentication endpoint with the cookie so its scope and the
     // subsequent CSTP request stay consistent.
-    e2e_marker(
-        "cookie_handoff",
-        format!(
-            "cookie_len={} url={} has_webvpn={}",
-            cookie.as_ref().map(|c| c.len()).unwrap_or(0),
-            url,
-            cookie
-                .as_ref()
-                .map(|c| c.contains("webvpn"))
-                .unwrap_or(false)
-        ),
-    );
     // Addresses filled by extension after CSTP; placeholder only for Want size.
     let snapshot = NetworkSnapshot {
         address: None,
@@ -289,14 +245,6 @@ pub fn authenticate(
     options.external_auth_allowed = wants_external_browser(profile);
     options.mobile_unique_id = profile.id.clone();
     options.apply_force_global();
-    e2e_marker(
-        "anyconnect_network",
-        format!(
-            "ip=deferred mtu={} cookie={}",
-            options.mtu,
-            options.cookie.is_some()
-        ),
-    );
 
     // Drop Client without an open CSTP session so the headend keeps the cookie
     // usable for the extension process. Do not call logout/reset first.
@@ -314,7 +262,7 @@ pub fn authenticate(
 /// Fetch the initial AnyConnect authentication form and return the headend's
 /// advertised groups without submitting credentials.
 pub fn discover_auth_groups(profile: &ConnectionProfile) -> CoreResult<AuthGroupDiscovery> {
-    use anyconnect::{AuthFormResult, Client};
+    use anyconnect::{AuthFormResult, Client, LogLevel};
 
     let url = auth_url_for_profile(profile);
     if url.is_empty() {
@@ -360,27 +308,19 @@ pub fn discover_auth_groups(profile: &ConnectionProfile) -> CoreResult<AuthGroup
         builder = builder.server_certificate_hash(pin);
     }
     let mut client = builder.build()?;
+    client.set_log_level(LogLevel::Info);
     apply_openconnect_prefs(&mut client, profile, accept_untrusted)?;
     // Discovery must receive the ordinary group-list form and must never
     // launch an IdP or bind the response to a previously saved group.
     client.set_auth_group(None)?;
     client.set_external_auth_allowed(false);
 
-    e2e_marker("anyconnect_group_discovery", format!("start url={url}"));
     let auth_result = client.obtain_cookie();
     let discovery = captured
         .lock()
         .map_err(|_| CoreError::msg("authentication group discovery lock poisoned"))?
         .clone();
     if let Some(discovery) = discovery {
-        e2e_marker(
-            "anyconnect_group_discovery",
-            format!(
-                "ok groups={} selected={}",
-                discovery.groups.len(),
-                discovery.selected.as_deref().unwrap_or("")
-            ),
-        );
         return Ok(discovery);
     }
 
@@ -412,14 +352,7 @@ fn wants_external_browser(profile: &ConnectionProfile) -> bool {
 }
 
 /// Decide whether to accept a peer certificate (ics trust + openconnect --servercert pin).
-fn peer_cert_decision(accept_untrusted: bool, reason: &str, fingerprint: Option<&str>) -> bool {
-    e2e_marker(
-        "anyconnect_peer_cert",
-        format!(
-            "accept={accept_untrusted} reason={reason} fp={}",
-            fingerprint.unwrap_or("")
-        ),
-    );
+fn peer_cert_decision(accept_untrusted: bool, _reason: &str, _fingerprint: Option<&str>) -> bool {
     accept_untrusted
 }
 
@@ -462,19 +395,9 @@ fn persist_server_config(config: &[u8]) -> anyconnect::ConfigWriteResult {
         return ConfigWriteResult::Accepted;
     };
     let path = std::path::Path::new(&home).join("anyconnect-server-profile.xml");
-    let temp = path.with_extension(format!("xml.tmp-{}", std::process::id()));
-    let result = std::fs::create_dir_all(&home)
-        .and_then(|()| std::fs::write(&temp, config))
-        .and_then(|()| std::fs::rename(&temp, &path));
-    if let Err(error) = result {
-        let _ = std::fs::remove_file(temp);
-        e2e_marker("anyconnect_server_config", format!("write_failed:{error}"));
+    if crate::private_fs::write_atomic_private(&path, config).is_err() {
         ConfigWriteResult::Error
     } else {
-        e2e_marker(
-            "anyconnect_server_config",
-            format!("saved bytes={}", config.len()),
-        );
         ConfigWriteResult::Accepted
     }
 }
@@ -642,26 +565,8 @@ fn handle_auth_form(
 
     let mut fields = snapshot_form_fields(form);
     apply_credentials_to_fields(&mut fields, creds);
-    e2e_marker(
-        "auth_form_fields",
-        fields
-            .iter()
-            .map(|f| {
-                format!(
-                    "{}:{:?}:req={}:choices={}:val_len={}",
-                    f.name,
-                    f.kind,
-                    f.required,
-                    f.choices.len(),
-                    f.value.len()
-                )
-            })
-            .collect::<Vec<_>>()
-            .join(","),
-    );
 
     let values = if can_autofill_without_ui(&fields) {
-        e2e_marker("auth_form_autofill", format!("fields={}", fields.len()));
         fields
             .iter()
             .filter(|f| !f.value.is_empty())
@@ -680,41 +585,15 @@ fn handle_auth_form(
         };
         let reply = interaction.wait_for_reply(challenge);
         if reply.cancelled {
-            e2e_marker("auth_form_cancelled", "user_or_abort");
             return AuthFormResult::Cancelled;
         }
-        e2e_marker(
-            "auth_form_submit_values",
-            format!(
-                "n={} names={}",
-                reply.values.len(),
-                reply
-                    .values
-                    .iter()
-                    .map(|v| v.name.as_str())
-                    .collect::<Vec<_>>()
-                    .join("+")
-            ),
-        );
         merge_reply_values(&fields, &reply)
     } else {
         // Extension and host-only paths are non-interactive. Authentication
         // challenges are completed in the UI before the cookie handoff.
         if !can_autofill_without_ui(&fields) {
-            e2e_marker(
-                "auth_form_noninteractive_need_ui",
-                format!(
-                    "fields={} filled={}",
-                    fields.len(),
-                    fields.iter().filter(|f| !f.value.is_empty()).count()
-                ),
-            );
             return AuthFormResult::Cancelled;
         }
-        e2e_marker(
-            "auth_form_noninteractive",
-            format!("fields={} autofill_ok", fields.len()),
-        );
         fields
             .iter()
             .filter(|f| !f.value.is_empty())
@@ -809,13 +688,6 @@ fn select_auth_group(
     }
     if !*initialized || selection_changed {
         *initialized = true;
-        e2e_marker(
-            "anyconnect_auth_group",
-            format!(
-                "new_group name={} label={}",
-                choices[selection].name, choices[selection].label
-            ),
-        );
         return Some(AuthFormResult::NewGroup);
     }
     None
@@ -828,7 +700,6 @@ fn auth_form_failure(
     if let Ok(mut slot) = auth_form_error.lock() {
         *slot = Some(message.clone());
     }
-    e2e_marker("auth_form_error", message);
     anyconnect::AuthFormResult::Error
 }
 
@@ -932,22 +803,13 @@ pub fn resume_from_options(options: &VpnOptions) -> CoreResult<PendingNativeSess
         let mut candidate = options.clone();
         candidate.server = Some(server.clone());
         match resume_from_options_once(&candidate) {
-            Ok(session) => {
-                if index > 0 {
-                    e2e_marker("anyconnect_failover", format!("connected={server}"));
-                }
-                return Ok(session);
-            }
+            Ok(session) => return Ok(session),
             Err(error) => {
                 let message = error.to_string();
                 failures.push(format!("{server}: {message}"));
                 if index + 1 == candidates.len() || !is_failover_eligible(&message) {
                     break;
                 }
-                e2e_marker(
-                    "anyconnect_failover",
-                    format!("failed={server} next={}", candidates[index + 1]),
-                );
             }
         }
     }
@@ -997,7 +859,7 @@ fn is_failover_eligible(message: &str) -> bool {
 }
 
 fn resume_from_options_once(options: &VpnOptions) -> CoreResult<PendingNativeSession> {
-    use anyconnect::{Client, Statistics};
+    use anyconnect::{Client, LogLevel, Statistics};
 
     let url = options
         .server
@@ -1013,14 +875,6 @@ fn resume_from_options_once(options: &VpnOptions) -> CoreResult<PendingNativeSes
     let has_cookie = cookie.is_some();
     let traffic = Arc::new(Mutex::new(SharedTraffic::default()));
     let traffic_cb = Arc::clone(&traffic);
-
-    e2e_marker(
-        "anyconnect_resume",
-        format!(
-            "url={url} cookie={has_cookie} user={}",
-            !username.is_empty()
-        ),
-    );
 
     if !has_cookie {
         return Err(CoreError::msg(
@@ -1078,10 +932,7 @@ fn resume_from_options_once(options: &VpnOptions) -> CoreResult<PendingNativeSes
                 guard.stats.packets_received = stats.received_packets;
             }
         })
-        .protect_socket_handler(crate::platform_protect::invoke)
-        .reconnected_handler(|| {
-            e2e_marker("anyconnect_reconnected", "mainloop");
-        });
+        .protect_socket_handler(crate::platform_protect::invoke);
     if options.external_auth_allowed {
         // SAML/SSO-v2: OpenConnect listens on localhost:29786 then asks us to
         // open the IdP URL. Extension has no UI Ability, so open() queues a
@@ -1093,6 +944,7 @@ fn resume_from_options_once(options: &VpnOptions) -> CoreResult<PendingNativeSes
     }
 
     let mut client = builder.build()?;
+    client.set_log_level(LogLevel::Info);
     // Rebuild a minimal profile from handoff options for shared prefs application.
     let mut resume_profile = ConnectionProfile::new_draft();
     resume_profile.id = options.mobile_unique_id.clone();
@@ -1128,17 +980,12 @@ fn resume_from_options_once(options: &VpnOptions) -> CoreResult<PendingNativeSes
     apply_openconnect_prefs(&mut client, &resume_profile, accept_untrusted)?;
 
     let cookie_value = cookie.as_deref().expect("cookie checked above");
-    e2e_marker(
-        "anyconnect_resume_mode",
-        format!("cookie len={} url={}", cookie_value.len(), url),
-    );
     client
         .set_cookie(cookie_value)
         .map_err(|err| CoreError::msg(format!("extension set_cookie failed: {err}")))?;
     client
         .make_cstp_connection()
         .map_err(|err| CoreError::msg(format!("extension make_cstp failed: {err}")))?;
-    e2e_marker("anyconnect_cstp", "extension_cookie_ok");
 
     let network = client.network_config()?;
     let mut profile = ConnectionProfile::new_draft();
@@ -1201,29 +1048,6 @@ fn resume_from_options_once(options: &VpnOptions) -> CoreResult<PendingNativeSes
             filled.routes.insert(0, host_route);
         }
     }
-    e2e_marker(
-        "vpn_routes",
-        format!(
-            "force_global={} addr={:?} routes={} sample={:?} dns={:?} search={:?} split_dns={:?}",
-            filled.force_global,
-            filled.addresses,
-            filled.routes.len(),
-            filled.routes.iter().take(8).collect::<Vec<_>>(),
-            filled.dns_addresses,
-            filled.search_domains,
-            network
-                .split_dns
-                .iter()
-                .map(|route| route.0.as_str())
-                .collect::<Vec<_>>()
-        ),
-    );
-
-    e2e_marker(
-        "anyconnect_extension_ready",
-        format!("ip={:?} mtu={} mode=cookie", snapshot.address, filled.mtu),
-    );
-
     Ok(PendingNativeSession {
         client: Some(client),
         network: snapshot,
@@ -1262,31 +1086,19 @@ pub fn spawn_mainloop(
     // keeping the platform/native lifetimes independent.
     let borrowed = unsafe { BorrowedFd::borrow_raw(tun_fd) };
     client.setup_tun_fd_borrowed(borrowed)?;
-    e2e_marker("anyconnect_setup_tun_fd", format!("fd={tun_fd}"));
 
     // OpenConnect lifecycle: CSTP -> network config -> TUN -> optional DTLS ->
     // mainloop. A DTLS failure is non-fatal because CSTP remains the transport.
     if setup_dtls_after_tun {
-        match client.setup_dtls(60) {
-            Ok(()) => e2e_marker("anyconnect_dtls", "ok_after_tun"),
-            Err(err) => e2e_marker("anyconnect_dtls", format!("fallback_cstp:{err}")),
-        }
-    } else {
-        e2e_marker("anyconnect_dtls", "disabled");
+        let _ = client.setup_dtls(60);
     }
 
     let join = std::thread::Builder::new()
         .name("hanyconnect-mainloop".to_owned())
         .spawn(move || {
-            e2e_marker("anyconnect_mainloop", "start");
             // 300s reconnect timeout, 10s interval — same order of magnitude as
             // the openconnect CLI defaults for interactive clients.
-            let result = client.run_mainloop(300, 10);
-            match &result {
-                Ok(()) => e2e_marker("anyconnect_mainloop", "exit_ok"),
-                Err(err) => e2e_marker("anyconnect_mainloop", format!("exit_err:{err}")),
-            }
-            result.map_err(CoreError::from)
+            client.run_mainloop(300, 10).map_err(CoreError::from)
         })
         .map_err(|err| CoreError::msg(format!("failed to spawn mainloop thread: {err}")))?;
 

@@ -55,6 +55,7 @@ pub(crate) fn connections_page(state: Signal<State>) -> Element {
                 {connections.into_iter().map(|connection| {
                     let selected = active_id.as_deref() == Some(connection.id.as_str());
                     let is_live = selected && lifecycle.is_active();
+                    let locked = selected && (lifecycle.is_active() || lifecycle.is_busy());
                     let key = connection.id.clone();
                     rsx! {
                         ConnectionCard {
@@ -63,6 +64,7 @@ pub(crate) fn connections_page(state: Signal<State>) -> Element {
                             connection,
                             selected,
                             is_live,
+                            locked,
                         }
                     }
                 })}
@@ -80,6 +82,7 @@ fn ConnectionCard(
     connection: VpnConnection,
     selected: bool,
     is_live: bool,
+    locked: bool,
 ) -> Element {
     let s = strings(state.read().locale);
     let navigator = use_navigator();
@@ -184,6 +187,7 @@ fn ConnectionCard(
                 FlatButton {
                     variant: FlatButtonVariant::Ghost,
                     size: ButtonSize::Icon,
+                    disabled: Some(locked),
                     onclick: move |_| {
                         navigator.push(Route::ConnectionEditor { id: id_for_edit.clone() });
                     },
@@ -192,6 +196,7 @@ fn ConnectionCard(
                 FlatButton {
                     variant: FlatButtonVariant::Ghost,
                     size: ButtonSize::Icon,
+                    disabled: Some(locked),
                     onclick: move |_| dispatch(state, Action::DeleteConnection(id_for_delete.clone())),
                     {arkit::icon("trash-2", 18.0, danger())}
                 }

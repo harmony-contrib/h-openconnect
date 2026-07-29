@@ -1,6 +1,6 @@
 use arkit::entry;
 use arkit::prelude::Element;
-use hanyconnect_core::{shared_engine, ConnectRequest, E2eConfig};
+use hanyconnect_core::{shared_engine, ConnectRequest};
 use napi_derive_ohos::napi;
 use napi_ohos::{bindgen_prelude::Object, Error, Result, Status};
 
@@ -63,6 +63,11 @@ pub fn complete_file_pick(request_id: u32, path: Option<String>) -> Result<()> {
     Ok(())
 }
 
+#[napi]
+pub fn secure_private_file(path: String) -> Result<()> {
+    hanyconnect_core::secure_private_file(path).map_err(to_napi_error)
+}
+
 /// Register ics-style per-fd protect: OpenConnect → `vpnConnection.protect(fd)`.
 ///
 /// Pass `{ protectSocket: async (fd: number) => Promise<void> }`. Native waits
@@ -120,7 +125,8 @@ pub fn expire_platform_vpn_start() -> Result<bool> {
 
 fn dry_run_from_env() -> bool {
     // Real OpenConnect is the default when the binary is built with
-    // `native-anyconnect`. Explicit HANYCONNECT_DRY_RUN=1 keeps UI/E2E mock path.
+    // `native-anyconnect`. Explicit HANYCONNECT_DRY_RUN=1 keeps the development
+    // mock path available without adding commands to production abilities.
     match std::env::var("HANYCONNECT_DRY_RUN") {
         Ok(value) => value == "1" || value.eq_ignore_ascii_case("true"),
         Err(_) => {
@@ -175,55 +181,6 @@ pub async fn stop_vpn() -> Result<()> {
     shared_engine()
         .set_platform_vpn_running(false)
         .map_err(to_napi_error)
-}
-
-#[napi]
-pub fn apply_e2e_config(config_json: String) -> Result<String> {
-    let config: E2eConfig = serde_json::from_str(&config_json).map_err(to_napi_error)?;
-    if config.dry_run {
-        std::env::set_var("HANYCONNECT_DRY_RUN", "1");
-    } else {
-        std::env::set_var("HANYCONNECT_DRY_RUN", "0");
-    }
-    shared_engine()
-        .apply_e2e_config(config)
-        .map_err(to_napi_error)
-}
-
-#[napi]
-pub async fn e2e_connect_active() -> Result<String> {
-    let engine = shared_engine();
-    let profile = engine
-        .active_profile()
-        .map_err(to_napi_error)?
-        .ok_or_else(|| to_napi_error("no active profile for e2e connect"))?;
-    let dry_run = dry_run_from_env();
-    let options = engine
-        .prepare_connect(ConnectRequest { profile, dry_run })
-        .await
-        .map_err(to_napi_error)?;
-    let options_json = serde_json::to_string(&options).map_err(to_napi_error)?;
-    if dry_run {
-        engine
-            .set_platform_vpn_running(true)
-            .map_err(to_napi_error)?;
-        return engine.snapshot_json().map_err(to_napi_error);
-    }
-    // Ask platform to start VPN extension when callbacks exist.
-    match platform_callbacks::request_start_vpn(options_json) {
-        Ok(()) => {}
-        Err(err) => return Err(to_napi_error(err)),
-    }
-    engine.snapshot_json().map_err(to_napi_error)
-}
-
-#[napi]
-pub async fn e2e_disconnect() -> Result<String> {
-    let _ = platform_callbacks::request_stop_vpn();
-    let engine = shared_engine();
-    engine.disconnect().await.map_err(to_napi_error)?;
-    let _ = engine.set_platform_vpn_running(false);
-    engine.snapshot_json().map_err(to_napi_error)
 }
 
 /// Submit answers for the current OpenConnect auth challenge (multi-round MFA).
