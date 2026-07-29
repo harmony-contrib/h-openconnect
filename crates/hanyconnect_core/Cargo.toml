@@ -20,8 +20,11 @@ native-anyconnect = [
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 thiserror = "2"
+time.workspace = true
 tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread", "sync", "time"] }
 tracing = "0.1"
+tracing-appender.workspace = true
+tracing-subscriber.workspace = true
 libc = "0.2"
 ohos-ashmem-binding.workspace = true
 

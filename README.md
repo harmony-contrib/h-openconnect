@@ -101,6 +101,8 @@ default routes.
   - Native ArkUI interface for phone, tablet, and 2-in-1 targets.
   - Connection profiles, favorites, live status, traffic statistics,
     diagnostics, and light/dark appearance.
+  - Opt-in diagnostic recording with bounded live history, UTC daily archives,
+    system document export, and protected deletion of inactive archives.
   - English and Simplified Chinese UI.
   - Persisted profile selection, language, theme, and credentials.
 

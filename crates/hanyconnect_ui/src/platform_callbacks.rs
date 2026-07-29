@@ -1,11 +1,14 @@
 use napi_ohos::{
     bindgen_prelude::{
-        spawn as spawn_napi_future, Function, JsObjectValue, Object, Promise, Unknown,
+        spawn as spawn_napi_future, CallbackContext, Function, JsObjectValue, Object, Promise,
+        PromiseRaw, Unknown,
     },
     threadsafe_function::{ThreadsafeFunction, ThreadsafeFunctionCallMode},
     Error, Result, Status,
 };
+use std::cell::Cell;
 use std::collections::HashMap;
+use std::rc::Rc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, LazyLock, Mutex, RwLock};
@@ -42,12 +45,18 @@ type PickFileThreadsafeFunction =
     ThreadsafeFunction<String, Unknown<'static>, String, Status, false>;
 type PickFileSlot = LazyLock<RwLock<Option<Arc<PickFileThreadsafeFunction>>>>;
 
+type ExportLogCall<'a> = Function<'a, String, Unknown<'a>>;
+type ExportLogThreadsafeFunction =
+    ThreadsafeFunction<String, Unknown<'static>, String, Status, false>;
+type ExportLogSlot = LazyLock<RwLock<Option<Arc<ExportLogThreadsafeFunction>>>>;
+
 static SET_COLOR_MODE: SetColorModeSlot = LazyLock::new(|| RwLock::new(None));
 static REQUEST_START_VPN: VpnStartSlot = LazyLock::new(|| RwLock::new(None));
 static REQUEST_STOP_VPN: VpnStopSlot = LazyLock::new(|| RwLock::new(None));
 static SOCKET_PROTECT: SocketProtectSlot = LazyLock::new(|| RwLock::new(None));
 static OPEN_BROWSER: OpenBrowserSlot = LazyLock::new(|| RwLock::new(None));
 static PICK_FILE: PickFileSlot = LazyLock::new(|| RwLock::new(None));
+static EXPORT_LOG: ExportLogSlot = LazyLock::new(|| RwLock::new(None));
 static PICK_FILE_SEQ: AtomicU64 = AtomicU64::new(1);
 static PICK_FILE_WAITERS: LazyLock<Mutex<HashMap<u64, oneshot::Sender<Option<String>>>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
@@ -130,6 +139,17 @@ pub(crate) fn register_platform_callbacks(callbacks: Object<'static>) -> Result<
         PICK_FILE
             .write()
             .map_err(|_| Error::from_reason("failed to store pick file callback"))?
+            .replace(Arc::new(tsfn));
+    }
+    if callbacks.has_named_property("exportLog")? {
+        let export_log: ExportLogCall<'static> = callbacks.get_named_property("exportLog")?;
+        let tsfn = export_log
+            .build_threadsafe_function()
+            .callee_handled::<false>()
+            .build()?;
+        EXPORT_LOG
+            .write()
+            .map_err(|_| Error::from_reason("failed to store log export callback"))?
             .replace(Arc::new(tsfn));
     }
     Ok(())
@@ -296,6 +316,68 @@ pub(crate) fn complete_file_pick(request_id: u64, path: Option<String>) {
         });
         let _ = tx.send(cleaned);
     }
+}
+
+pub(crate) async fn export_log(
+    suggested_name: String,
+    content: String,
+) -> std::result::Result<(), String> {
+    let tsfn = EXPORT_LOG
+        .read()
+        .map_err(|_| "failed to read log export callback".to_owned())?
+        .as_ref()
+        .map(Arc::clone)
+        .ok_or_else(|| "log export callback is not registered".to_owned())?;
+    let request = serde_json::json!({
+        "suggestedName": suggested_name,
+        "content": content,
+    })
+    .to_string();
+    invoke_string_void_callback(tsfn, request, "log export").await
+}
+
+async fn invoke_string_void_callback(
+    tsfn: Arc<ExportLogThreadsafeFunction>,
+    value: String,
+    label: &'static str,
+) -> std::result::Result<(), String> {
+    let (tx, rx) = oneshot::channel::<Result<()>>();
+    let status = tsfn.call_with_return_value(value, ThreadsafeFunctionCallMode::NonBlocking, {
+        move |result, _| {
+            match result {
+                Ok(value) => {
+                    let tx_cell = Rc::new(Cell::new(Some(tx)));
+                    let tx_in_catch = tx_cell.clone();
+                    let promise = unsafe { value.cast::<PromiseRaw<'static, ()>>() }?;
+                    promise
+                        .then(move |_ctx| {
+                            if let Some(sender) = tx_cell.replace(None) {
+                                let _ = sender.send(Ok(()));
+                            }
+                            Ok(())
+                        })?
+                        .catch(move |ctx: CallbackContext<Unknown>| {
+                            if let Some(sender) = tx_in_catch.replace(None) {
+                                let _ = sender.send(Err(ctx.value.into()));
+                            }
+                            Ok(())
+                        })?;
+                }
+                Err(error) => {
+                    let _ = tx.send(Err(error));
+                }
+            }
+            Ok(())
+        }
+    });
+    if status != Status::Ok {
+        return Err(format!(
+            "call {label} callback failed with status: {status:?}"
+        ));
+    }
+    rx.await
+        .map_err(|_| format!("{label} callback receiver dropped"))?
+        .map_err(|error| error.to_string())
 }
 
 pub(crate) fn set_color_mode(color_mode: i32) -> Result<()> {

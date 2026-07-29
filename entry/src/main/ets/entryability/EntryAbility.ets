@@ -20,6 +20,11 @@ interface HAnyPickCertRequest {
   kind?: string;
 }
 
+interface HAnyTextExportRequest {
+  suggestedName?: string;
+  content?: string;
+}
+
 function describeError(err: Error | Object | string | number | boolean | null | undefined): string {
   if (err instanceof Error) {
     return `${err.name}: ${err.message}`;
@@ -175,6 +180,50 @@ export default class EntryAbility extends NativeAbility {
       const message = describeError(err) || 'open external browser failed';
       hilog.error(LOG_DOMAIN, LOG_TAG, 'open external browser failed %{public}s', message);
       throw new Error(message);
+    }
+  }
+
+  private async exportLogToSystem(requestJson: string): Promise<void> {
+    let request: HAnyTextExportRequest;
+    try {
+      request = JSON.parse(requestJson) as HAnyTextExportRequest;
+    } catch (err) {
+      throw new Error(`invalid log export request: ${describeError(err)}`);
+    }
+    const content = request.content ?? '';
+    if (content.length === 0) {
+      throw new Error('log export content is empty');
+    }
+    const baseName = (request.suggestedName ?? 'h-anyconnect-log')
+      .replace(/[\\/:*?"<>|]/g, '_')
+      .trim() || 'h-anyconnect-log';
+    const fileName = baseName.endsWith('.log') ? baseName : `${baseName}.log`;
+    const documentPicker = new picker.DocumentViewPicker(this.context as common.UIAbilityContext);
+    const options = new picker.DocumentSaveOptions();
+    options.newFileNames = [fileName];
+    options.fileSuffixChoices = ['Log|.log', 'Text|.txt'];
+    const result: Array<string> = await documentPicker.save(options);
+    if (!result || result.length === 0 || result[0].length === 0) {
+      throw new Error('log export cancelled');
+    }
+    let file: fs.File | undefined = undefined;
+    try {
+      file = fs.openSync(
+        result[0],
+        fs.OpenMode.WRITE_ONLY | fs.OpenMode.CREATE | fs.OpenMode.TRUNC,
+      );
+      fs.writeSync(file.fd, content);
+      hilog.info(LOG_DOMAIN, LOG_TAG, 'exported log');
+    } catch (err) {
+      throw new Error(describeError(err) || 'write exported log failed');
+    } finally {
+      if (file) {
+        try {
+          fs.closeSync(file);
+        } catch (err) {
+          hilog.error(LOG_DOMAIN, LOG_TAG, 'close exported log failed %{public}s', describeError(err));
+        }
+      }
     }
   }
 
@@ -334,6 +383,7 @@ export default class EntryAbility extends NativeAbility {
         requestStopVpn: async () => await this.requestStopVpn(),
         openExternalBrowser: async (uri: string) => await this.openExternalBrowser(uri),
         pickCertFile: async (requestJson: string) => await this.pickCertFile(requestJson),
+        exportLog: async (requestJson: string) => await this.exportLogToSystem(requestJson),
       });
       hilog.info(LOG_DOMAIN, LOG_TAG, 'registered native platform callbacks');
     } catch (err) {

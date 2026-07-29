@@ -6,7 +6,7 @@
 //! authenticated cookie can exceed HarmonyOS Want parameter limits.
 
 use crate::error::{CoreError, CoreResult};
-use crate::model::{ConnectionLifecycle, NetworkSnapshot, SessionStats};
+use crate::model::{ConnectionLifecycle, DiagnosticEntry, NetworkSnapshot, SessionStats};
 use crate::private_fs::{ensure_private_dir, write_atomic_private};
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -75,6 +75,8 @@ pub struct PlatformVpnState {
     pub mtu: u32,
     pub network: NetworkSnapshot,
     pub stats: SessionStats,
+    /// Process-local diagnostic tail for live cross-process display.
+    pub diagnostics: Vec<DiagnosticEntry>,
     /// Strictly monotonic Unix-nanosecond revision within an ashmem session.
     pub updated_at: u128,
 }

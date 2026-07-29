@@ -9,6 +9,7 @@
 mod auth_bridge;
 mod engine;
 mod error;
+mod log_recording;
 mod model;
 #[cfg(feature = "native-anyconnect")]
 mod native_session;
@@ -28,6 +29,7 @@ pub use platform_protect::set_handler as set_socket_protect_handler;
 pub use auth_bridge::AuthInteraction;
 pub use engine::{shared_engine, SessionEngine};
 pub use error::{CoreError, CoreResult};
+pub use log_recording::{LogArchiveSummary, LogRecordingStatus};
 pub use model::{
     AuthChallenge, AuthChallengeReply, AuthField, AuthFieldChoice, AuthFieldKind, AuthFieldValue,
     AuthGroupDiscovery, AuthMethod, ConnectRequest, ConnectionLifecycle, ConnectionProfile,

@@ -4,7 +4,7 @@ use crate::model::{
     NetworkSnapshot, ProtocolKind, SessionSnapshot, SessionStats, VpnConnection,
 };
 use crate::platform_callbacks;
-use hanyconnect_core::{shared_engine, ConnectRequest, SessionEngine};
+use hanyconnect_core::{shared_engine, ConnectRequest, LogRecordingStatus, SessionEngine};
 use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
@@ -179,7 +179,12 @@ pub(crate) enum Action {
     SaveDraft,
     DeleteConnection(String),
     ToggleFavorite(String),
-    ClearDiagnostics,
+    ToggleLogRecording,
+    LogRecordingChanged(Result<LogRecordingChangeResult, String>),
+    ExportLogArchive(String),
+    LogArchiveExported(Result<String, String>),
+    DeleteLogArchive(String),
+    LogArchiveDeleted(Result<LogArchiveDeleteResult, String>),
     /// Remove a toast by id (Sonner timer / swipe / close).
     DismissToast(u64),
     /// Update one field on the in-progress auth challenge form.
@@ -206,6 +211,18 @@ pub(crate) enum SessionOutcome {
     PlatformStartRequested,
 }
 
+#[derive(Debug, Clone)]
+pub(crate) struct LogRecordingChangeResult {
+    snapshot: SessionSnapshot,
+    status: LogRecordingStatus,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct LogArchiveDeleteResult {
+    file_name: String,
+    status: LogRecordingStatus,
+}
+
 #[derive(Clone)]
 pub(crate) struct State {
     pub locale: UiLocale,
@@ -222,6 +239,10 @@ pub(crate) struct State {
     pub group_choices: Vec<AuthFieldChoice>,
     pub group_discovery_loading: bool,
     pub group_discovery_error: Option<String>,
+    pub log_recording: LogRecordingStatus,
+    pub log_recording_pending: bool,
+    pub log_archive_export_pending: Option<String>,
+    pub log_archive_delete_pending: Option<String>,
     /// Timed Sonner toasts (oldest → newest). Key events only.
     pub toasts: Vec<FeedbackToast>,
     next_toast_id: u64,
@@ -264,6 +285,7 @@ impl State {
                 pending_auth: None,
             });
         let last_lifecycle = snapshot.lifecycle;
+        let log_recording = shared_engine().log_recording_status().unwrap_or_default();
         let (language_preference, theme_preference) = shared_engine()
             .appearance_preferences()
             .map(|(language, theme)| {
@@ -286,6 +308,10 @@ impl State {
             group_choices: Vec::new(),
             group_discovery_loading: false,
             group_discovery_error: None,
+            log_recording,
+            log_recording_pending: false,
+            log_archive_export_pending: None,
+            log_archive_delete_pending: None,
             toasts: Vec::new(),
             next_toast_id: 0,
             dry_run,
@@ -316,6 +342,9 @@ impl State {
         if let Ok(snapshot) = shared_engine().snapshot() {
             self.snapshot = snapshot;
             self.seed_challenge_draft();
+        }
+        if let Ok(status) = shared_engine().log_recording_status() {
+            self.log_recording = status;
         }
     }
 
@@ -955,11 +984,91 @@ pub(crate) fn reduce(state: &mut State, action: Action) -> Command<Action> {
             }
             Command::none()
         }
-        Action::ClearDiagnostics => {
-            if let Err(err) = shared_engine().clear_diagnostics() {
-                state.push_toast(err.to_string());
+        Action::ToggleLogRecording => {
+            if state.log_recording_pending {
+                return Command::none();
             }
-            state.sync_engine();
+            state.log_recording_pending = true;
+            let enabled = !state.log_recording.enabled;
+            Command::perform(set_log_recording_and_snapshot(enabled), |result| {
+                Action::LogRecordingChanged(result)
+            })
+        }
+        Action::LogRecordingChanged(result) => {
+            state.log_recording_pending = false;
+            match result {
+                Ok(result) => {
+                    state.snapshot = result.snapshot;
+                    state.log_recording = result.status;
+                    state.push_toast(if state.log_recording.enabled {
+                        tr_msg(state.locale, "已开始记录日志", "Log recording started")
+                    } else {
+                        tr_msg(state.locale, "已停止记录日志", "Log recording stopped")
+                    });
+                }
+                Err(error) => state.push_toast(format!(
+                    "{}{error}",
+                    tr_msg(
+                        state.locale,
+                        "切换日志记录失败：",
+                        "Failed to change log recording: "
+                    )
+                )),
+            }
+            Command::none()
+        }
+        Action::ExportLogArchive(file_name) => {
+            if state.log_archive_export_pending.is_some()
+                || state.log_archive_delete_pending.is_some()
+            {
+                return Command::none();
+            }
+            state.log_archive_export_pending = Some(file_name.clone());
+            Command::perform(export_log_archive(file_name), |result| {
+                Action::LogArchiveExported(result)
+            })
+        }
+        Action::LogArchiveExported(result) => {
+            state.log_archive_export_pending = None;
+            match result {
+                Ok(file_name) => state.push_toast(format!(
+                    "{}{file_name}",
+                    tr_msg(state.locale, "日志已导出：", "Log exported: ")
+                )),
+                Err(error) => state.push_toast(format!(
+                    "{}{error}",
+                    tr_msg(state.locale, "日志导出失败：", "Failed to export log: ")
+                )),
+            }
+            Command::none()
+        }
+        Action::DeleteLogArchive(file_name) => {
+            if state.log_archive_export_pending.is_some()
+                || state.log_archive_delete_pending.is_some()
+            {
+                return Command::none();
+            }
+            state.log_archive_delete_pending = Some(file_name.clone());
+            Command::perform(delete_log_archive(file_name), |result| {
+                Action::LogArchiveDeleted(result)
+            })
+        }
+        Action::LogArchiveDeleted(result) => {
+            state.log_archive_delete_pending = None;
+            match result {
+                Ok(result) => {
+                    state.log_recording = result.status;
+                    state.push_toast(format!(
+                        "{}{}",
+                        tr_msg(state.locale, "日志已删除：", "Log deleted: "),
+                        result.file_name
+                    ));
+                }
+                Err(error) => state.push_toast(format!(
+                    "{}{error}",
+                    tr_msg(state.locale, "日志删除失败：", "Failed to delete log: ")
+                )),
+            }
             Command::none()
         }
         Action::DismissToast(id) => {
@@ -967,6 +1076,30 @@ pub(crate) fn reduce(state: &mut State, action: Action) -> Command<Action> {
             Command::none()
         }
     }
+}
+
+async fn set_log_recording_and_snapshot(enabled: bool) -> Result<LogRecordingChangeResult, String> {
+    let engine = shared_engine();
+    let status = engine
+        .set_log_recording_enabled(enabled)
+        .map_err(|error| error.to_string())?;
+    let snapshot = engine.snapshot().map_err(|error| error.to_string())?;
+    Ok(LogRecordingChangeResult { snapshot, status })
+}
+
+async fn export_log_archive(file_name: String) -> Result<String, String> {
+    let content = shared_engine()
+        .read_log_archive(&file_name)
+        .map_err(|error| error.to_string())?;
+    platform_callbacks::export_log(file_name.clone(), content).await?;
+    Ok(file_name)
+}
+
+async fn delete_log_archive(file_name: String) -> Result<LogArchiveDeleteResult, String> {
+    let status = shared_engine()
+        .delete_log_archive(&file_name)
+        .map_err(|error| error.to_string())?;
+    Ok(LogArchiveDeleteResult { file_name, status })
 }
 
 /// Shared connect path for user toggle and unexpected-drop auto-reconnect.

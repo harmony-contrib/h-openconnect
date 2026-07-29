@@ -1,5 +1,6 @@
 use crate::auth_bridge::AuthInteraction;
 use crate::error::{CoreError, CoreResult};
+use crate::log_recording::{self, RecordedLogBuffer, RuntimeLogBuffer, MAX_IN_MEMORY_LOGS};
 use crate::model::{
     AuthChallenge, AuthChallengeReply, AuthGroupDiscovery, ConnectRequest, ConnectionLifecycle,
     ConnectionProfile, DiagnosticEntry, NetworkSnapshot, SessionSnapshot, SessionStats, VpnOptions,
@@ -8,9 +9,12 @@ use crate::platform_ipc::{PlatformIpc, PlatformIpcError};
 use crate::platform_state::{PlatformVpnState, SessionHandoff};
 use crate::store::{Preferences, ProfileStore};
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, LazyLock, Mutex, Once, OnceLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tokio::sync::watch;
+use tracing::Level;
+use tracing_subscriber::prelude::*;
+use tracing_subscriber::Layer;
 
 #[cfg(feature = "native-anyconnect")]
 use crate::native_session::{
@@ -26,6 +30,9 @@ const BACKEND: &str = "anyconnect-rs";
 const BACKEND: &str = "platform-orchestrator";
 
 static ENGINE: OnceLock<Arc<SessionEngine>> = OnceLock::new();
+static RUNTIME_LOGS: LazyLock<Arc<Mutex<RuntimeLogBuffer>>> =
+    LazyLock::new(|| Arc::new(Mutex::new(RuntimeLogBuffer::default())));
+static INSTALL_RUNTIME_LOG_LAYER: Once = Once::new();
 
 pub fn shared_engine() -> Arc<SessionEngine> {
     ENGINE
@@ -44,6 +51,8 @@ struct Inner {
     platform_vpn_starting: bool,
     platform_vpn_state_updated_at: u128,
     last_vpn_options: VpnOptions,
+    logs: RecordedLogBuffer,
+    platform_diagnostics: Vec<DiagnosticEntry>,
     #[cfg(feature = "native-anyconnect")]
     pending_native: Option<PendingNativeSession>,
     #[cfg(feature = "native-anyconnect")]
@@ -65,6 +74,7 @@ pub struct PlatformSharedMemoryFds {
 
 impl SessionEngine {
     pub fn new() -> Self {
+        install_runtime_log_layer();
         let (lifecycle_tx, _) = watch::channel(ConnectionLifecycle::Disconnected);
         let auth = AuthInteraction::shared();
         Self {
@@ -79,6 +89,8 @@ impl SessionEngine {
                 platform_vpn_starting: false,
                 platform_vpn_state_updated_at: 0,
                 last_vpn_options: VpnOptions::default(),
+                logs: RecordedLogBuffer::new("."),
+                platform_diagnostics: Vec::new(),
                 #[cfg(feature = "native-anyconnect")]
                 pending_native: None,
                 #[cfg(feature = "native-anyconnect")]
@@ -105,6 +117,14 @@ impl SessionEngine {
             }
         }
 
+        let log_root = {
+            let inner = self.lock()?;
+            inner.home.clone()
+        };
+        log_recording::reset_recording(&log_root)?;
+        if let Ok(mut logs) = RUNTIME_LOGS.lock() {
+            logs.clear();
+        }
         let (platform, fds) = PlatformIpc::create_ui().map_err(platform_ipc_error)?;
         {
             let mut slot = self
@@ -176,7 +196,9 @@ impl SessionEngine {
         }
         let preferences = store.load_preferences().unwrap_or_default();
         let mut inner = self.lock()?;
-        inner.home = home;
+        inner.home = home.clone();
+        inner.logs = RecordedLogBuffer::new(home);
+        inner.platform_diagnostics.clear();
         inner.store = Some(store);
         inner.preferences = preferences.clone();
         inner.snapshot.connections = profiles;
@@ -205,6 +227,15 @@ impl SessionEngine {
         let mut inner = self.lock()?;
         self.sync_platform_locked(&mut inner);
         self.refresh_stats_locked(&mut inner);
+        inner.logs.sync_session();
+        if let Ok(mut runtime_logs) = RUNTIME_LOGS.lock() {
+            runtime_logs.sync(inner.logs.root());
+        }
+        inner.snapshot.diagnostics = if inner.logs.enabled() {
+            merge_platform_logs(merged_logs(&inner.logs), &inner.platform_diagnostics)
+        } else {
+            Vec::new()
+        };
         inner.snapshot.pending_auth = self.auth.pending();
         Ok(inner.snapshot.clone())
     }
@@ -256,7 +287,12 @@ impl SessionEngine {
 
     pub fn clear_diagnostics(&self) -> CoreResult<()> {
         let mut inner = self.lock()?;
+        inner.logs.clear();
+        inner.platform_diagnostics.clear();
         inner.snapshot.diagnostics.clear();
+        if let Ok(mut logs) = RUNTIME_LOGS.lock() {
+            logs.clear();
+        }
         for name in [
             "openconnect-progress.log",
             "openconnect-progress.log.1",
@@ -265,6 +301,56 @@ impl SessionEngine {
             let _ = std::fs::remove_file(inner.home.join(name));
         }
         Ok(())
+    }
+
+    pub fn log_recording_status(&self) -> CoreResult<crate::LogRecordingStatus> {
+        let inner = self.lock()?;
+        log_recording::recording_status(&inner.home)
+    }
+
+    pub fn set_log_recording_enabled(
+        &self,
+        enabled: bool,
+    ) -> CoreResult<crate::LogRecordingStatus> {
+        let mut inner = self.lock()?;
+        let root = inner.home.clone();
+        let was_enabled = log_recording::recording_status(&root)?.enabled;
+        if was_enabled == enabled {
+            return log_recording::recording_status(&root);
+        }
+
+        if enabled {
+            inner.logs.clear();
+            inner.platform_diagnostics.clear();
+            inner.snapshot.diagnostics.clear();
+            if let Ok(mut logs) = RUNTIME_LOGS.lock() {
+                logs.clear();
+            }
+            log_recording::set_recording_enabled(&root, true)?;
+            inner.logs.sync_session();
+            self.push_diag_locked(&mut inner, "info", "log recording enabled");
+        } else {
+            self.push_diag_locked(&mut inner, "info", "log recording disabled");
+            log_recording::set_recording_enabled(&root, false)?;
+            inner.logs.sync_session();
+            inner.platform_diagnostics.clear();
+            inner.snapshot.diagnostics.clear();
+            if let Ok(mut logs) = RUNTIME_LOGS.lock() {
+                logs.clear();
+            }
+        }
+        log_recording::recording_status(&root)
+    }
+
+    pub fn read_log_archive(&self, file_name: &str) -> CoreResult<String> {
+        let inner = self.lock()?;
+        log_recording::read_archive(&inner.home, file_name)
+    }
+
+    pub fn delete_log_archive(&self, file_name: &str) -> CoreResult<crate::LogRecordingStatus> {
+        let inner = self.lock()?;
+        log_recording::delete_archive(&inner.home, file_name)?;
+        log_recording::recording_status(&inner.home)
     }
 
     pub fn set_profiles(&self, profiles: Vec<ConnectionProfile>) -> CoreResult<()> {
@@ -1222,6 +1308,7 @@ impl SessionEngine {
         inner.platform_vpn_starting = starting;
         inner.platform_vpn_running = running;
         inner.platform_vpn_state_updated_at = remote.updated_at;
+        inner.platform_diagnostics = remote.diagnostics.clone();
 
         if running {
             if !remote.assigned_ip.is_empty() {
@@ -1317,6 +1404,7 @@ impl SessionEngine {
             mtu: inner.snapshot.stats.mtu,
             network: inner.snapshot.network.clone(),
             stats: inner.snapshot.stats.clone(),
+            diagnostics: merged_logs(&inner.logs),
             updated_at: inner.platform_vpn_state_updated_at,
         };
         platform.publish_state(state).map_err(platform_ipc_error)
@@ -1334,16 +1422,13 @@ impl SessionEngine {
     }
 
     fn push_diag_locked(&self, inner: &mut Inner, level: &str, message: impl Into<String>) {
-        inner.snapshot.diagnostics.insert(
-            0,
-            DiagnosticEntry {
-                level: level.to_owned(),
-                message: message.into(),
-                timestamp: now_timestamp(),
-            },
-        );
-        if inner.snapshot.diagnostics.len() > 64 {
-            inner.snapshot.diagnostics.truncate(64);
+        inner.logs.push(DiagnosticEntry {
+            level: level.to_owned(),
+            message: message.into(),
+            timestamp: now_timestamp(),
+        });
+        if inner.logs.enabled() {
+            inner.snapshot.diagnostics = merged_logs(&inner.logs);
         }
     }
 
@@ -1391,11 +1476,7 @@ fn seed_snapshot() -> SessionSnapshot {
         stats: SessionStats::default(),
         network: NetworkSnapshot::default(),
         last_error: None,
-        diagnostics: vec![DiagnosticEntry {
-            level: "info".to_owned(),
-            message: format!("session engine ready (backend={BACKEND})"),
-            timestamp: now_timestamp(),
-        }],
+        diagnostics: Vec::new(),
         app_version: APP_VERSION.to_owned(),
         sdk_ready: cfg!(feature = "native-anyconnect"),
         anyconnect_version: {
@@ -1414,14 +1495,126 @@ fn seed_snapshot() -> SessionSnapshot {
 }
 
 fn now_timestamp() -> String {
-    let secs = SystemTime::now()
+    SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs())
-        .unwrap_or(0);
-    let hours = (secs / 3600) % 24;
-    let minutes = (secs / 60) % 60;
-    let seconds = secs % 60;
-    format!("{hours:02}:{minutes:02}:{seconds:02}")
+        .unwrap_or(0)
+        .to_string()
+}
+
+fn install_runtime_log_layer() {
+    INSTALL_RUNTIME_LOG_LAYER.call_once(|| {
+        let subscriber = tracing_subscriber::registry().with(HAnyConnectLogLayer {
+            logs: RUNTIME_LOGS.clone(),
+        });
+        let _ = tracing::subscriber::set_global_default(subscriber);
+    });
+}
+
+struct HAnyConnectLogLayer {
+    logs: Arc<Mutex<RuntimeLogBuffer>>,
+}
+
+impl<S> Layer<S> for HAnyConnectLogLayer
+where
+    S: tracing::Subscriber,
+{
+    fn on_event(
+        &self,
+        event: &tracing::Event<'_>,
+        _ctx: tracing_subscriber::layer::Context<'_, S>,
+    ) {
+        if !is_vpn_log_target(event.metadata().target()) {
+            return;
+        }
+        let level = match *event.metadata().level() {
+            Level::TRACE | Level::DEBUG => "debug",
+            Level::INFO => "info",
+            Level::WARN => "warning",
+            Level::ERROR => "error",
+        };
+        let mut visitor = LogMessageVisitor::default();
+        event.record(&mut visitor);
+        if let Ok(mut logs) = self.logs.lock() {
+            logs.capture(DiagnosticEntry {
+                level: level.to_owned(),
+                message: visitor.finish(event.metadata().target()),
+                timestamp: now_timestamp(),
+            });
+        }
+    }
+}
+
+fn is_vpn_log_target(target: &str) -> bool {
+    target.starts_with("hanyconnect_core")
+        || target.starts_with("anyconnect")
+        || target.starts_with("openconnect")
+}
+
+#[derive(Default)]
+struct LogMessageVisitor {
+    message: Option<String>,
+    fields: Vec<String>,
+}
+
+impl LogMessageVisitor {
+    fn finish(self, fallback: &str) -> String {
+        let mut message = self.message.unwrap_or_else(|| fallback.to_owned());
+        if !self.fields.is_empty() {
+            message.push_str(" · ");
+            message.push_str(&self.fields.join(", "));
+        }
+        message
+    }
+}
+
+impl tracing::field::Visit for LogMessageVisitor {
+    fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
+        let value = format!("{value:?}");
+        if field.name() == "message" {
+            self.message = Some(value.trim_matches('"').to_owned());
+        } else {
+            self.fields.push(format!("{}={value}", field.name()));
+        }
+    }
+
+    fn record_str(&mut self, field: &tracing::field::Field, value: &str) {
+        if field.name() == "message" {
+            self.message = Some(value.to_owned());
+        } else {
+            self.fields.push(format!("{}={value}", field.name()));
+        }
+    }
+}
+
+fn merged_logs(state_logs: &[DiagnosticEntry]) -> Vec<DiagnosticEntry> {
+    let state_start = state_logs.len().saturating_sub(MAX_IN_MEMORY_LOGS);
+    let mut logs = state_logs[state_start..].to_vec();
+    let remaining = MAX_IN_MEMORY_LOGS.saturating_sub(logs.len());
+    if let Ok(runtime_logs) = RUNTIME_LOGS.lock() {
+        let runtime_start = runtime_logs.len().saturating_sub(remaining);
+        logs.extend(runtime_logs.entries().skip(runtime_start).cloned());
+    }
+    logs
+}
+
+fn merge_platform_logs(
+    mut local: Vec<DiagnosticEntry>,
+    platform: &[DiagnosticEntry],
+) -> Vec<DiagnosticEntry> {
+    for entry in platform {
+        if !local.iter().any(|existing| {
+            existing.level == entry.level
+                && existing.message == entry.message
+                && existing.timestamp == entry.timestamp
+        }) {
+            local.push(entry.clone());
+        }
+    }
+    if local.len() > MAX_IN_MEMORY_LOGS {
+        local.drain(..local.len() - MAX_IN_MEMORY_LOGS);
+    }
+    local
 }
 
 fn write_last_error(home: &std::path::Path, message: &str) -> CoreResult<()> {
@@ -1599,6 +1792,42 @@ mod tests {
     }
 
     #[test]
+    fn log_recording_is_opt_in_and_archives_the_enabled_session() {
+        let dir = tempdir().unwrap();
+        let engine = SessionEngine::new();
+        engine.configure_home(dir.path()).unwrap();
+
+        assert!(!engine.log_recording_status().unwrap().enabled);
+        assert!(engine.snapshot().unwrap().diagnostics.is_empty());
+
+        let status = engine.set_log_recording_enabled(true).unwrap();
+        assert!(status.enabled);
+        {
+            let mut inner = engine.lock().unwrap();
+            engine.push_diag_locked(&mut inner, "warning", "recorded session event");
+        }
+        assert!(engine
+            .snapshot()
+            .unwrap()
+            .diagnostics
+            .iter()
+            .any(|entry| entry.message == "recorded session event"));
+
+        let stopped = engine.set_log_recording_enabled(false).unwrap();
+        assert!(!stopped.enabled);
+        assert!(engine.snapshot().unwrap().diagnostics.is_empty());
+        assert_eq!(stopped.archives.len(), 1);
+        let file_name = stopped.archives[0].file_name.clone();
+        let content = engine.read_log_archive(&file_name).unwrap();
+        assert!(content.contains("log recording enabled"));
+        assert!(content.contains("recorded session event"));
+        assert!(content.contains("log recording disabled"));
+
+        let deleted = engine.delete_log_archive(&file_name).unwrap();
+        assert!(deleted.archives.is_empty());
+    }
+
+    #[test]
     fn configure_home_ignores_legacy_platform_state_file() {
         let dir = tempdir().unwrap();
         let legacy = PlatformVpnState {
@@ -1611,6 +1840,7 @@ mod tests {
             mtu: 1400,
             network: NetworkSnapshot::default(),
             stats: SessionStats::default(),
+            diagnostics: Vec::new(),
             updated_at: PlatformVpnState::now_nanos(),
         };
         std::fs::write(
