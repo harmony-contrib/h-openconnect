@@ -1,117 +1,300 @@
 # H-AnyConnect
 
-HarmonyOS 上的 AnyConnect 兼容 VPN 客户端（Arkit + shadcn + **anyconnect-rs / OpenConnect 9.20**）。
+H-AnyConnect is a native HarmonyOS AnyConnect-compatible VPN client powered by
+Rust, [Arkit](https://github.com/richerfu/arkit), and
+[anyconnect-rs/OpenConnect](https://crates.io/crates/anyconnect).
 
-**真实接通**（非 preview / mock）：
+The app performs interactive authentication in its UI process, hands the
+authenticated session to a HarmonyOS `VpnExtensionAbility`, creates the system
+TUN from the headend-provided network configuration, and runs the OpenConnect
+packet loop inside the VPN extension process.
 
-1. UI：`obtain_cookie` → 写出 `session-handoff.json`（含密码，仅本机沙箱）
-2. 系统 `VpnExtensionAbility`（独立进程）只使用认证 cookie 建立 CSTP
-3. 用真实分配地址创建 TUN → `setup_tun_fd` + `run_mainloop`
-4. UI 经 `platform-vpn-state.json` 同步 Connected（对齐 paws）
-5. 断开：停扩展 + cancel mainloop
+> H-AnyConnect is under active development. Validate routing, DNS, application
+> binding, and reconnect behavior on a physical device or a VPN-enabled
+> OpenHarmony QEMU image. A DevEco simulator can validate UI and profile flows,
+> but does not prove that a system TUN was created or that traffic traversed it.
 
-## 结构
+## Architecture
 
+```text
+Native ArkUI (Rust: Arkit + Dioxus)
+    |  N-API
+    v
+EntryAbility (ArkTS)
+    |  authentication UI, browser SSO, certificate picker
+    |  start/stop VpnExtensionAbility
+    v
+HAnyConnectVpnExtensionAbility (ArkTS)
+    |  VpnConnection.create(VpnConfig)
+    |  per-socket protect + protectProcessNet()
+    |  HarmonyOS-owned TUN fd
+    v
+hanyconnect_core (Rust)
+    |  profile store, auth forms, session handoff, lifecycle
+    v
+anyconnect crate / OpenConnect 9.20
+    |  XML auth, cookie, CSTP, optional DTLS, routes, DNS, mainloop
+    v
+AnyConnect-compatible headend
 ```
-crates/hanyconnect_core/   # 会话引擎 + anyconnect-rs
-crates/hanyconnect_ui/     # Arkit UI + NAPI (cdylib)
-entry/                     # HarmonyOS 壳 (ArkTS + VPN Extension)
-scripts/                   # OHOS 依赖 / 打包 / E2E
-```
 
-## 页面
+The connection lifecycle is intentionally split across two application
+processes:
 
-| 底部导航 | 路由 | 说明 |
-| --- | --- | --- |
-| 连接 | `/` | 连接/断开、状态、会话摘要 |
-| 配置 | `/connections` | 连接列表、收藏、编辑/删除 |
-| 统计 | `/statistics` | 时长 / 流量 / IP / MTU（OpenConnect stats） |
-| 更多 | `/more` | 外观、诊断、关于 |
+1. The UI process calls `obtain_cookie`, handles group selection and all
+   interactive authentication forms, then writes a short-lived private session
+   handoff.
+2. The VPN extension resumes the authenticated cookie, establishes CSTP, and
+   reads the assigned addresses, routes, DNS servers, search domains, and MTU.
+3. ArkTS maps that headend configuration directly to HarmonyOS `VpnConfig` and
+   creates the system TUN.
+4. Rust attaches the TUN fd to OpenConnect, optionally enables DTLS, and runs
+   the packet mainloop.
+5. The UI observes the extension-owned lifecycle and traffic statistics through
+   private cross-process state.
 
-## 构建（设备 HAP，默认链 OpenConnect）
+Missing or malformed headend network configuration fails the connection. The
+app does not synthesize fallback tunnel addresses, public DNS servers, or
+default routes.
 
-```bash
+## Features
+
+- **Standards-aligned AnyConnect authentication**
+  - Fetches the initial authentication form when a server is entered and
+    presents every group advertised by the headend.
+  - Sends the selected protocol group through OpenConnect's standard
+    `group-select` flow.
+  - Supports multi-round username/password, AAA/RADIUS challenge, SMS OTP,
+    token, and select fields.
+  - Keeps challenge text inputs visible so verification codes can be reviewed
+    while typing.
+- **Enterprise authentication**
+  - External-browser SAML/SSO-v2 with the system browser and OpenConnect's local
+    callback listener.
+  - RSA SecurID and TOTP software-token modes.
+  - Password, certificate, password-plus-certificate, and SAML profile modes.
+- **Certificate and TLS policy**
+  - System trust, private CA files, server certificate pins, and explicit
+    development-only untrusted-certificate policy.
+  - PEM, DER, and PKCS#12 client certificates, private keys, secondary
+    certificates, and key passwords.
+  - Certificate files selected through the HarmonyOS document picker are copied
+    into the application-private sandbox.
+- **VPN data path**
+  - Headend-provided IPv4/IPv6 addresses, split includes, split excludes, DNS
+    servers, search domains, and MTU.
+  - Split tunnel, force-global routing, local-LAN exclusions, and trusted or
+    blocked application lists.
+  - CSTP transport with optional DTLS acceleration and CSTP fallback.
+  - Per-socket protection before connecting to the VPN gateway, followed by
+    process-network protection after TUN creation.
+  - Feature-gated TUN DNS redirection for HarmonyOS environments whose system
+    resolver keeps the uplink DNS destination after routing the packet into the
+    VPN.
+- **Connection resilience**
+  - Ordered backup gateways for eligible network, TLS, and connection failures.
+  - OpenConnect mainloop reconnect plus profile-controlled reconnect after an
+    unexpected disconnect while the app is active.
+  - Cross-process lifecycle ownership checks prevent stale state or PID reuse
+    from showing a false connected session.
+- **Native application experience**
+  - Native ArkUI interface for phone, tablet, and 2-in-1 targets.
+  - Connection profiles, favorites, live status, traffic statistics,
+    diagnostics, and light/dark appearance.
+  - English and Simplified Chinese UI.
+  - Persisted profile selection, language, theme, and credentials.
+
+Profile data is stored in the application-private directory with restricted
+permissions and is excluded from HarmonyOS backup. Production abilities do not
+accept credentials, trust overrides, or auto-connect instructions through
+`Want` parameters.
+
+## Building
+
+### Prerequisites
+
+- macOS with DevEco Studio and the HarmonyOS SDK installed.
+- Rust 1.89 or a compatible newer toolchain.
+- [`ohrs`](https://github.com/ohos-rs/ohos-rs) available in `PATH`.
+- `hvigorw`, `ohpm`, and `hdc`; the scripts can use the copies bundled with
+  DevEco Studio.
+- A HarmonyOS signing profile when producing a HAP for a physical device.
+- Docker Desktop only when using the optional local `ocserv` headend.
+
+The project targets HarmonyOS 6.1, is compatible with HarmonyOS 6.0.2, and
+currently packages an `arm64-v8a` native library.
+
+The default native build uses:
+
+| Dependency             | Source                                                       |
+| ---------------------- | ------------------------------------------------------------ |
+| AnyConnect/OpenConnect | crates.io `anyconnect 0.1.0`, OpenConnect 9.20               |
+| Native UI              | `richerfu/arkit` commit `9f15744`                            |
+| TLS                    | Vendored OpenSSL                                             |
+| XML                    | Static OHOS libxml2 under `third_party/libxml2-ohos-aarch64` |
+
+If the static libxml2 prefix is missing, `scripts/build-libxml2-ohos.sh` builds
+it for `aarch64-unknown-linux-ohos`.
+
+### Build an unsigned release HAP
+
+```sh
 export OHOS_NDK_HOME=/Applications/DevEco-Studio.app/Contents/sdk/default/openharmony
 export DEVECO_SDK_HOME=/Applications/DevEco-Studio.app/Contents/sdk
 
-# 自动：libxml2 前缀 + vendored OpenSSL + --features native-anyconnect
-./scripts/package-hap.sh
-
-# 安装并启动
-./scripts/run-simulator.sh
+scripts/package-hap.sh
 ```
 
-仅 UI 壳（不链 OpenConnect）：
+Output:
 
-```bash
-FEATURES= ./scripts/package-hap.sh
+```text
+entry/build/default/outputs/default/entry-default-unsigned.hap
 ```
 
-手动：
+`package-hap.sh` enables `native-anyconnect` by default. A UI-only development
+shell can be built explicitly with:
 
-```bash
-. ./scripts/env-ohos-anyconnect.sh
-ohrs build --arch aarch --release -p hanyconnect_ui -- --features native-anyconnect
+```sh
+FEATURES= scripts/package-hap.sh
 ```
 
-## 连接行为
+The UI-only build does not provide a real OpenConnect tunnel and must not be
+used for VPN acceptance testing.
 
-| 构建 | 默认 dry-run | 说明 |
-| --- | --- | --- |
-| `--features native-anyconnect`（默认打包） | **false** | 真实 headend + TUN mainloop |
-| 无 feature | true | 平台编排 / mock 生命周期 |
-| `HANYCONNECT_DRY_RUN=1` | 强制 dry-run | E2E 不连 headend |
+### Manual native build
 
-在「配置」页填好服务器后会自动读取首次 AnyConnect 认证表单并展示全部
-auth group；选定的协议值会在正式认证的首个 XML POST 中作为
-`<group-select>` 发送。填写用户/密码后，主页点连接即可走完整协议。
-
-## 本地测试 VPN（ocserv）
-
-真连协议需要 AnyConnect 兼容 headend。本仓库提供一键本地服务：
-
-```bash
-# 需 Docker Desktop 运行中
-./scripts/dev-ocserv.sh start
-# 打印 Server URL / demo 账号；手机填局域网 IP，不要用 127.0.0.1
-
-./scripts/dev-ocserv.sh status
-./scripts/dev-ocserv.sh logs
-./scripts/dev-ocserv.sh stop
+```sh
+. scripts/env-ohos-anyconnect.sh
+ohrs build --arch aarch --release -p hanyconnect_ui -- \
+  --features native-anyconnect
 ```
 
-默认：`https://<本机局域网IP>:4433`，用户 `demo` / 密码 `demo`。  
-App 内需同时关闭「严格证书信任」和「阻止不可信服务器」（仅限该自签名开发环境）。
+## Install and launch
 
-## 测试
+List connected targets:
 
-```bash
-# 正式 HAP 的构建、安装和启动检查
-./scripts/e2e-device.sh
-
-# 主机协议（可选 live headend）
-./scripts/e2e-host-anyconnect.sh
+```sh
+hdc list targets
 ```
 
-设备连接场景通过真实 UI 配置执行；正式 Ability 不提供密码或自动连接 Want 注入入口。
+After configuring a valid HarmonyOS signing profile, install the signed HAP and
+launch the application:
 
-详见 [docs/e2e.md](docs/e2e.md)。
+```sh
+hdc install -r \
+  entry/build/default/outputs/default/entry-default-signed.hap
+hdc shell aa start -b com.richerfu.hanyconnect -a EntryAbility
+```
 
-## Arkit
+For a target selected by key, add `-t <target-key>` immediately after `hdc`.
 
-Arkit 依赖固定到
-[`richerfu/arkit@9f15744`](https://github.com/richerfu/arkit/commit/9f15744d891539635b22128b171bab3cb985dd22)
-（CSS-style RSX）；AnyConnect 使用 crates.io 的 `anyconnect 0.1.0`。
+The launch smoke script can build, install, start `EntryAbility`, and capture
+`hilog`:
 
-| 旧写法 | 新写法 |
-| --- | --- |
-| `percent_width: 1.0` | `width: "100%"` |
-| `alignment: 0` | `alignment: "top_start"` |
+```sh
+scripts/e2e-device.sh --target <target-key>
+```
 
-## 真机签名
+Its default unsigned HAP is intended for compatible development/QEMU
+environments. Physical devices normally require a correctly signed HAP.
 
-DevEco → **Signing Configs → Fix**（bundle `com.southorange.hanyconnect`）。
+## Local AnyConnect headend
 
-## 图标
+The repository includes a Docker-based `ocserv` environment for protocol
+development:
 
-分层图标在 `AppScope/resources/base/media/` 与 `entry/src/main/resources/base/media/`。
+```sh
+scripts/dev-ocserv.sh start
+scripts/dev-ocserv.sh url
+scripts/dev-ocserv.sh logs
+scripts/dev-ocserv.sh stop
+```
+
+The default account is `demo` / `demo`. A physical device must use the
+development host's LAN address instead of `127.0.0.1`. The generated server
+certificate is self-signed; disable strict certificate trust only for this
+isolated development profile.
+
+## OpenHarmony QEMU
+
+Use a standard-system image that includes VPN Manager, `VpnExtension`,
+`/dev/tun`, policy routing, SettingsData, and the system VPN authorization
+dialog. The [ohos-qemu](https://github.com/harmony-contrib/ohos-qemu) project
+provides suitable prebuilt images.
+
+After starting QEMU, connect the forwarded HDC endpoint:
+
+```sh
+hdc tconn 127.0.0.1:5555
+hdc list targets
+scripts/e2e-device.sh --target 127.0.0.1:5555
+```
+
+Approve the system VPN authorization dialog on first use. A successful app
+launch alone is not a tunnel test: create a real connection profile, connect to
+an accessible headend, and verify DNS plus TCP traffic under the application
+UID.
+
+Root `hdc shell` traffic is not necessarily subject to the application's VPN
+policy. The included probe can run with the target application UID:
+
+```sh
+OHOS_CLANG=/Applications/DevEco-Studio.app/Contents/sdk/default/openharmony/native/llvm/bin/aarch64-unknown-linux-ohos-clang
+"$OHOS_CLANG" scripts/device-net-probe.c -o smoke-logs/device-net-probe
+hdc file send smoke-logs/device-net-probe /data/local/tmp/device-net-probe
+hdc shell chmod 755 /data/local/tmp/device-net-probe
+
+# Replace 20010042 with the UID reported for com.richerfu.hanyconnect.
+hdc shell /data/local/tmp/device-net-probe 20010042 internal.example
+hdc shell /data/local/tmp/device-net-probe 20010042 10.10.10.1 443
+```
+
+## Tests
+
+Run the core unit and integration tests against the published AnyConnect crate:
+
+```sh
+cargo test -p hanyconnect_core --features native-anyconnect
+```
+
+Run the host-side AnyConnect checks, optionally against a real headend:
+
+```sh
+scripts/e2e-host-anyconnect.sh
+
+HANY_E2E_SERVER=https://vpn.example.com \
+HANY_E2E_USER=alice \
+HANY_E2E_PASSWORD='***' \
+scripts/e2e-host-anyconnect.sh
+```
+
+Build the full native library and release HAP:
+
+```sh
+scripts/package-hap.sh
+```
+
+See [end-to-end and device validation](docs/e2e.md) for the complete lifecycle,
+QEMU network probe, and DNS verification procedure. See
+[UI and protocol mapping](docs/ui-map.md) for the user-flow-to-implementation
+map.
+
+## Project structure
+
+```text
+AppScope/                       Application identity and launcher resources
+entry/                          HarmonyOS application module
+  src/main/ets/                 Entry, backup, and VPN extension abilities
+  src/main/cpp/types/           Generated N-API declarations
+  src/main/resources/           UI resources and backup policy
+crates/
+  hanyconnect_core/             Profiles, auth, OpenConnect, VPN lifecycle
+  hanyconnect_ui/               Native ArkUI interface and N-API exports
+scripts/                        Build, package, ocserv, smoke, and probe tools
+docs/                           Architecture, UI mapping, and validation notes
+third_party/                    OHOS static native dependencies
+```
+
+## LICENSE
+
+[MIT](./LICENSE-MIT) or [Apache 2.0](./LICENSE-APACHE)
