@@ -1,11 +1,6 @@
 use super::super::*;
-use arkit::ohos_arkui_binding::{
-    common::node::ArkUINode, types::attribute::ArkUINodeAttributeType,
-};
-use std::cell::RefCell;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
-use std::rc::Rc;
 
 pub(crate) fn diagnostics_page(state: Signal<State>) -> Element {
     let mut log_query = use_signal(String::new);
@@ -375,13 +370,6 @@ struct VirtualLogPalette {
     danger: u32,
 }
 
-#[derive(Clone)]
-struct VirtualLogRenderState {
-    items: Vec<VirtualLogRow>,
-    palette: VirtualLogPalette,
-    on_open: EventHandler<VirtualLogRow>,
-}
-
 #[derive(Clone, PartialEq, Eq, Hash)]
 struct VirtualLogArchiveRow {
     file_name: String,
@@ -390,14 +378,6 @@ struct VirtualLogArchiveRow {
     deleting: bool,
     export_disabled: bool,
     delete_disabled: bool,
-}
-
-#[derive(Clone)]
-struct VirtualLogArchiveRenderState {
-    items: Vec<VirtualLogArchiveRow>,
-    palette: VirtualLogPalette,
-    on_export: EventHandler<String>,
-    on_delete: EventHandler<String>,
 }
 
 #[component]
@@ -416,28 +396,14 @@ fn VirtualLogArchiveList(
             hasher.finish()
         })
         .collect::<Vec<_>>();
-    let render_state = use_hook(|| {
-        Rc::new(RefCell::new(VirtualLogArchiveRenderState {
-            items: items.clone(),
-            palette,
-            on_export,
-            on_delete,
-        }))
-    });
-    *render_state.borrow_mut() = VirtualLogArchiveRenderState {
-        items,
-        palette,
-        on_export,
-        on_delete,
-    };
-    let render_state_for_adapter = render_state.clone();
+    let render_items = items;
     let handle = use_virtual_node_adapter_items_keyed(VirtualKind::List, item_keys, move |index| {
-        let state = render_state_for_adapter.borrow();
-        render_virtual_log_archive_row(
-            &state.items[index as usize],
-            state.palette,
-            render_state_for_adapter.clone(),
-        )
+        let Some(item) = render_items.get(index as usize).cloned() else {
+            return rsx! {};
+        };
+        rsx! {
+            VirtualLogArchiveRowView { item, palette, on_export, on_delete }
+        }
     });
     let attach_handle = handle.clone();
     use_layout_frame_node(move |host_node, _frame| {
@@ -468,22 +434,14 @@ fn VirtualLogList(
             hasher.finish()
         })
         .collect::<Vec<_>>();
-    let render_state = use_hook(|| {
-        Rc::new(RefCell::new(VirtualLogRenderState {
-            items: items.clone(),
-            palette,
-            on_open,
-        }))
-    });
-    *render_state.borrow_mut() = VirtualLogRenderState {
-        items,
-        palette,
-        on_open,
-    };
-    let render_state_for_adapter = render_state.clone();
+    let render_items = items;
     let handle = use_virtual_node_adapter_items_keyed(VirtualKind::List, item_keys, move |index| {
-        let state = render_state_for_adapter.borrow();
-        render_virtual_log_row(&state.items[index as usize], state.palette, state.on_open)
+        let Some(item) = render_items.get(index as usize).cloned() else {
+            return rsx! {};
+        };
+        rsx! {
+            VirtualLogRowView { item, palette, on_open }
+        }
     });
     let attach_handle = handle.clone();
     use_layout_frame_node(move |host_node, _frame| {
@@ -499,193 +457,176 @@ fn VirtualLogList(
     }
 }
 
-fn render_virtual_log_archive_row(
-    item: &VirtualLogArchiveRow,
+#[component]
+fn VirtualLogArchiveRowView(
+    item: VirtualLogArchiveRow,
     palette: VirtualLogPalette,
-    interaction_state: Rc<RefCell<VirtualLogArchiveRenderState>>,
-) -> arkit::ohos_arkui_binding::common::error::ArkUIResult<ArkUINode> {
-    let title = virtual_log_text(
-        item.file_name.clone(),
-        14.0,
-        6,
-        palette.foreground,
-        20.0,
-        1,
-        0.0,
-    )?;
-    let detail = virtual_log_text(
-        item.detail.clone(),
-        11.0,
-        4,
-        palette.muted_foreground,
-        16.0,
-        1,
-        4.0,
-    )?;
-    let content = NodeBuilder::new("column")?
-        .attr(ArkUINodeAttributeType::LayoutWeight, 1.0_f32)?
-        .attr(ArkUINodeAttributeType::ColumnAlignItems, 0_i32)?
-        .attr(ArkUINodeAttributeType::ColumnJustifyContent, 2_i32)?
-        .child(title)?
-        .child(detail)?
-        .build();
+    on_export: EventHandler<String>,
+    on_delete: EventHandler<String>,
+) -> Element {
     let export_color = if item.export_disabled && !item.exporting {
         palette.muted_foreground
     } else {
         palette.foreground
     };
     let export_file_name = item.file_name.clone();
-    let export_state = interaction_state.clone();
-    let export_action = virtual_log_archive_action(
-        if item.exporting { "…" } else { "↓" },
-        export_color,
-        if item.exporting {
-            "exporting log"
-        } else {
-            "export log"
-        },
-        move || {
-            let state = export_state.borrow();
-            if state
-                .items
-                .iter()
-                .find(|item| item.file_name == export_file_name)
-                .is_some_and(|item| !item.export_disabled)
-            {
-                state.on_export.call(export_file_name.clone());
-            }
-        },
-    )?;
     let delete_color = if item.delete_disabled && !item.deleting {
         palette.muted_foreground
     } else {
         palette.danger
     };
     let delete_file_name = item.file_name.clone();
-    let delete_state = interaction_state.clone();
-    let delete_action = virtual_log_archive_action(
-        if item.deleting { "…" } else { "×" },
-        delete_color,
-        if item.deleting {
-            "deleting log"
-        } else if item.delete_disabled {
-            "stop recording before deleting this log"
-        } else {
-            "delete log"
-        },
-        move || {
-            let state = delete_state.borrow();
-            if state
-                .items
-                .iter()
-                .find(|item| item.file_name == delete_file_name)
-                .is_some_and(|item| !item.delete_disabled)
-            {
-                state.on_delete.call(delete_file_name.clone());
+    let accessibility_text = format!("{}，{}", item.file_name, item.detail);
+    rsx! {
+        row {
+            width: "100%",
+            height: 72.0,
+            background_color: palette.surface,
+            padding_top: 8.0,
+            padding_right: 8.0,
+            padding_bottom: 8.0,
+            padding_left: 14.0,
+            margin_bottom: 7.0,
+            border_width: 1.0,
+            border_color: palette.border,
+            border_radius: 9.0,
+            clip: true,
+            align_items: "center",
+            column {
+                layout_weight: 1.0,
+                align_items: "start",
+                justify_content: "center",
+                text {
+                    width: "100%",
+                    content: item.file_name,
+                    font_size: 14.0,
+                    font_weight: 600,
+                    font_color: palette.foreground,
+                    line_height: 20.0,
+                    max_lines: 1,
+                    text_overflow: "ellipsis",
+                }
+                text {
+                    width: "100%",
+                    content: item.detail,
+                    padding_top: 4.0,
+                    font_size: 11.0,
+                    font_weight: 400,
+                    font_color: palette.muted_foreground,
+                    line_height: 16.0,
+                    max_lines: 1,
+                    text_overflow: "ellipsis",
+                }
+                text { content: accessibility_text, width: 0.0, height: 0.0, opacity: 0.0 }
             }
-        },
-    )?;
-    Ok(NodeBuilder::new("row")?
-        .percent_width(1.0)?
-        .height(72.0)?
-        .background_color(format!("#{:08x}", palette.surface))?
-        .padding([8.0, 8.0, 8.0, 14.0])?
-        .margin([0.0, 0.0, 7.0, 0.0])?
-        .attr(ArkUINodeAttributeType::BorderWidth, vec![1.0; 4])?
-        .attr(ArkUINodeAttributeType::BorderColor, palette.border)?
-        .attr(ArkUINodeAttributeType::BorderRadius, vec![9.0; 4])?
-        .attr(ArkUINodeAttributeType::Clip, true)?
-        .attr(ArkUINodeAttributeType::RowAlignItems, 1_i32)?
-        .attr(
-            ArkUINodeAttributeType::AccessibilityText,
-            format!("{}，{}", item.file_name, item.detail),
-        )?
-        .child(content)?
-        .child(export_action)?
-        .child(delete_action)?
-        .build())
+            VirtualLogArchiveAction {
+                content: if item.exporting { "…".to_owned() } else { "↓".to_owned() },
+                color: export_color,
+                accessibility: if item.exporting {
+                    "exporting log".to_owned()
+                } else {
+                    "export log".to_owned()
+                },
+                disabled: item.export_disabled,
+                on_click: move |_| on_export.call(export_file_name.clone()),
+            }
+            VirtualLogArchiveAction {
+                content: if item.deleting { "…".to_owned() } else { "×".to_owned() },
+                color: delete_color,
+                accessibility: if item.deleting {
+                    "deleting log".to_owned()
+                } else if item.delete_disabled {
+                    "stop recording before deleting this log".to_owned()
+                } else {
+                    "delete log".to_owned()
+                },
+                disabled: item.delete_disabled,
+                on_click: move |_| on_delete.call(delete_file_name.clone()),
+            }
+        }
+    }
 }
 
-fn virtual_log_archive_action(
-    content: &str,
+#[component]
+fn VirtualLogArchiveAction(
+    content: String,
     color: u32,
-    accessibility: &str,
-    on_click: impl Fn() + 'static,
-) -> arkit::ohos_arkui_binding::common::error::ArkUIResult<ArkUINode> {
-    Ok(NodeBuilder::new("text")?
-        .width(40.0)?
-        .height(40.0)?
-        .font_size(if content == "…" { 18.0 } else { 20.0 })?
-        .font_color(format!("#{color:08x}"))?
-        .text_content(content.to_owned())?
-        .attr(ArkUINodeAttributeType::FontWeight, 5_i32)?
-        .attr(ArkUINodeAttributeType::TextAlign, 1_i32)?
-        .attr(ArkUINodeAttributeType::TextLineHeight, 40.0_f32)?
-        .attr(ArkUINodeAttributeType::TextMaxLines, 1_i32)?
-        .attr(
-            ArkUINodeAttributeType::AccessibilityText,
-            accessibility.to_owned(),
-        )?
-        .on_click(on_click)?
-        .build())
+    accessibility: String,
+    disabled: bool,
+    on_click: EventHandler<()>,
+) -> Element {
+    let font_size = if content == "…" { 18.0 } else { 20.0 };
+    rsx! {
+        text {
+            width: 40.0,
+            height: 40.0,
+            content,
+            font_size,
+            font_color: color,
+            font_weight: 500,
+            text_align: "center",
+            line_height: 40.0,
+            max_lines: 1,
+            enabled: !disabled,
+            opacity: if disabled { 0.55 } else { 1.0 },
+            onclick: move |_| {
+                if !disabled {
+                    on_click.call(());
+                }
+            },
+        }
+        text { content: accessibility, width: 0.0, height: 0.0, opacity: 0.0 }
+    }
 }
 
-fn render_virtual_log_row(
-    item: &VirtualLogRow,
+#[component]
+fn VirtualLogRowView(
+    item: VirtualLogRow,
     palette: VirtualLogPalette,
     on_open: EventHandler<VirtualLogRow>,
-) -> arkit::ohos_arkui_binding::common::error::ArkUIResult<ArkUINode> {
-    let meta = virtual_log_text(item.meta.clone(), 10.0, 5, item.color, 15.0, 1, 0.0)?;
-    let message = virtual_log_text(
-        item.preview.clone(),
-        12.0,
-        4,
-        palette.foreground,
-        17.0,
-        2,
-        4.0,
-    )?;
-    let node = NodeBuilder::new("column")?
-        .percent_width(1.0)?
-        .height(76.0)?
-        .background_color(format!("#{:08x}", palette.surface))?
-        .padding([9.0, 11.0, 9.0, 11.0])?
-        .margin([0.0, 0.0, 7.0, 0.0])?
-        .attr(ArkUINodeAttributeType::BorderWidth, vec![1.0; 4])?
-        .attr(ArkUINodeAttributeType::BorderColor, palette.border)?
-        .attr(ArkUINodeAttributeType::BorderRadius, vec![9.0; 4])?
-        .attr(ArkUINodeAttributeType::Clip, true)?
-        .attr(ArkUINodeAttributeType::ColumnAlignItems, 0_i32)?
-        .attr(
-            ArkUINodeAttributeType::AccessibilityText,
-            format!("{}，{}", item.meta, item.message),
-        )?
-        .child(meta)?
-        .child(message)?;
-    let item = item.clone();
-    Ok(node.on_click(move || on_open.call(item.clone()))?.build())
-}
-
-fn virtual_log_text(
-    content: String,
-    size: f32,
-    weight: i32,
-    color: u32,
-    line_height: f32,
-    max_lines: i32,
-    padding_top: f32,
-) -> arkit::ohos_arkui_binding::common::error::ArkUIResult<ArkUINode> {
-    Ok(NodeBuilder::new("text")?
-        .percent_width(1.0)?
-        .font_size(size)?
-        .font_color(format!("#{color:08x}"))?
-        .text_content(content)?
-        .padding([padding_top, 0.0, 0.0, 0.0])?
-        .attr(ArkUINodeAttributeType::FontWeight, weight)?
-        .attr(ArkUINodeAttributeType::TextLineHeight, line_height)?
-        .attr(ArkUINodeAttributeType::TextMaxLines, max_lines)?
-        .attr(ArkUINodeAttributeType::TextOverflow, 2_i32)?
-        .build())
+) -> Element {
+    let accessibility_text = format!("{}，{}", item.meta, item.message);
+    let open_item = item.clone();
+    rsx! {
+        column {
+            width: "100%",
+            height: 76.0,
+            background_color: palette.surface,
+            padding_top: 9.0,
+            padding_right: 11.0,
+            padding_bottom: 9.0,
+            padding_left: 11.0,
+            margin_bottom: 7.0,
+            border_width: 1.0,
+            border_color: palette.border,
+            border_radius: 9.0,
+            clip: true,
+            align_items: "start",
+            onclick: move |_| on_open.call(open_item.clone()),
+            text {
+                width: "100%",
+                content: item.meta,
+                font_size: 10.0,
+                font_weight: 500,
+                font_color: item.color,
+                line_height: 15.0,
+                max_lines: 1,
+                text_overflow: "ellipsis",
+            }
+            text {
+                width: "100%",
+                content: item.preview,
+                padding_top: 4.0,
+                font_size: 12.0,
+                font_weight: 400,
+                font_color: palette.foreground,
+                line_height: 17.0,
+                max_lines: 2,
+                text_overflow: "ellipsis",
+            }
+            text { content: accessibility_text, width: 0.0, height: 0.0, opacity: 0.0 }
+        }
+    }
 }
 
 fn log_detail_dialog(

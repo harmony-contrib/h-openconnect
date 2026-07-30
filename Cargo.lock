@@ -45,7 +45,7 @@ checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 [[package]]
 name = "arkit"
 version = "0.0.1-beta.0"
-source = "git+https://github.com/richerfu/arkit.git?rev=765b1f4ff591fcd02af6fdbc115d28d297f70d6a#765b1f4ff591fcd02af6fdbc115d28d297f70d6a"
+source = "git+https://github.com/richerfu/arkit.git?rev=75ff91c619f5e4774fe6badea5cd9c619f189b2f#75ff91c619f5e4774fe6badea5cd9c619f189b2f"
 dependencies = [
  "arkit_animation",
  "arkit_arkui",
@@ -66,7 +66,7 @@ dependencies = [
 [[package]]
 name = "arkit_animation"
 version = "0.0.1-beta.0"
-source = "git+https://github.com/richerfu/arkit.git?rev=765b1f4ff591fcd02af6fdbc115d28d297f70d6a#765b1f4ff591fcd02af6fdbc115d28d297f70d6a"
+source = "git+https://github.com/richerfu/arkit.git?rev=75ff91c619f5e4774fe6badea5cd9c619f189b2f#75ff91c619f5e4774fe6badea5cd9c619f189b2f"
 dependencies = [
  "arkit_animation_core",
  "arkit_hooks",
@@ -81,7 +81,7 @@ dependencies = [
 [[package]]
 name = "arkit_animation_core"
 version = "0.0.1-beta.0"
-source = "git+https://github.com/richerfu/arkit.git?rev=765b1f4ff591fcd02af6fdbc115d28d297f70d6a#765b1f4ff591fcd02af6fdbc115d28d297f70d6a"
+source = "git+https://github.com/richerfu/arkit.git?rev=75ff91c619f5e4774fe6badea5cd9c619f189b2f#75ff91c619f5e4774fe6badea5cd9c619f189b2f"
 dependencies = [
  "oxc_index",
  "rustc-hash",
@@ -91,7 +91,7 @@ dependencies = [
 [[package]]
 name = "arkit_arkui"
 version = "0.0.1-beta.0"
-source = "git+https://github.com/richerfu/arkit.git?rev=765b1f4ff591fcd02af6fdbc115d28d297f70d6a#765b1f4ff591fcd02af6fdbc115d28d297f70d6a"
+source = "git+https://github.com/richerfu/arkit.git?rev=75ff91c619f5e4774fe6badea5cd9c619f189b2f#75ff91c619f5e4774fe6badea5cd9c619f189b2f"
 dependencies = [
  "arkit_elements",
  "dioxus-core",
@@ -104,7 +104,7 @@ dependencies = [
 [[package]]
 name = "arkit_derive"
 version = "0.0.1-beta.0"
-source = "git+https://github.com/richerfu/arkit.git?rev=765b1f4ff591fcd02af6fdbc115d28d297f70d6a#765b1f4ff591fcd02af6fdbc115d28d297f70d6a"
+source = "git+https://github.com/richerfu/arkit.git?rev=75ff91c619f5e4774fe6badea5cd9c619f189b2f#75ff91c619f5e4774fe6badea5cd9c619f189b2f"
 dependencies = [
  "proc-macro-crate",
  "proc-macro2",
@@ -115,7 +115,7 @@ dependencies = [
 [[package]]
 name = "arkit_elements"
 version = "0.0.1-beta.0"
-source = "git+https://github.com/richerfu/arkit.git?rev=765b1f4ff591fcd02af6fdbc115d28d297f70d6a#765b1f4ff591fcd02af6fdbc115d28d297f70d6a"
+source = "git+https://github.com/richerfu/arkit.git?rev=75ff91c619f5e4774fe6badea5cd9c619f189b2f#75ff91c619f5e4774fe6badea5cd9c619f189b2f"
 dependencies = [
  "dioxus-core",
 ]
@@ -123,7 +123,7 @@ dependencies = [
 [[package]]
 name = "arkit_hooks"
 version = "0.0.1-beta.0"
-source = "git+https://github.com/richerfu/arkit.git?rev=765b1f4ff591fcd02af6fdbc115d28d297f70d6a#765b1f4ff591fcd02af6fdbc115d28d297f70d6a"
+source = "git+https://github.com/richerfu/arkit.git?rev=75ff91c619f5e4774fe6badea5cd9c619f189b2f#75ff91c619f5e4774fe6badea5cd9c619f189b2f"
 dependencies = [
  "arkit_arkui",
  "arkit_prelude",
@@ -137,7 +137,7 @@ dependencies = [
 [[package]]
 name = "arkit_i18n"
 version = "0.0.1-beta.0"
-source = "git+https://github.com/richerfu/arkit.git?rev=765b1f4ff591fcd02af6fdbc115d28d297f70d6a#765b1f4ff591fcd02af6fdbc115d28d297f70d6a"
+source = "git+https://github.com/richerfu/arkit.git?rev=75ff91c619f5e4774fe6badea5cd9c619f189b2f#75ff91c619f5e4774fe6badea5cd9c619f189b2f"
 dependencies = [
  "arkit_i18n_macros",
  "dioxus-core",
@@ -152,7 +152,7 @@ dependencies = [
 [[package]]
 name = "arkit_i18n_macros"
 version = "0.0.1-beta.0"
-source = "git+https://github.com/richerfu/arkit.git?rev=765b1f4ff591fcd02af6fdbc115d28d297f70d6a#765b1f4ff591fcd02af6fdbc115d28d297f70d6a"
+source = "git+https://github.com/richerfu/arkit.git?rev=75ff91c619f5e4774fe6badea5cd9c619f189b2f#75ff91c619f5e4774fe6badea5cd9c619f189b2f"
 dependencies = [
  "fluent-syntax",
  "proc-macro-crate",
@@ -165,7 +165,7 @@ dependencies = [
 [[package]]
 name = "arkit_icon"
 version = "0.0.1-beta.0"
-source = "git+https://github.com/richerfu/arkit.git?rev=765b1f4ff591fcd02af6fdbc115d28d297f70d6a#765b1f4ff591fcd02af6fdbc115d28d297f70d6a"
+source = "git+https://github.com/richerfu/arkit.git?rev=75ff91c619f5e4774fe6badea5cd9c619f189b2f#75ff91c619f5e4774fe6badea5cd9c619f189b2f"
 dependencies = [
  "arkit_arkui",
  "arkit_prelude",
@@ -177,7 +177,7 @@ dependencies = [
 [[package]]
 name = "arkit_prelude"
 version = "0.0.1-beta.0"
-source = "git+https://github.com/richerfu/arkit.git?rev=765b1f4ff591fcd02af6fdbc115d28d297f70d6a#765b1f4ff591fcd02af6fdbc115d28d297f70d6a"
+source = "git+https://github.com/richerfu/arkit.git?rev=75ff91c619f5e4774fe6badea5cd9c619f189b2f#75ff91c619f5e4774fe6badea5cd9c619f189b2f"
 dependencies = [
  "arkit_elements",
  "dioxus-core",
@@ -189,7 +189,7 @@ dependencies = [
 [[package]]
 name = "arkit_router"
 version = "0.0.1-beta.0"
-source = "git+https://github.com/richerfu/arkit.git?rev=765b1f4ff591fcd02af6fdbc115d28d297f70d6a#765b1f4ff591fcd02af6fdbc115d28d297f70d6a"
+source = "git+https://github.com/richerfu/arkit.git?rev=75ff91c619f5e4774fe6badea5cd9c619f189b2f#75ff91c619f5e4774fe6badea5cd9c619f189b2f"
 dependencies = [
  "arkit_animation",
  "arkit_prelude",
@@ -201,7 +201,7 @@ dependencies = [
 [[package]]
 name = "arkit_runtime"
 version = "0.0.1-beta.0"
-source = "git+https://github.com/richerfu/arkit.git?rev=765b1f4ff591fcd02af6fdbc115d28d297f70d6a#765b1f4ff591fcd02af6fdbc115d28d297f70d6a"
+source = "git+https://github.com/richerfu/arkit.git?rev=75ff91c619f5e4774fe6badea5cd9c619f189b2f#75ff91c619f5e4774fe6badea5cd9c619f189b2f"
 dependencies = [
  "arkit_arkui",
  "arkit_elements",
@@ -216,7 +216,7 @@ dependencies = [
 [[package]]
 name = "arkit_shadcn"
 version = "0.0.1-beta.0"
-source = "git+https://github.com/richerfu/arkit.git?rev=765b1f4ff591fcd02af6fdbc115d28d297f70d6a#765b1f4ff591fcd02af6fdbc115d28d297f70d6a"
+source = "git+https://github.com/richerfu/arkit.git?rev=75ff91c619f5e4774fe6badea5cd9c619f189b2f#75ff91c619f5e4774fe6badea5cd9c619f189b2f"
 dependencies = [
  "arkit_animation",
  "arkit_arkui",

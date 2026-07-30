@@ -96,7 +96,7 @@ pub(crate) fn about_page(state: Signal<State>) -> Element {
                     open_source_row(
                         state,
                         "layout-template",
-                        "Arkit 765b1f4",
+                        "Arkit 75ff91c",
                         "MIT OR Apache-2.0",
                         "https://github.com/richerfu/arkit",
                     ),
