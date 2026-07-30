@@ -15,8 +15,8 @@ use arkit::router::{use_back_handler, use_navigator, use_route, AnimatedOutlet, 
 use arkit::shadcn::components::{
     Badge, BadgeVariant, BottomNavigation, BottomNavigationItem, ButtonSize, CardContent,
     CardHeader, CardTitle, Field, FieldContent, FieldDescription, FieldOrientation, FieldTitle,
-    Form, FormItem, RadioGroup, Select, Separator, Sonner, SonnerPosition, SonnerToast, Spinner,
-    Switch, Textarea, ToastVariant,
+    Form, FormItem, InputMode, RadioGroup, Select, Separator, Sonner, SonnerPosition, SonnerToast,
+    Spinner, Switch, Textarea, ToastVariant,
 };
 use arkit::shadcn::theme::{use_theme, Theme, ThemeMode, ThemePreset, ThemeProvider};
 use pages::{

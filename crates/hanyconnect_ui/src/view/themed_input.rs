@@ -13,6 +13,8 @@ pub(super) struct InputProps {
     pub placeholder: Option<String>,
     pub value: Option<String>,
     #[props(default)]
+    pub mode: InputMode,
+    #[props(default)]
     pub height: Option<f32>,
     pub width: Option<String>,
     #[props(default)]
@@ -28,6 +30,16 @@ pub(super) struct InputProps {
 #[component]
 pub(super) fn Input(props: InputProps) -> Element {
     let theme = use_theme();
+    let input_type = match props.mode {
+        InputMode::Text => "text",
+        InputMode::Password => "password",
+        InputMode::Number => "number",
+    };
+    let input_filter = if props.mode == InputMode::Number {
+        Some("[0-9]")
+    } else {
+        None
+    };
     let on_change = props.on_change;
     let on_click = props.on_click;
 
@@ -35,8 +47,9 @@ pub(super) fn Input(props: InputProps) -> Element {
         textinput {
             value: if let Some(value) = props.value { value },
             placeholder: if let Some(placeholder) = props.placeholder { placeholder },
-            input_type: "text",
-            show_password_icon: false,
+            input_type,
+            input_filter: if let Some(filter) = input_filter { filter },
+            show_password_icon: props.mode == InputMode::Password,
             placeholder_color: with_alpha(theme.colors.muted_foreground, 0x80),
             caret_color: if props.read_only {
                 0x00000000
@@ -68,7 +81,15 @@ pub(super) fn Input(props: InputProps) -> Element {
             on_change: move |event| {
                 if !props.disabled && !props.read_only {
                     if let Some(handler) = on_change {
-                        handler.call(event.data().string_value.clone());
+                        let value = event.data().string_value.clone();
+                        handler.call(if props.mode == InputMode::Number {
+                            value
+                                .chars()
+                                .filter(char::is_ascii_digit)
+                                .collect::<String>()
+                        } else {
+                            value
+                        });
                     }
                 }
             },

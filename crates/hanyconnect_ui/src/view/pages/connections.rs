@@ -436,6 +436,7 @@ pub(crate) fn connection_editor_page(state: Signal<State>, id: String) -> Elemen
                                 Input {
                                     value: Some(draft.password.clone()),
                                     width: Some("100%".to_owned()),
+                                    mode: InputMode::Password,
                                     on_change: move |value| dispatch(state, Action::SetDraftPassword(value)),
                                 }
                             }
@@ -602,6 +603,7 @@ pub(crate) fn connection_editor_page(state: Signal<State>, id: String) -> Elemen
                                         Input {
                                             value: Some(draft.key_password.clone()),
                                             width: Some("100%".to_owned()),
+                                            mode: InputMode::Password,
                                             on_change: move |value| dispatch(state, Action::SetDraftKeyPassword(value)),
                                         }
                                     }
@@ -640,6 +642,7 @@ pub(crate) fn connection_editor_page(state: Signal<State>, id: String) -> Elemen
                                         Input {
                                             value: Some(draft.secondary_key_password.clone()),
                                             width: Some("100%".to_owned()),
+                                            mode: InputMode::Password,
                                             on_change: move |value| dispatch(state, Action::SetDraftSecondaryKeyPassword(value)),
                                         }
                                     }
