@@ -37,8 +37,8 @@ pub use log_recording::{LogArchiveSummary, LogRecordingStatus};
 pub use model::{
     AuthChallenge, AuthChallengeReply, AuthField, AuthFieldChoice, AuthFieldKey, AuthFieldKind,
     AuthFieldValue, AuthGroupDiscovery, AuthMethod, ConnectRequest, ConnectionLifecycle,
-    ConnectionProfile, NetworkSnapshot, ProtocolKind, SessionSnapshot, SessionStats, SoftwareToken,
-    SplitTunnelMode, VpnOptions,
+    ConnectionProfile, DiagnosticEntry, NetworkSnapshot, ProtocolKind, SessionSnapshot,
+    SessionStats, SoftwareToken, SplitTunnelMode, VpnOptions,
 };
 pub use store::{Preferences, ProfileStore};
 

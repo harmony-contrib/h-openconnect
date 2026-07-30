@@ -2,27 +2,32 @@ mod pages;
 mod route;
 
 use crate::l10n::{strings, tr, UiLocale};
+use crate::log_filter::{matches_log_filter_normalized, normalize_log_query, LogLevelFilter};
 use crate::model::{
     format_bytes, format_duration, AuthMethod, ConnectionLifecycle, ProtocolKind, SoftwareToken,
     SplitTunnelMode, VpnConnection,
 };
 use crate::platform_callbacks;
 use crate::state::{reduce, Action, Command, LanguagePreference, State, ThemePreference};
+use crate::time_format;
 use arkit::dioxus_core::EventHandler;
 use arkit::prelude::*;
 use arkit::router::{use_back_handler, use_navigator, use_route, AnimatedOutlet, Router};
 use arkit::shadcn::components::{
-    Badge, BadgeVariant, BottomNavigation, BottomNavigationItem, ButtonSize, CardContent,
-    CardHeader, CardTitle, Field, FieldContent, FieldDescription, FieldOrientation, FieldTitle,
-    Form, FormItem, Input, InputMode, RadioGroup, Select, Separator, Sonner, SonnerPosition,
-    SonnerToast, Spinner, Switch, Textarea, ToastVariant,
+    Badge, BadgeVariant, BottomNavigation, BottomNavigationItem, ButtonSize, Card, CardContent,
+    CardHeader, CardTitle, DialogFooter, DialogHeader, Field, FieldContent, FieldDescription,
+    FieldOrientation, FieldTitle, Form, FormItem, Input, InputMode, RadioGroup, Select, Separator,
+    Sonner, SonnerPosition, SonnerToast, Spinner, Switch, Textarea, ToastVariant,
 };
-use arkit::shadcn::theme::{use_theme, Theme, ThemeMode, ThemePreset, ThemeProvider};
+use arkit::shadcn::theme::{
+    spacing, typography, use_theme, Theme, ThemeMode, ThemePreset, ThemeProvider,
+};
 use pages::{
     about_page, appearance_page, auth_challenge_overlay, connection_editor_page, connections_page,
     diagnostics_page, home_page, more_page, statistics_page,
 };
 use route::Route;
+use std::cell::Cell;
 use std::rc::Rc;
 
 fn bg() -> u32 {
@@ -153,6 +158,181 @@ fn FlatButton(props: FlatButtonProps) -> Element {
     }
 }
 
+#[derive(Props, Clone, PartialEq)]
+struct FlatSegmentedProps {
+    options: Vec<String>,
+    selected: String,
+    on_change: EventHandler<String>,
+}
+
+/// Full-width segmented control matching Paws: a muted track with a raised
+/// active segment and no dividers.
+#[component]
+fn FlatSegmented(props: FlatSegmentedProps) -> Element {
+    let theme = use_theme();
+    let options = props
+        .options
+        .into_iter()
+        .map(|option| {
+            let active = option == props.selected;
+            let next = option.clone();
+            let on_change = props.on_change;
+            rsx! {
+                row {
+                    key: "{option}",
+                    layout_weight: 1.0,
+                    height: "100%",
+                    padding_left: 2.0,
+                    padding_right: 2.0,
+                    button {
+                        button_type: "normal",
+                        width: "100%",
+                        height: 32.0,
+                        background_color: if active { theme.colors.background } else { 0x00000000 },
+                        foreground_color: theme.colors.foreground,
+                        border_width: if active { 1.0 } else { 0.0 },
+                        border_color: if active { theme.colors.border } else { 0x00000000 },
+                        border_radius: theme.radii.md,
+                        onclick: move |_| {
+                            let next = next.clone();
+                            arkit::queue_ui_loop(move || on_change.call(next));
+                        },
+                        text {
+                            content: option,
+                            font_size: typography::SM,
+                            font_weight: if active { 600 } else { 500 },
+                            font_color: if active {
+                                theme.colors.foreground
+                            } else {
+                                theme.colors.muted_foreground
+                            },
+                        }
+                    }
+                }
+            }
+        })
+        .collect::<Vec<_>>();
+
+    rsx! {
+        row {
+            width: "100%",
+            height: 40.0,
+            padding_left: spacing::XXS,
+            padding_right: spacing::XXS,
+            align_items: "center",
+            border_width: 0.0,
+            border_radius: theme.radii.lg,
+            background_color: theme.colors.muted,
+            clip: true,
+            {options.into_iter()}
+        }
+    }
+}
+
+#[derive(Props, Clone, PartialEq)]
+struct FlatDialogProps {
+    open: bool,
+    #[props(default)]
+    content_key: u64,
+    on_close: EventHandler<()>,
+    children: Element,
+}
+
+/// Centered, backdrop-dismissible flat dialog matching the Paws log details
+/// and history deletion confirmation interaction.
+#[component]
+fn FlatDialog(props: FlatDialogProps) -> Element {
+    let theme = use_theme();
+    let close = props.on_close;
+    let panel_close = close;
+    let panel = rsx! {
+        stack {
+            width: "100%",
+            max_width_constraint: 512.0,
+            alignment: "top-start",
+            border_radius: theme.radii.lg,
+            border_width: 1.0,
+            border_color: theme.colors.border,
+            background_color: theme.colors.background,
+            clip: true,
+            column {
+                width: "100%",
+                padding: spacing::XXL,
+                {props.children}
+            }
+            row {
+                width: "100%",
+                justify_content: "end",
+                padding_top: 14.0,
+                padding_right: 14.0,
+                hit_test_behavior: "transparent",
+                button {
+                    button_type: "normal",
+                    width: 28.0,
+                    height: 28.0,
+                    padding: 0.0,
+                    background_color: 0x00000000,
+                    border_width: 0.0,
+                    border_radius: theme.radii.sm,
+                    clip: true,
+                    focusable: false,
+                    focus_on_touch: false,
+                    alignment: "center",
+                    onclick: move |_| panel_close.call(()),
+                    {arkit::icon("x", 18.0, theme.colors.muted_foreground)}
+                }
+            }
+        }
+    };
+    use_flat_dialog_overlay(props.open, props.content_key, panel, close);
+    rsx! {}
+}
+
+fn use_flat_dialog_overlay(
+    open: bool,
+    content_key: u64,
+    panel: Element,
+    on_dismiss: EventHandler<()>,
+) {
+    let overlay = arkit::use_overlay();
+    let last_open = use_hook(|| Rc::new(Cell::new(false)));
+    let spec = arkit::hooks::ModalOverlaySpec {
+        open,
+        presentation: arkit::hooks::ModalPresentation::CenteredDialog,
+        dismiss_on_backdrop: true,
+        backdrop_color: 0x80000000,
+        viewport_inset: 8.0,
+    };
+
+    let effect_overlay = overlay.clone();
+    let effect_last_open = last_open.clone();
+    use_effect(use_reactive(
+        (&open, &content_key),
+        move |(open, _content_key)| {
+            if open {
+                let panel = panel.clone();
+                effect_overlay.show_modal_with_dismiss(
+                    spec,
+                    move || panel.clone(),
+                    move || on_dismiss.call(()),
+                );
+                effect_last_open.set(true);
+            } else if effect_last_open.get() {
+                effect_overlay.dismiss();
+                effect_last_open.set(false);
+            }
+        },
+    ));
+
+    let cleanup_overlay = overlay.clone();
+    let cleanup_last_open = last_open.clone();
+    use_drop(move || {
+        if cleanup_last_open.get() {
+            cleanup_overlay.dismiss();
+        }
+    });
+}
+
 #[component]
 pub(crate) fn App() -> Element {
     let state = use_signal(State::new);
@@ -269,6 +449,20 @@ fn run_command(state: Signal<State>, command: Command<Action>) {
 }
 
 fn scaffold(state: Signal<State>, page: Route, actions: Element, body: Element) -> Element {
+    scaffold_layout(state, page, actions, body, true)
+}
+
+fn fixed_scaffold(state: Signal<State>, page: Route, actions: Element, body: Element) -> Element {
+    scaffold_layout(state, page, actions, body, false)
+}
+
+fn scaffold_layout(
+    state: Signal<State>,
+    page: Route,
+    actions: Element,
+    body: Element,
+    scrollable: bool,
+) -> Element {
     let current = state.read().clone();
     let parent = page.parent();
     use_parent_back_handler(parent.clone());
@@ -325,17 +519,31 @@ fn scaffold(state: Signal<State>, page: Route, actions: Element, body: Element) 
             column {
                 layout_weight: 1.0,
                 width: "100%",
-                scroll {
-                    width: "100%",
-                    height: "100%",
-                    alignment: "top_start",
-                    background_color: bg(),
-                    scroll_bar: "auto",
+                if scrollable {
+                    scroll {
+                        width: "100%",
+                        height: "100%",
+                        alignment: "top_start",
+                        background_color: bg(),
+                        scroll_bar: "auto",
+                        column {
+                            width: "100%",
+                            padding_top: 16.0,
+                            padding_right: 16.0,
+                            padding_bottom: end_pad,
+                            padding_left: 16.0,
+                            align_items: "stretch",
+                            justify_content: "start",
+                            {body}
+                        }
+                    }
+                } else {
                     column {
+                        layout_weight: 1.0,
                         width: "100%",
                         padding_top: 16.0,
                         padding_right: 16.0,
-                        padding_bottom: end_pad,
+                        padding_bottom: 16.0,
                         padding_left: 16.0,
                         align_items: "stretch",
                         justify_content: "start",
@@ -411,6 +619,63 @@ fn section_label(title: impl Into<String>) -> Element {
             font_weight: 650,
             font_color: subtle(),
         }
+    }
+}
+
+fn empty_state(
+    icon: &'static str,
+    title: impl Into<String>,
+    subtitle: impl Into<String>,
+) -> Element {
+    let title = title.into();
+    let subtitle = subtitle.into();
+    let theme = use_theme();
+    rsx! {
+        Card {
+            shadow: Some(false),
+            column {
+                width: "100%",
+                height: 190.0,
+                padding: spacing::XXL,
+                align_items: "center",
+                justify_content: "center",
+                row {
+                    width: 48.0,
+                    height: 48.0,
+                    align_items: "center",
+                    justify_content: "center",
+                    background_color: theme.colors.muted,
+                    border_radius: theme.radii.xl,
+                    {arkit::icon(icon, 22.0, theme.colors.muted_foreground)}
+                }
+                text {
+                    content: title,
+                    margin_top: spacing::MD,
+                    font_size: typography::MD,
+                    line_height: 22.0,
+                    font_weight: 600,
+                    font_color: theme.colors.foreground,
+                }
+                text {
+                    content: subtitle,
+                    margin_top: spacing::XXS,
+                    font_size: typography::SM,
+                    line_height: 20.0,
+                    font_color: theme.colors.muted_foreground,
+                    text_align: "center",
+                }
+            }
+        }
+    }
+}
+
+fn truncate_text(value: &str, max_chars: usize) -> String {
+    let mut chars = value.chars();
+    let prefix = chars.by_ref().take(max_chars).collect::<String>();
+    if chars.next().is_some() {
+        format!("{prefix}…")
+    } else {
+        prefix
     }
 }
 

@@ -5,9 +5,11 @@ use napi_derive_ohos::napi;
 use napi_ohos::{bindgen_prelude::Object, Error, Result, Status};
 
 mod l10n;
+mod log_filter;
 mod model;
 mod platform_callbacks;
 mod state;
+mod time_format;
 mod view;
 
 #[entry]

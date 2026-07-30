@@ -53,7 +53,7 @@ impl Route {
             Self::Statistics {} => "activity",
             Self::More {} => "menu",
             Self::Appearance {} => "palette",
-            Self::Diagnostics {} => "stethoscope",
+            Self::Diagnostics {} => "scroll-text",
             Self::About {} => "badge-info",
         }
     }

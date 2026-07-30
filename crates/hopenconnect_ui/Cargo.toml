@@ -26,6 +26,7 @@ napi-derive-ohos.workspace = true
 napi-ohos.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+time.workspace = true
 tokio.workspace = true
 
 [build-dependencies]
