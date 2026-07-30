@@ -149,4 +149,3 @@ export interface WindowStageEventCallback {
   onWindowRectChange: (arg: object) => void
   onAvoidAreaChange: (arg: object) => void
 }
-
