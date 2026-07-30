@@ -8,6 +8,7 @@ export interface NativePlatformIdentityApi {
     sdkApiVersion: string,
     deviceType: string,
     appVersion: string,
+    uniqueId: string,
   ): void;
 }
 
@@ -21,5 +22,6 @@ export function configureNativePlatformIdentity(nativeApi: NativePlatformIdentit
     deviceInfo.sdkApiVersion.toString(),
     deviceInfo.deviceType,
     bundleInfo.versionName,
+    deviceInfo.ODID,
   );
 }

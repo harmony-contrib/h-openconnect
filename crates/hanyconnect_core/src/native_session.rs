@@ -430,12 +430,19 @@ fn apply_openconnect_prefs(
     client.set_exact_user_agent(effective_user_agent(profile))?;
     client.set_client_version(effective_client_version(profile))?;
     client.set_reported_os(os)?;
-    let unique_id = profile.id.trim();
-    if !unique_id.is_empty() {
-        if os == OPENHARMONY_REPORTED_OS {
-            let identity = mobile_identity();
+    if os == OPENHARMONY_REPORTED_OS {
+        let identity = mobile_identity();
+        let unique_id = if identity.unique_id.is_empty() {
+            profile.id.trim()
+        } else {
+            identity.unique_id.as_str()
+        };
+        if !unique_id.is_empty() {
             client.set_mobile_info(&identity.platform_version, &identity.device_type, unique_id)?;
-        } else if matches!(os, "android" | "apple-ios") {
+        }
+    } else if matches!(os, "android" | "apple-ios") {
+        let unique_id = profile.id.trim();
+        if !unique_id.is_empty() {
             client.set_mobile_info("1.0", os, unique_id)?;
         }
     }
@@ -1425,7 +1432,10 @@ mod tests {
             effective_user_agent(&profile),
             format!("AnyConnect OpenHarmony {}", env!("CARGO_PKG_VERSION"))
         );
-        assert_eq!(effective_client_version(&profile), "4.10.07061");
+        assert_eq!(
+            effective_client_version(&profile),
+            env!("CARGO_PKG_VERSION")
+        );
         assert_eq!(
             openconnect_reported_os(effective_reported_os(&profile)),
             "OpenHarmony"

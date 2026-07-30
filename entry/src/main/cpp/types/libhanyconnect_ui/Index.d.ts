@@ -23,7 +23,7 @@ export declare function configureAppHome(homeDir: string): void
   */
 export declare function configureAppHomeForExtension(homeDir: string): void
 
-export declare function configurePlatformIdentity(osFullName: string, displayVersion: string, sdkApiVersion: string, deviceType: string, appVersion: string): void
+export declare function configurePlatformIdentity(osFullName: string, displayVersion: string, sdkApiVersion: string, deviceType: string, appVersion: string, uniqueId: string): void
 
 export declare function configureSystemColorMode(colorMode: number): void
 

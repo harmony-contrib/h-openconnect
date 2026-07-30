@@ -1,7 +1,6 @@
 use std::sync::{OnceLock, RwLock};
 
 pub(crate) const OPENHARMONY_REPORTED_OS: &str = "OpenHarmony";
-const DEFAULT_ANYCONNECT_VERSION: &str = "4.10.07061";
 const ANYCONNECT_USER_AGENT_PREFIX: &str = "AnyConnect OpenHarmony";
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -9,6 +8,7 @@ struct PlatformIdentity {
     os_version: String,
     device_type: String,
     app_version: String,
+    unique_id: String,
 }
 
 impl Default for PlatformIdentity {
@@ -17,6 +17,7 @@ impl Default for PlatformIdentity {
             os_version: String::new(),
             device_type: String::new(),
             app_version: env!("CARGO_PKG_VERSION").to_owned(),
+            unique_id: String::new(),
         }
     }
 }
@@ -26,6 +27,7 @@ impl Default for PlatformIdentity {
 pub(crate) struct MobileIdentity {
     pub platform_version: String,
     pub device_type: String,
+    pub unique_id: String,
 }
 
 static PLATFORM_IDENTITY: OnceLock<RwLock<PlatformIdentity>> = OnceLock::new();
@@ -44,6 +46,7 @@ pub fn configure_platform_identity(
     sdk_api_version: String,
     device_type: String,
     app_version: String,
+    unique_id: String,
 ) {
     let identity = PlatformIdentity::from_platform(
         &os_full_name,
@@ -51,6 +54,7 @@ pub fn configure_platform_identity(
         &sdk_api_version,
         &device_type,
         &app_version,
+        &unique_id,
     );
     match platform_identity().write() {
         Ok(mut current) => *current = identity,
@@ -63,7 +67,7 @@ pub fn default_user_agent() -> String {
 }
 
 pub fn default_client_version() -> String {
-    DEFAULT_ANYCONNECT_VERSION.to_owned()
+    current_platform_identity().client_version()
 }
 
 #[cfg(any(feature = "native-anyconnect", test))]
@@ -95,12 +99,14 @@ impl PlatformIdentity {
         sdk_api_version: &str,
         device_type: &str,
         app_version: &str,
+        unique_id: &str,
     ) -> Self {
         let os_full_name = sanitized_header_component(os_full_name);
         let display_version = sanitized_header_component(display_version);
         let sdk_api_version = sanitized_header_component(sdk_api_version);
         let device_type = sanitized_header_component(device_type);
         let app_version = sanitized_version(app_version);
+        let unique_id = sanitized_identifier(unique_id);
 
         let os_version = openharmony_version(&os_full_name)
             .filter(|version| !version.is_empty())
@@ -116,11 +122,16 @@ impl PlatformIdentity {
             } else {
                 app_version
             },
+            unique_id,
         }
     }
 
     fn user_agent(&self) -> String {
         format!("{ANYCONNECT_USER_AGENT_PREFIX} {}", self.app_version)
+    }
+
+    fn client_version(&self) -> String {
+        self.app_version.clone()
     }
 
     #[cfg(any(feature = "native-anyconnect", test))]
@@ -136,6 +147,7 @@ impl PlatformIdentity {
             } else {
                 self.device_type.clone()
             },
+            unique_id: self.unique_id.clone(),
         }
     }
 }
@@ -188,6 +200,16 @@ fn sanitized_version(raw: &str) -> String {
         .collect()
 }
 
+fn sanitized_identifier(raw: &str) -> String {
+    raw.trim()
+        .chars()
+        .filter(|character| {
+            character.is_ascii_alphanumeric() || matches!(character, '.' | '-' | '_' | ':')
+        })
+        .take(128)
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -205,37 +227,53 @@ mod tests {
             MobileIdentity {
                 platform_version: "unknown".to_owned(),
                 device_type: "OpenHarmony".to_owned(),
+                unique_id: String::new(),
             }
         );
-        assert_eq!(default_client_version(), "4.10.07061");
+        assert_eq!(default_client_version(), env!("CARGO_PKG_VERSION"));
     }
 
     #[test]
     fn runtime_identity_uses_real_openharmony_version_and_device_type() {
-        let identity =
-            PlatformIdentity::from_platform("OpenHarmony-6.0.0.46", "6.0", "20", "phone", "1.2.3");
+        let identity = PlatformIdentity::from_platform(
+            "OpenHarmony-6.0.0.46",
+            "6.0",
+            "20",
+            "phone",
+            "1.2.3",
+            "dff3cdfd-7beb-1e7d-fdf7-1dbfddd7d30c",
+        );
 
         assert_eq!(identity.user_agent(), "AnyConnect OpenHarmony 1.2.3");
+        assert_eq!(identity.client_version(), "1.2.3");
         assert_eq!(
             identity.mobile_identity(),
             MobileIdentity {
                 platform_version: "6.0.0.46".to_owned(),
                 device_type: "phone".to_owned(),
+                unique_id: "dff3cdfd-7beb-1e7d-fdf7-1dbfddd7d30c".to_owned(),
             }
         );
     }
 
     #[test]
     fn runtime_identity_has_stable_fallbacks_and_sanitizes_headers() {
-        let identity =
-            PlatformIdentity::from_platform("", "6.0", "20", "phone;bad", "1.2.3\r\nInjected:yes");
+        let identity = PlatformIdentity::from_platform(
+            "",
+            "6.0",
+            "20",
+            "phone;bad",
+            "1.2.3\r\nInjected:yes",
+            "odid\r\nInjected:yes",
+        );
         assert_eq!(
             identity.user_agent(),
             "AnyConnect OpenHarmony 1.2.3Injectedyes"
         );
         assert_eq!(identity.mobile_identity().device_type, "phone bad");
+        assert_eq!(identity.mobile_identity().unique_id, "odidInjected:yes");
 
-        let api_only = PlatformIdentity::from_platform("", "", "20", "", "");
+        let api_only = PlatformIdentity::from_platform("", "", "20", "", "", "");
         assert_eq!(
             api_only.user_agent(),
             format!("AnyConnect OpenHarmony {}", env!("CARGO_PKG_VERSION"))

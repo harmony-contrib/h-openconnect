@@ -45,6 +45,7 @@ pub fn configure_platform_identity(
     sdk_api_version: String,
     device_type: String,
     app_version: String,
+    unique_id: String,
 ) {
     hanyconnect_core::configure_platform_identity(
         os_full_name,
@@ -52,6 +53,7 @@ pub fn configure_platform_identity(
         sdk_api_version,
         device_type,
         app_version,
+        unique_id,
     );
 }
 

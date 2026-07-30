@@ -254,7 +254,7 @@ pub struct ConnectionProfile {
     /// Optional exact User-Agent override (empty = runtime OpenHarmony identity).
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub user_agent: String,
-    /// Version reported in AnyConnect XML (empty = compatible AnyConnect version).
+    /// Version reported in AnyConnect XML (empty = runtime application version).
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub client_version: String,
     /// TLS SNI override (ics `sni`).
