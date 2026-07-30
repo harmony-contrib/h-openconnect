@@ -1,6 +1,6 @@
-# H-AnyConnect
+# H-OpenConnect
 
-H-AnyConnect is a native HarmonyOS AnyConnect-compatible VPN client powered by
+H-OpenConnect is a native HarmonyOS AnyConnect-compatible VPN client powered by
 Rust, [Arkit](https://github.com/richerfu/arkit), and
 [anyconnect-rs/OpenConnect](https://crates.io/crates/anyconnect).
 
@@ -9,7 +9,7 @@ authenticated session to a HarmonyOS `VpnExtensionAbility`, creates the system
 TUN from the headend-provided network configuration, and runs the OpenConnect
 packet loop inside the VPN extension process.
 
-> H-AnyConnect is under active development. Validate routing, DNS, application
+> H-OpenConnect is under active development. Validate routing, DNS, application
 > binding, and reconnect behavior on a physical device or a VPN-enabled
 > OpenHarmony QEMU image. A DevEco simulator can validate UI and profile flows,
 > but does not prove that a system TUN was created or that traffic traversed it.
@@ -24,12 +24,12 @@ EntryAbility (ArkTS)
     |  authentication UI, browser SSO, certificate picker
     |  start/stop VpnExtensionAbility
     v
-HAnyConnectVpnExtensionAbility (ArkTS)
+HOpenConnectVpnExtensionAbility (ArkTS)
     |  VpnConnection.create(VpnConfig)
     |  per-socket protect + protectProcessNet()
     |  HarmonyOS-owned TUN fd
     v
-hanyconnect_core (Rust)
+hopenconnect_core (Rust)
     |  profile store, auth forms, session handoff, ashmem lifecycle IPC
     v
 anyconnect crate / OpenConnect 9.20
@@ -113,8 +113,8 @@ accept credentials, trust overrides, or auto-connect instructions through
 
 ## Open source
 
-The complete source for H-AnyConnect is published at
-[harmony-contrib/h-anyconnect](https://github.com/harmony-contrib/h-anyconnect).
+The complete source for H-OpenConnect is published at
+[harmony-contrib/h-openconnect](https://github.com/harmony-contrib/h-openconnect).
 The application is available under your choice of the MIT license or Apache
 License 2.0.
 
@@ -125,7 +125,7 @@ pinned source and relinkable build inputs are distributed by
 See [open-source notices](OPEN_SOURCE.md) for component versions, source
 locations, licenses, and rebuild information.
 
-H-AnyConnect is an independent project and is not affiliated with or endorsed
+H-OpenConnect is an independent project and is not affiliated with or endorsed
 by Cisco. Cisco and AnyConnect names and trademarks belong to their respective
 owners.
 
@@ -191,7 +191,7 @@ used for VPN acceptance testing.
 
 ```sh
 . scripts/env-ohos-anyconnect.sh
-ohrs build --arch aarch --release -p hanyconnect_ui -- \
+ohrs build --arch aarch --release -p hopenconnect_ui -- \
   --features native-anyconnect
 ```
 
@@ -209,7 +209,7 @@ launch the application:
 ```sh
 hdc install -r \
   entry/build/default/outputs/default/entry-default-signed.hap
-hdc shell aa start -b com.richerfu.hanyconnect -a EntryAbility
+hdc shell aa start -b com.richerfu.h_openconnect -a EntryAbility
 ```
 
 For a target selected by key, add `-t <target-key>` immediately after `hdc`.
@@ -270,7 +270,7 @@ OHOS_CLANG=/Applications/DevEco-Studio.app/Contents/sdk/default/openharmony/nati
 hdc file send smoke-logs/device-net-probe /data/local/tmp/device-net-probe
 hdc shell chmod 755 /data/local/tmp/device-net-probe
 
-# Replace 20010042 with the UID reported for com.richerfu.hanyconnect.
+# Replace 20010042 with the UID reported for com.richerfu.h_openconnect.
 hdc shell /data/local/tmp/device-net-probe 20010042 internal.example
 hdc shell /data/local/tmp/device-net-probe 20010042 10.10.10.1 443
 ```
@@ -280,7 +280,7 @@ hdc shell /data/local/tmp/device-net-probe 20010042 10.10.10.1 443
 Run the core unit and integration tests against the published AnyConnect crate:
 
 ```sh
-cargo test -p hanyconnect_core --features native-anyconnect
+cargo test -p hopenconnect_core --features native-anyconnect
 ```
 
 Run the host-side AnyConnect checks, optionally against a real headend:
@@ -288,9 +288,9 @@ Run the host-side AnyConnect checks, optionally against a real headend:
 ```sh
 scripts/e2e-host-anyconnect.sh
 
-HANY_E2E_SERVER=https://vpn.example.com \
-HANY_E2E_USER=alice \
-HANY_E2E_PASSWORD='***' \
+HOPEN_E2E_SERVER=https://vpn.example.com \
+HOPEN_E2E_USER=alice \
+HOPEN_E2E_PASSWORD='***' \
 scripts/e2e-host-anyconnect.sh
 ```
 
@@ -314,8 +314,8 @@ entry/                          HarmonyOS application module
   src/main/cpp/types/           Generated N-API declarations
   src/main/resources/           UI resources and backup policy
 crates/
-  hanyconnect_core/             Profiles, auth, OpenConnect, VPN lifecycle
-  hanyconnect_ui/               Native ArkUI interface and N-API exports
+  hopenconnect_core/             Profiles, auth, OpenConnect, VPN lifecycle
+  hopenconnect_ui/               Native ArkUI interface and N-API exports
 scripts/                        Build, package, ocserv, smoke, and probe tools
 docs/                           Architecture, UI mapping, and validation notes
 third_party/                    OHOS static native dependencies

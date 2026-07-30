@@ -1504,18 +1504,18 @@ fn now_timestamp() -> String {
 
 fn install_runtime_log_layer() {
     INSTALL_RUNTIME_LOG_LAYER.call_once(|| {
-        let subscriber = tracing_subscriber::registry().with(HAnyConnectLogLayer {
+        let subscriber = tracing_subscriber::registry().with(HOpenConnectLogLayer {
             logs: RUNTIME_LOGS.clone(),
         });
         let _ = tracing::subscriber::set_global_default(subscriber);
     });
 }
 
-struct HAnyConnectLogLayer {
+struct HOpenConnectLogLayer {
     logs: Arc<Mutex<RuntimeLogBuffer>>,
 }
 
-impl<S> Layer<S> for HAnyConnectLogLayer
+impl<S> Layer<S> for HOpenConnectLogLayer
 where
     S: tracing::Subscriber,
 {
@@ -1546,7 +1546,7 @@ where
 }
 
 fn is_vpn_log_target(target: &str) -> bool {
-    target.starts_with("hanyconnect_core")
+    target.starts_with("hopenconnect_core")
         || target.starts_with("anyconnect")
         || target.starts_with("openconnect")
 }

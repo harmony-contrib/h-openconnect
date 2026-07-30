@@ -10,10 +10,10 @@ HAP_BUILD_MODE="${HAP_BUILD_MODE:-release}"
 FEATURES="${FEATURES:-native-anyconnect}"
 case "$NATIVE_PROFILE" in
   release)
-    SO_SRC="$ROOT_DIR/target/aarch64-unknown-linux-ohos/release/libhanyconnect_ui.so"
+    SO_SRC="$ROOT_DIR/target/aarch64-unknown-linux-ohos/release/libhopenconnect_ui.so"
     ;;
   debug)
-    SO_SRC="$ROOT_DIR/target/aarch64-unknown-linux-ohos/debug/libhanyconnect_ui.so"
+    SO_SRC="$ROOT_DIR/target/aarch64-unknown-linux-ohos/debug/libhopenconnect_ui.so"
     ;;
   *)
     echo "Unsupported NATIVE_PROFILE: $NATIVE_PROFILE (expected release or debug)" >&2
@@ -28,7 +28,7 @@ case "$HAP_BUILD_MODE" in
     exit 1
     ;;
 esac
-SO_DST="$ROOT_DIR/entry/libs/arm64-v8a/libhanyconnect_ui.so"
+SO_DST="$ROOT_DIR/entry/libs/arm64-v8a/libhopenconnect_ui.so"
 HAP_PATH="${HAP_PATH:-$ROOT_DIR/entry/build/default/outputs/default/entry-default-unsigned.hap}"
 HVIGOR_ARGS="${HVIGOR_ARGS:---no-daemon}"
 DEVECO_STUDIO_HOME="${DEVECO_STUDIO_HOME:-/Applications/DevEco-Studio.app/Contents}"
@@ -71,10 +71,10 @@ fi
 
 if [ "$NATIVE_PROFILE" = "release" ]; then
   # shellcheck disable=SC2086
-  "$OHRS" build --arch "$ARCH" --release -p hanyconnect_ui -- $CARGO_FEATURE_ARGS
+  "$OHRS" build --arch "$ARCH" --release -p hopenconnect_ui -- $CARGO_FEATURE_ARGS
 else
   # shellcheck disable=SC2086
-  "$OHRS" build --arch "$ARCH" -p hanyconnect_ui -- $CARGO_FEATURE_ARGS
+  "$OHRS" build --arch "$ARCH" -p hopenconnect_ui -- $CARGO_FEATURE_ARGS
 fi
 
 mkdir -p "$(dirname "$SO_DST")"
@@ -94,10 +94,10 @@ fi
 # Sync generated d.ts into entry types (ohrs writes workspace dist/ by default).
 if [ -f "$ROOT_DIR/dist/index.d.ts" ]; then
   cp "$ROOT_DIR/dist/index.d.ts" \
-    "$ROOT_DIR/entry/src/main/cpp/types/libhanyconnect_ui/Index.d.ts"
-elif [ -f "$ROOT_DIR/crates/hanyconnect_ui/dist/index.d.ts" ]; then
-  cp "$ROOT_DIR/crates/hanyconnect_ui/dist/index.d.ts" \
-    "$ROOT_DIR/entry/src/main/cpp/types/libhanyconnect_ui/Index.d.ts"
+    "$ROOT_DIR/entry/src/main/cpp/types/libhopenconnect_ui/Index.d.ts"
+elif [ -f "$ROOT_DIR/crates/hopenconnect_ui/dist/index.d.ts" ]; then
+  cp "$ROOT_DIR/crates/hopenconnect_ui/dist/index.d.ts" \
+    "$ROOT_DIR/entry/src/main/cpp/types/libhopenconnect_ui/Index.d.ts"
 fi
 
 if [ -x "${OHPM:-}" ]; then

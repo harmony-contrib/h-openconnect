@@ -4,24 +4,24 @@ import { vpnExtension } from '@kit.NetworkKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { picker, fileIo as fs } from '@kit.CoreFileKit';
 import { NativeAbility } from '@ohos-rs/ability';
-import hanyconnectUi from 'libhanyconnect_ui.so';
+import hopenconnectUi from 'libhopenconnect_ui.so';
 import window from '@ohos.window';
 import {
   buildVpnWant,
-  HAnyPlatformSharedMemoryFds,
-  setHAnyBundleName,
+  HOpenPlatformSharedMemoryFds,
+  setHOpenBundleName,
 } from '../vpnability/VpnConfig';
 import { configureNativePlatformIdentity } from '../common/PlatformIdentity';
 
 const LOG_DOMAIN: number = 0x0000;
-const LOG_TAG: string = 'HAnyConnectEntry';
+const LOG_TAG: string = 'HOpenConnectEntry';
 
-interface HAnyPickCertRequest {
+interface HOpenPickCertRequest {
   id?: number;
   kind?: string;
 }
 
-interface HAnyTextExportRequest {
+interface HOpenTextExportRequest {
   suggestedName?: string;
   content?: string;
 }
@@ -44,15 +44,15 @@ function describeError(err: Error | Object | string | number | boolean | null | 
 }
 
 export default class EntryAbility extends NativeAbility {
-  public moduleName: string | string[] = 'hanyconnect_ui';
+  public moduleName: string | string[] = 'hopenconnect_ui';
   public defaultPage: boolean = false;
   private vpnStartRequest: Promise<void> | undefined = undefined;
-  private platformSharedMemory?: HAnyPlatformSharedMemoryFds;
+  private platformSharedMemory?: HOpenPlatformSharedMemoryFds;
 
   private configureNativeHome(): void {
     try {
-      setHAnyBundleName(this.context.applicationInfo.name);
-      hanyconnectUi.configureAppHome(`${this.context.filesDir}/h-anyconnect`);
+      setHOpenBundleName(this.context.applicationInfo.name);
+      hopenconnectUi.configureAppHome(`${this.context.filesDir}/h-openconnect`);
       hilog.info(LOG_DOMAIN, LOG_TAG, 'configured native home');
     } catch (err) {
       const message = describeError(err) || 'configure native home failed';
@@ -62,7 +62,7 @@ export default class EntryAbility extends NativeAbility {
   }
 
   private initializePlatformSharedMemory(): void {
-    const fields = hanyconnectUi.initializePlatformSharedMemory().split(',');
+    const fields = hopenconnectUi.initializePlatformSharedMemory().split(',');
     const ashmemFd = Number(fields[0]);
     const notificationFd = Number(fields[1]);
     if (fields.length !== 2 || !Number.isInteger(ashmemFd) || ashmemFd < 0 ||
@@ -82,7 +82,7 @@ export default class EntryAbility extends NativeAbility {
       if (locale.length === 0) {
         return;
       }
-      (hanyconnectUi as ESObject).configureUiLocale(locale);
+      (hopenconnectUi as ESObject).configureUiLocale(locale);
       hilog.info(LOG_DOMAIN, LOG_TAG, 'configured native locale %{public}s', locale);
     } catch (err) {
       hilog.info(LOG_DOMAIN, LOG_TAG, 'configure native locale skipped %{public}s', describeError(err));
@@ -92,7 +92,7 @@ export default class EntryAbility extends NativeAbility {
   private configureNativeAppearance(colorMode?: ConfigurationConstant.ColorMode): void {
     try {
       const mode = colorMode ?? this.context.config.colorMode ?? ConfigurationConstant.ColorMode.COLOR_MODE_NOT_SET;
-      (hanyconnectUi as ESObject).configureSystemColorMode(mode);
+      (hopenconnectUi as ESObject).configureSystemColorMode(mode);
       hilog.info(LOG_DOMAIN, LOG_TAG, 'configured native color mode %{public}d', mode);
     } catch (err) {
       hilog.info(LOG_DOMAIN, LOG_TAG, 'configure native color mode skipped %{public}s', describeError(err));
@@ -134,7 +134,7 @@ export default class EntryAbility extends NativeAbility {
   private async performStartVpn(optionsJson: string): Promise<void> {
     try {
       hilog.info(LOG_DOMAIN, LOG_TAG, 'request VPN start received');
-      hanyconnectUi.setPlatformVpnStarting(true);
+      hopenconnectUi.setPlatformVpnStarting(true);
       // The first standards-compliant VpnExtension start is intentionally
       // gated by the system consent dialog. Await the platform result instead
       // of imposing an application timeout while the user is deciding.
@@ -142,7 +142,7 @@ export default class EntryAbility extends NativeAbility {
       hilog.info(LOG_DOMAIN, LOG_TAG, 'requested VPN start');
     } catch (err) {
       const message = describeError(err) || 'request VPN start failed';
-      hanyconnectUi.setPlatformVpnFailed(message);
+      hopenconnectUi.setPlatformVpnFailed(message);
       hilog.error(LOG_DOMAIN, LOG_TAG, 'request VPN start failed %{public}s', message);
       throw new Error(message);
     }
@@ -152,7 +152,7 @@ export default class EntryAbility extends NativeAbility {
     try {
       hilog.info(LOG_DOMAIN, LOG_TAG, 'request VPN stop received');
       await vpnExtension.stopVpnExtensionAbility(buildVpnWant());
-      hanyconnectUi.setPlatformVpnRunning(false);
+      hopenconnectUi.setPlatformVpnRunning(false);
       hilog.info(LOG_DOMAIN, LOG_TAG, 'requested VPN stop');
     } catch (err) {
       hilog.error(LOG_DOMAIN, LOG_TAG, 'request VPN stop failed %{public}s', describeError(err));
@@ -185,9 +185,9 @@ export default class EntryAbility extends NativeAbility {
   }
 
   private async exportLogToSystem(requestJson: string): Promise<void> {
-    let request: HAnyTextExportRequest;
+    let request: HOpenTextExportRequest;
     try {
-      request = JSON.parse(requestJson) as HAnyTextExportRequest;
+      request = JSON.parse(requestJson) as HOpenTextExportRequest;
     } catch (err) {
       throw new Error(`invalid log export request: ${describeError(err)}`);
     }
@@ -195,9 +195,9 @@ export default class EntryAbility extends NativeAbility {
     if (content.length === 0) {
       throw new Error('log export content is empty');
     }
-    const baseName = (request.suggestedName ?? 'h-anyconnect-log')
+    const baseName = (request.suggestedName ?? 'h-openconnect-log')
       .replace(/[\\/:*?"<>|]/g, '_')
-      .trim() || 'h-anyconnect-log';
+      .trim() || 'h-openconnect-log';
     const fileName = baseName.endsWith('.log') ? baseName : `${baseName}.log`;
     const documentPicker = new picker.DocumentViewPicker(this.context as common.UIAbilityContext);
     const options = new picker.DocumentSaveOptions();
@@ -235,11 +235,11 @@ export default class EntryAbility extends NativeAbility {
   private async pickCertFile(requestJson: string): Promise<void> {
     let requestId = 0;
     try {
-      const req = JSON.parse(requestJson) as HAnyPickCertRequest;
+      const req = JSON.parse(requestJson) as HOpenPickCertRequest;
       requestId = typeof req.id === 'number' ? req.id : 0;
       const kind = typeof req.kind === 'string' ? req.kind : 'certificate';
       const path = await this.pickAndStoreCertFile(kind);
-      hanyconnectUi.completeFilePick(requestId, path);
+      hopenconnectUi.completeFilePick(requestId, path);
       hilog.info(
         LOG_DOMAIN,
         LOG_TAG,
@@ -251,7 +251,7 @@ export default class EntryAbility extends NativeAbility {
     } catch (err) {
       hilog.error(LOG_DOMAIN, LOG_TAG, 'pick cert file failed %{public}s', describeError(err));
       try {
-        hanyconnectUi.completeFilePick(requestId, '');
+        hopenconnectUi.completeFilePick(requestId, '');
       } catch (_completeErr) {
         // ignore secondary failure
       }
@@ -259,7 +259,7 @@ export default class EntryAbility extends NativeAbility {
   }
 
   private certDir(): string {
-    return `${this.context.filesDir}/h-anyconnect/certs`;
+    return `${this.context.filesDir}/h-openconnect/certs`;
   }
 
   private ensureCertDir(): void {
@@ -345,7 +345,7 @@ export default class EntryAbility extends NativeAbility {
       if (total === 0) {
         throw new Error('selected certificate file is empty');
       }
-      hanyconnectUi.securePrivateFile(destPath);
+      hopenconnectUi.securePrivateFile(destPath);
       completed = true;
     } finally {
       if (srcFile) {
@@ -375,11 +375,11 @@ export default class EntryAbility extends NativeAbility {
   public async onCreate(want: Want, launchParam: AbilityConstant.LaunchParam): Promise<void> {
     try {
       this.configureNativeHome();
-      configureNativePlatformIdentity(hanyconnectUi);
+      configureNativePlatformIdentity(hopenconnectUi);
       this.initializePlatformSharedMemory();
       this.configureNativeLocale();
       this.configureNativeAppearance();
-      hanyconnectUi.registerPlatformCallbacks({
+      hopenconnectUi.registerPlatformCallbacks({
         setColorMode: async (colorMode: number) => this.setAppColorMode(colorMode),
         requestStartVpn: async (optionsJson: string) => await this.requestStartVpn(optionsJson),
         requestStopVpn: async () => await this.requestStopVpn(),

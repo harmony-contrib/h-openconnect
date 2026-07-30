@@ -31,7 +31,7 @@ METADATA="$(
   cd "$ROOT_DIR" &&
     cargo metadata --format-version 1 --locked \
       --filter-platform aarch64-unknown-linux-ohos \
-      --features hanyconnect_ui/native-anyconnect
+      --features hopenconnect_ui/native-anyconnect
 )"
 ANYCONNECT_MANIFEST="$(
   printf '%s\n' "$METADATA" |
@@ -60,7 +60,7 @@ if ! grep -Fq \
 fi
 
 OUTPUT_DIR="$ROOT_DIR/target/openconnect-openharmony-$PATCH_HASH"
-STAMP_FILE="$OUTPUT_DIR/.hanyconnect-openharmony-patch"
+STAMP_FILE="$OUTPUT_DIR/.hopenconnect-openharmony-patch"
 EXPECTED_STAMP="anyconnect-sys=$ANYCONNECT_SYS_VERSION openconnect=$OPENCONNECT_VERSION patch=$PATCH_HASH"
 
 if [ -f "$STAMP_FILE" ] &&
@@ -89,7 +89,7 @@ trap cleanup EXIT HUP INT TERM
 
 cp -R "$SOURCE_DIR/." "$TEMP_DIR/"
 patch -d "$TEMP_DIR" -p1 < "$PATCH_FILE" >/dev/null
-printf '%s\n' "$EXPECTED_STAMP" > "$TEMP_DIR/.hanyconnect-openharmony-patch"
+printf '%s\n' "$EXPECTED_STAMP" > "$TEMP_DIR/.hopenconnect-openharmony-patch"
 
 if [ -e "$OUTPUT_DIR" ]; then
   rm -rf -- "$OUTPUT_DIR"

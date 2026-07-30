@@ -69,7 +69,7 @@ SSO 的首次请求读取服务器分组；成功后使用服务器协议值填�
 | 层 | 行为 |
 | --- | --- |
 | **连接编辑** | 客户端证书 / 私钥 / CA 路径旁「选择文件」 |
-| **UI → ArkTS** | `pickCertFile({id,kind})` → `DocumentViewPicker` → 复制到 `filesDir/h-anyconnect/certs/` |
+| **UI → ArkTS** | `pickCertFile({id,kind})` → `DocumentViewPicker` → 复制到 `filesDir/h-openconnect/certs/` |
 | **回传** | NAPI `completeFilePick(id, path)` 解锁 UI 并写入 draft |
 | **OpenConnect** | 主/次客户端证书、对应私钥和 `set_ca_file` 使用沙箱绝对路径（handoff 到扩展进程） |
 

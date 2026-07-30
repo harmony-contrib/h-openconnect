@@ -1,9 +1,9 @@
-# H-AnyConnect E2E
+# H-OpenConnect E2E
 
 ## Architecture (full anyconnect-rs)
 
 ```
-UI (arkit) ──► hanyconnect_core::SessionEngine
+UI (arkit) ──► hopenconnect_core::SessionEngine
                      │
                      │ prepare_connect (dry_run=false)
                      ▼
@@ -15,7 +15,7 @@ UI (arkit) ──► hanyconnect_core::SessionEngine
               EntryAbility.requestStartVpn(optionsJson)
                      │
                      ▼
-              HAnyConnectVpnExtensionAbility
+              HOpenConnectVpnExtensionAbility
               · 读取 handoff，使用标准 webvpn cookie 恢复会话
               · make_cstp_connection
               · setup_dtls（失败时按协议回退 CSTP）
@@ -31,7 +31,7 @@ UI (arkit) ──► hanyconnect_core::SessionEngine
               CommandHandle(Cancel) on disconnect / extension destroy
 ```
 
-OpenConnect 9.20 由 `anyconnect-rs` 源码静态编译进 `libhanyconnect_ui.so`。
+OpenConnect 9.20 由 `anyconnect-rs` 源码静态编译进 `libhopenconnect_ui.so`。
 OHOS 交叉编译需要 NDK + 静态 libxml2；OpenSSL 默认走 `vendored-openssl`。
 
 ## 本地 ocserv 测试头端
@@ -52,8 +52,8 @@ OHOS 交叉编译需要 NDK + 静态 libxml2；OpenSSL 默认走 `vendored-opens
 | 证书 | 自签 → App 关闭严格证书信任 |
 | 状态目录 | `.dev-ocserv/`（已 gitignore） |
 
-真机与 Mac 需同一 Wi‑Fi（或 Mac 开热点）。调试时结合 `HAnyConnectEntry`、
-`HAnyConnectVpn` 的生命周期日志和受限权限的 `openconnect-progress.log` 判断各阶段；
+真机与 Mac 需同一 Wi‑Fi（或 Mac 开热点）。调试时结合 `HOpenConnectEntry`、
+`HOpenConnectVpn` 的生命周期日志和受限权限的 `openconnect-progress.log` 判断各阶段；
 生产运行链路不再写测试 marker。
 
 ## 设备 HAP（默认完整接入）
@@ -82,8 +82,8 @@ FEATURES= ./scripts/package-hap.sh
 
 | 环境变量 | 含义 |
 | --- | --- |
-| `HANYCONNECT_DRY_RUN=0`（默认，native 构建） | 真实 anyconnect-rs 会话 |
-| `HANYCONNECT_DRY_RUN=1` | 跳过 headend，仅走生命周期 / 可选 VPN 扩展 |
+| `HOPENCONNECT_DRY_RUN=0`（默认，native 构建） | 真实 anyconnect-rs 会话 |
+| `HOPENCONNECT_DRY_RUN=1` | 跳过 headend，仅走生命周期 / 可选 VPN 扩展 |
 
 ## 主机协议 E2E
 
@@ -92,9 +92,9 @@ FEATURES= ./scripts/package-hap.sh
 ./scripts/e2e-host-anyconnect.sh
 
 # 可选：连真实 VPN
-HANY_E2E_SERVER=https://vpn.example.com \
-HANY_E2E_USER=alice \
-HANY_E2E_PASSWORD='***' \
+HOPEN_E2E_SERVER=https://vpn.example.com \
+HOPEN_E2E_USER=alice \
+HOPEN_E2E_PASSWORD='***' \
 ./scripts/e2e-host-anyconnect.sh
 ```
 
@@ -143,7 +143,7 @@ hdc shell /data/local/tmp/device-net-probe 20010042 10.10.10.1 443
 ```
 
 同时在 headend 抓取 `vpns*` 流量，确认 `VpnConfig.dnsAddresses` 使用服务端下发的
-DNS 地址。H-AnyConnect 的 `native-anyconnect` 会显式启用
+DNS 地址。H-OpenConnect 的 `native-anyconnect` 会显式启用
 `anyconnect/rediect-tun-dns`：当 Harmony 兼容环境保留上行解析器地址、但系统已经
 把该 DNS 包路由进 VPN TUN 时，将目标改写到第一个 headend DNS；响应返回后再恢复
 原解析器源地址并重算 IPv4/UDP 校验和。该 feature 不匹配域名、不硬编码客户网络，

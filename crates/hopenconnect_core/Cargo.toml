@@ -1,12 +1,12 @@
 [package]
-name = "hanyconnect_core"
+name = "hopenconnect_core"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
 rust-version.workspace = true
-description = "H-AnyConnect session engine (anyconnect-rs + platform VPN orchestration)"
+description = "H-OpenConnect session engine (anyconnect-rs + platform VPN orchestration)"
 
 [features]
 default = []

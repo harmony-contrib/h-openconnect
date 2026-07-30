@@ -2,7 +2,7 @@
 set -eu
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-BUNDLE_NAME="${BUNDLE_NAME:-com.southorange.hanyconnect}"
+BUNDLE_NAME="${BUNDLE_NAME:-com.richerfu.h_openconnect}"
 ABILITY="${ABILITY:-EntryAbility}"
 # Simulator accepts the unsigned HAP produced by PackageHap. Signed HAP requires
 # a bundleName-matching debug profile from DevEco (File > Project Structure >

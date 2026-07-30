@@ -506,7 +506,7 @@ pub(crate) fn about_page(state: Signal<State>) -> Element {
                     {arkit::icon("shield", 34.0, accent())}
                 }
                 text {
-                    content: "H-AnyConnect",
+                    content: "H-OpenConnect",
                     margin_top: 14.0,
                     font_size: 22.0,
                     font_weight: 750,
@@ -545,9 +545,9 @@ pub(crate) fn about_page(state: Signal<State>) -> Element {
                     open_source_row(
                         state,
                         "github",
-                        "H-AnyConnect",
+                        "H-OpenConnect",
                         "MIT OR Apache-2.0",
-                        "https://github.com/harmony-contrib/h-anyconnect",
+                        "https://github.com/harmony-contrib/h-openconnect",
                     ),
                     open_source_row(
                         state,
@@ -616,8 +616,8 @@ pub(crate) fn about_page(state: Signal<State>) -> Element {
             text {
                 content: tr(
                     locale,
-                    "H-AnyConnect 是独立开源项目，与 Cisco 无隶属或背书关系；相关名称与商标归其各自所有者。",
-                    "H-AnyConnect is an independent open-source project and is not affiliated with or endorsed by Cisco; related names and trademarks belong to their respective owners.",
+                    "H-OpenConnect 是独立开源项目，与 Cisco 无隶属或背书关系；相关名称与商标归其各自所有者。",
+                    "H-OpenConnect is an independent open-source project and is not affiliated with or endorsed by Cisco; related names and trademarks belong to their respective owners.",
                 ),
                 width: "100%",
                 padding_top: 14.0,

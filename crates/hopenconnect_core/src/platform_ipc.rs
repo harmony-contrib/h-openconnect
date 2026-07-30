@@ -70,7 +70,7 @@ struct SocketNotification {
 
 impl PlatformIpc {
     pub(crate) fn create_ui() -> Result<(Arc<Self>, PlatformSharedMemoryFds)> {
-        let mut ashmem = Ashmem::create("hanyconnect-platform-session", REGION_SIZE)
+        let mut ashmem = Ashmem::create("hopenconnect-platform-session", REGION_SIZE)
             .map_err(|error| PlatformIpcError::Memory(error.to_string()))?;
         ashmem
             .map_read_write()

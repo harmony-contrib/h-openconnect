@@ -1,5 +1,5 @@
 #!/usr/bin/env sh
-# Device launch smoke for H-AnyConnect.
+# Device launch smoke for H-OpenConnect.
 #
 # Connection scenarios are driven through the real UI. Production abilities do
 # not accept credentials, trust overrides, or auto-connect commands in Want
@@ -8,7 +8,7 @@ set -eu
 
 ROOT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 HDC="${HDC:-hdc}"
-BUNDLE_NAME="${BUNDLE_NAME:-com.richerfu.hanyconnect}"
+BUNDLE_NAME="${BUNDLE_NAME:-com.richerfu.h_openconnect}"
 ABILITY_NAME="${ABILITY_NAME:-EntryAbility}"
 HAP_PATH="${HAP_PATH:-$ROOT_DIR/entry/build/default/outputs/default/entry-default-unsigned.hap}"
 LOG_DIR="${LOG_DIR:-$ROOT_DIR/smoke-logs}"
@@ -20,7 +20,7 @@ usage() {
   cat <<USAGE
 Usage: scripts/e2e-device.sh [options]
 
-Build/install H-AnyConnect, launch EntryAbility without test parameters, and
+Build/install H-OpenConnect, launch EntryAbility without test parameters, and
 verify that the production shell initializes.
 
 Options:
@@ -72,7 +72,7 @@ HDC_CMD shell aa start -a "$ABILITY_NAME" -b "$BUNDLE_NAME"
   HDC_CMD shell "hilog -x" || true
 } >"$LOG_FILE" 2>&1 || true
 
-if ! grep -E "HAnyConnectEntry|configured native home|registered native platform callbacks" \
+if ! grep -E "HOpenConnectEntry|configured native home|registered native platform callbacks" \
   "$LOG_FILE" >/dev/null 2>&1; then
   echo "device smoke failed. Log: $LOG_FILE" >&2
   tail -n 80 "$LOG_FILE" >&2 || true

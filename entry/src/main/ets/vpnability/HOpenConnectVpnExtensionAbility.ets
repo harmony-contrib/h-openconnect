@@ -12,18 +12,18 @@
 import { Want } from '@kit.AbilityKit';
 import { vpnExtension, VpnExtensionAbility } from '@kit.NetworkKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
-import hanyconnectUi from 'libhanyconnect_ui.so';
+import hopenconnectUi from 'libhopenconnect_ui.so';
 import { configureNativePlatformIdentity } from '../common/PlatformIdentity';
 import {
   buildVpnConfig,
   parseOptions,
   readPlatformSharedMemoryFds,
   readOptionsJson,
-  setHAnyBundleName,
+  setHOpenBundleName,
 } from './VpnConfig';
 
 const LOG_DOMAIN: number = 0x0000;
-const LOG_TAG: string = 'HAnyConnectVpn';
+const LOG_TAG: string = 'HOpenConnectVpn';
 
 function describeError(err: Error | Object | string | number | boolean | null | undefined): string {
   if (err instanceof Error) {
@@ -42,7 +42,7 @@ function describeError(err: Error | Object | string | number | boolean | null | 
   return json && json !== '{}' ? json : err.toString();
 }
 
-export default class HAnyConnectVpnExtensionAbility extends VpnExtensionAbility {
+export default class HOpenConnectVpnExtensionAbility extends VpnExtensionAbility {
   private vpnConnection?: vpnExtension.VpnConnection;
   private tunFd: number = -1;
   private starting: boolean = false;
@@ -62,14 +62,14 @@ export default class HAnyConnectVpnExtensionAbility extends VpnExtensionAbility 
   public onDestroy(): void {
     hilog.info(LOG_DOMAIN, LOG_TAG, 'onDestroy');
     try {
-      if (typeof (hanyconnectUi as ESObject).clearSocketProtect === 'function') {
-        (hanyconnectUi as ESObject).clearSocketProtect();
+      if (typeof (hopenconnectUi as ESObject).clearSocketProtect === 'function') {
+        (hopenconnectUi as ESObject).clearSocketProtect();
       }
     } catch (_err) {
       // ignore
     }
     try {
-      hanyconnectUi.setPlatformVpnRunning(false);
+      hopenconnectUi.setPlatformVpnRunning(false);
     } catch (_err) {
       // ignore
     }
@@ -78,12 +78,12 @@ export default class HAnyConnectVpnExtensionAbility extends VpnExtensionAbility 
 
   private configureNativeHome(): void {
     try {
-      setHAnyBundleName(this.context.applicationInfo.name);
-      const home = `${this.context.filesDir}/h-anyconnect`;
-      if (typeof (hanyconnectUi as ESObject).configureAppHomeForExtension === 'function') {
-        (hanyconnectUi as ESObject).configureAppHomeForExtension(home);
+      setHOpenBundleName(this.context.applicationInfo.name);
+      const home = `${this.context.filesDir}/h-openconnect`;
+      if (typeof (hopenconnectUi as ESObject).configureAppHomeForExtension === 'function') {
+        (hopenconnectUi as ESObject).configureAppHomeForExtension(home);
       } else {
-        hanyconnectUi.configureAppHome(home);
+        hopenconnectUi.configureAppHome(home);
       }
       hilog.info(LOG_DOMAIN, LOG_TAG, 'configured native home (extension)');
     } catch (err) {
@@ -99,8 +99,8 @@ export default class HAnyConnectVpnExtensionAbility extends VpnExtensionAbility 
       return;
     }
     try {
-      if (typeof (hanyconnectUi as ESObject).registerSocketProtect === 'function') {
-        (hanyconnectUi as ESObject).registerSocketProtect({
+      if (typeof (hopenconnectUi as ESObject).registerSocketProtect === 'function') {
+        (hopenconnectUi as ESObject).registerSocketProtect({
           protectSocket: async (fd: number): Promise<void> => {
             if (fd < 0 || !this.vpnConnection) {
               throw new Error('VpnConnection is unavailable');
@@ -126,7 +126,7 @@ export default class HAnyConnectVpnExtensionAbility extends VpnExtensionAbility 
   private startFromWant(want: Want): void {
     try {
       this.configureNativeHome();
-      configureNativePlatformIdentity(hanyconnectUi);
+      configureNativePlatformIdentity(hopenconnectUi);
     } catch (err) {
       hilog.error(LOG_DOMAIN, LOG_TAG, 'VPN request rejected %{public}s', describeError(err));
       return;
@@ -136,20 +136,20 @@ export default class HAnyConnectVpnExtensionAbility extends VpnExtensionAbility 
       const message = 'VPN start is missing platform shared memory descriptors';
       hilog.error(LOG_DOMAIN, LOG_TAG, message);
       try {
-        hanyconnectUi.setPlatformVpnFailed(message);
+        hopenconnectUi.setPlatformVpnFailed(message);
       } catch (_inner) {
         // No ashmem session is available to publish this failure.
       }
       return;
     }
     try {
-      hanyconnectUi.attachPlatformSharedMemory(sharedMemory.ashmemFd, sharedMemory.notificationFd);
+      hopenconnectUi.attachPlatformSharedMemory(sharedMemory.ashmemFd, sharedMemory.notificationFd);
       hilog.info(LOG_DOMAIN, LOG_TAG, 'attached platform shared memory');
       this.startPlatformSubscription();
     } catch (err) {
       const message = `attach platform shared memory failed: ${describeError(err)}`;
       try {
-        hanyconnectUi.setPlatformVpnFailed(message);
+        hopenconnectUi.setPlatformVpnFailed(message);
       } catch (_inner) {
         // ignore
       }
@@ -160,7 +160,7 @@ export default class HAnyConnectVpnExtensionAbility extends VpnExtensionAbility 
     if (this.tunFd >= 0) {
       this.starting = false;
       try {
-        hanyconnectUi.setPlatformVpnRunning(true);
+        hopenconnectUi.setPlatformVpnRunning(true);
         hilog.info(LOG_DOMAIN, LOG_TAG, 'reported existing VPN to rebound platform shared memory');
       } catch (err) {
         hilog.error(LOG_DOMAIN, LOG_TAG, 'report existing VPN state failed %{public}s', describeError(err));
@@ -169,7 +169,7 @@ export default class HAnyConnectVpnExtensionAbility extends VpnExtensionAbility 
     }
     if (this.starting) {
       try {
-        hanyconnectUi.setPlatformVpnStarting(true);
+        hopenconnectUi.setPlatformVpnStarting(true);
         hilog.info(LOG_DOMAIN, LOG_TAG, 'reported pending VPN to rebound platform shared memory');
       } catch (err) {
         hilog.error(LOG_DOMAIN, LOG_TAG, 'report pending VPN state failed %{public}s', describeError(err));
@@ -183,7 +183,7 @@ export default class HAnyConnectVpnExtensionAbility extends VpnExtensionAbility 
     } catch (err) {
       const message = describeError(err) || 'VPN request has no valid options';
       try {
-        hanyconnectUi.setPlatformVpnFailed(message);
+        hopenconnectUi.setPlatformVpnFailed(message);
       } catch (_inner) {
         // ignore
       }
@@ -195,7 +195,7 @@ export default class HAnyConnectVpnExtensionAbility extends VpnExtensionAbility 
     this.performStart(optionsJson).catch((err: Error) => {
       const message = describeError(err) || 'vpn start failed';
       try {
-        hanyconnectUi.setPlatformVpnFailed(message);
+        hopenconnectUi.setPlatformVpnFailed(message);
       } catch (_inner) {
         // ignore
       }
@@ -220,9 +220,9 @@ export default class HAnyConnectVpnExtensionAbility extends VpnExtensionAbility 
   private async runPlatformSubscription(): Promise<void> {
     while (this.platformSubscriptionActive) {
       try {
-        const changed = await hanyconnectUi.waitForPlatformChange(1000);
+        const changed = await hopenconnectUi.waitForPlatformChange(1000);
         if (changed && this.platformSubscriptionActive) {
-          hanyconnectUi.syncPlatformChanges();
+          hopenconnectUi.syncPlatformChanges();
         }
       } catch (err) {
         hilog.error(LOG_DOMAIN, LOG_TAG, 'platform subscription failed %{public}s', describeError(err));
@@ -233,7 +233,7 @@ export default class HAnyConnectVpnExtensionAbility extends VpnExtensionAbility 
 
   private async performStart(optionsJson: string): Promise<void> {
     try {
-      hanyconnectUi.setPlatformVpnStarting(true);
+      hopenconnectUi.setPlatformVpnStarting(true);
     } catch (_err) {
       // ignore
     }
@@ -244,7 +244,7 @@ export default class HAnyConnectVpnExtensionAbility extends VpnExtensionAbility 
     // 1) CSTP on physical network — need real headend address/DNS before create.
     let effectiveOptionsJson = optionsJson;
     try {
-      const prepared: string = await (hanyconnectUi as ESObject).prepareVpnInExtension(optionsJson);
+      const prepared: string = await (hopenconnectUi as ESObject).prepareVpnInExtension(optionsJson);
       if (typeof prepared === 'string' && prepared.length > 2) {
         effectiveOptionsJson = prepared;
         hilog.info(LOG_DOMAIN, LOG_TAG, 'extension prepare ok len=%{public}d', prepared.length);
@@ -253,7 +253,7 @@ export default class HAnyConnectVpnExtensionAbility extends VpnExtensionAbility 
       const message = describeError(prepErr) || 'extension prepare failed';
       hilog.error(LOG_DOMAIN, LOG_TAG, 'extension prepare failed %{public}s', message);
       try {
-        hanyconnectUi.setPlatformVpnFailed(message);
+        hopenconnectUi.setPlatformVpnFailed(message);
       } catch (_inner) {
         // ignore
       }
@@ -265,7 +265,7 @@ export default class HAnyConnectVpnExtensionAbility extends VpnExtensionAbility 
     if (!options.addresses || options.addresses.length === 0) {
       const message = 'extension prepare returned no VPN addresses';
       try {
-        hanyconnectUi.setPlatformVpnFailed(message);
+        hopenconnectUi.setPlatformVpnFailed(message);
       } catch (_inner) {
         // ignore
       }
@@ -299,13 +299,13 @@ export default class HAnyConnectVpnExtensionAbility extends VpnExtensionAbility 
       }
 
       // 4) OpenConnect packet loop.
-      await hanyconnectUi.startVpn(fd, effectiveOptionsJson);
+      await hopenconnectUi.startVpn(fd, effectiveOptionsJson);
       hilog.info(LOG_DOMAIN, LOG_TAG, 'native startVpn completed fd=%{public}d', fd);
     } catch (err) {
       const message = describeError(err) || 'native startVpn failed';
       hilog.error(LOG_DOMAIN, LOG_TAG, 'VPN pipeline failed %{public}s', message);
       try {
-        hanyconnectUi.setPlatformVpnFailed(message);
+        hopenconnectUi.setPlatformVpnFailed(message);
       } catch (_inner) {
         // ignore
       }

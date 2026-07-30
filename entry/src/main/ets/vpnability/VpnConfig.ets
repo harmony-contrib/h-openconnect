@@ -10,20 +10,20 @@
 import { Want } from '@kit.AbilityKit';
 import { vpnExtension } from '@kit.NetworkKit';
 
-export const HANY_BUNDLE_NAME: string = 'com.southorange.hanyconnect';
-export const HANY_MODULE_NAME: string = 'entry';
-export const HANY_ENTRY_ABILITY: string = 'EntryAbility';
-export const HANY_VPN_ABILITY: string = 'HAnyConnectVpnExtensionAbility';
+export const HOPEN_BUNDLE_NAME: string = 'com.richerfu.h_openconnect';
+export const HOPEN_MODULE_NAME: string = 'entry';
+export const HOPEN_ENTRY_ABILITY: string = 'EntryAbility';
+export const HOPEN_VPN_ABILITY: string = 'HOpenConnectVpnExtensionAbility';
 
-let hanyBundleName: string = HANY_BUNDLE_NAME;
+let hopenBundleName: string = HOPEN_BUNDLE_NAME;
 
-export function setHAnyBundleName(bundleName?: string): void {
+export function setHOpenBundleName(bundleName?: string): void {
   const value = bundleName?.trim() ?? '';
-  hanyBundleName = value.length > 0 ? value : HANY_BUNDLE_NAME;
+  hopenBundleName = value.length > 0 ? value : HOPEN_BUNDLE_NAME;
 }
 
-export function currentHAnyBundleName(): string {
-  return hanyBundleName;
+export function currentHOpenBundleName(): string {
+  return hopenBundleName;
 }
 
 export class NetAddress {
@@ -83,7 +83,7 @@ export interface VpnOptions {
   blockedApplications?: string[];
 }
 
-export class HAnyVpnConfig {
+export class HOpenVpnConfig {
   public addresses: LinkAddress[];
   public routes: RouteInfo[];
   public dnsAddresses: string[];
@@ -153,7 +153,7 @@ export function routeDefaultPrefix(value: string): number {
 }
 
 export function buildVpnConfig(options: VpnOptions, _vpnId?: string): vpnExtension.VpnConfig {
-  return new HAnyVpnConfig(options) as vpnExtension.VpnConfig;
+  return new HOpenVpnConfig(options) as vpnExtension.VpnConfig;
 }
 
 export function parseOptions(optionsJson?: string): VpnOptions {
@@ -190,15 +190,15 @@ export function readOptionsJson(want?: Want): string {
   throw new Error('VPN extension request is missing optionsJson');
 }
 
-const HANY_ASHMEM_FD_KEY = 'hanyconnectPlatformAshmem';
-const HANY_NOTIFICATION_FD_KEY = 'hanyconnectPlatformNotification';
+const HOPEN_ASHMEM_FD_KEY = 'hopenconnectPlatformAshmem';
+const HOPEN_NOTIFICATION_FD_KEY = 'hopenconnectPlatformNotification';
 
-export interface HAnyPlatformSharedMemoryFds {
+export interface HOpenPlatformSharedMemoryFds {
   ashmemFd: number;
   notificationFd: number;
 }
 
-class HAnyWantFileDescriptor {
+class HOpenWantFileDescriptor {
   public type: string = 'FD';
   public value: number;
 
@@ -207,33 +207,33 @@ class HAnyWantFileDescriptor {
   }
 }
 
-interface HAnyVpnWantParameters extends Record<string, Object> {
+interface HOpenVpnWantParameters extends Record<string, Object> {
   optionsJson: string;
 }
 
 export function buildVpnWant(
   optionsJson?: string,
-  sharedMemory?: HAnyPlatformSharedMemoryFds,
+  sharedMemory?: HOpenPlatformSharedMemoryFds,
 ): Want {
-  const parameters: HAnyVpnWantParameters = {
+  const parameters: HOpenVpnWantParameters = {
     optionsJson: optionsJson ?? '',
   };
   if (sharedMemory) {
-    parameters[HANY_ASHMEM_FD_KEY] = new HAnyWantFileDescriptor(sharedMemory.ashmemFd);
-    parameters[HANY_NOTIFICATION_FD_KEY] = new HAnyWantFileDescriptor(sharedMemory.notificationFd);
+    parameters[HOPEN_ASHMEM_FD_KEY] = new HOpenWantFileDescriptor(sharedMemory.ashmemFd);
+    parameters[HOPEN_NOTIFICATION_FD_KEY] = new HOpenWantFileDescriptor(sharedMemory.notificationFd);
   }
   return {
     deviceId: '',
-    bundleName: currentHAnyBundleName(),
-    moduleName: HANY_MODULE_NAME,
-    abilityName: HANY_VPN_ABILITY,
+    bundleName: currentHOpenBundleName(),
+    moduleName: HOPEN_MODULE_NAME,
+    abilityName: HOPEN_VPN_ABILITY,
     parameters,
   };
 }
 
-export function readPlatformSharedMemoryFds(want: Want): HAnyPlatformSharedMemoryFds | undefined {
-  const ashmemFd = want.fds?.[HANY_ASHMEM_FD_KEY];
-  const notificationFd = want.fds?.[HANY_NOTIFICATION_FD_KEY];
+export function readPlatformSharedMemoryFds(want: Want): HOpenPlatformSharedMemoryFds | undefined {
+  const ashmemFd = want.fds?.[HOPEN_ASHMEM_FD_KEY];
+  const notificationFd = want.fds?.[HOPEN_NOTIFICATION_FD_KEY];
   if (typeof ashmemFd !== 'number' || ashmemFd < 0 ||
     typeof notificationFd !== 'number' || notificationFd < 0) {
     return undefined;

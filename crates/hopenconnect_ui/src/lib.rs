@@ -1,6 +1,6 @@
 use arkit::entry;
 use arkit::prelude::Element;
-use hanyconnect_core::{shared_engine, ConnectRequest};
+use hopenconnect_core::{shared_engine, ConnectRequest};
 use napi_derive_ohos::napi;
 use napi_ohos::{bindgen_prelude::Object, Error, Result, Status};
 
@@ -21,7 +21,7 @@ fn to_napi_error(err: impl std::fmt::Display) -> Error {
 
 #[napi]
 pub fn configure_app_home(home_dir: String) -> Result<()> {
-    std::env::set_var("HANYCONNECT_HOME", &home_dir);
+    std::env::set_var("HOPENCONNECT_HOME", &home_dir);
     shared_engine()
         .configure_home(home_dir)
         .map_err(to_napi_error)
@@ -32,7 +32,7 @@ pub fn configure_app_home(home_dir: String) -> Result<()> {
 /// lifecycle state is exchanged through ashmem.
 #[napi]
 pub fn configure_app_home_for_extension(home_dir: String) -> Result<()> {
-    std::env::set_var("HANYCONNECT_HOME", &home_dir);
+    std::env::set_var("HOPENCONNECT_HOME", &home_dir);
     shared_engine()
         .configure_home(home_dir)
         .map_err(to_napi_error)
@@ -47,7 +47,7 @@ pub fn configure_platform_identity(
     app_version: String,
     unique_id: String,
 ) {
-    hanyconnect_core::configure_platform_identity(
+    hopenconnect_core::configure_platform_identity(
         os_full_name,
         display_version,
         sdk_api_version,
@@ -89,13 +89,13 @@ pub fn sync_platform_changes() -> Result<()> {
 
 #[napi]
 pub fn configure_ui_locale(locale: String) -> Result<()> {
-    std::env::set_var("HANYCONNECT_UI_LOCALE", locale);
+    std::env::set_var("HOPENCONNECT_UI_LOCALE", locale);
     Ok(())
 }
 
 #[napi]
 pub fn configure_system_color_mode(color_mode: i32) -> Result<()> {
-    std::env::set_var("HANYCONNECT_SYSTEM_COLOR_MODE", color_mode.to_string());
+    std::env::set_var("HOPENCONNECT_SYSTEM_COLOR_MODE", color_mode.to_string());
     Ok(())
 }
 
@@ -115,7 +115,7 @@ pub fn complete_file_pick(request_id: u32, path: Option<String>) -> Result<()> {
 
 #[napi]
 pub fn secure_private_file(path: String) -> Result<()> {
-    hanyconnect_core::secure_private_file(path).map_err(to_napi_error)
+    hopenconnect_core::secure_private_file(path).map_err(to_napi_error)
 }
 
 /// Register ics-style per-fd protect: OpenConnect → `vpnConnection.protect(fd)`.
@@ -129,7 +129,7 @@ pub fn register_socket_protect(callbacks: Object<'static>) -> Result<()> {
 
 #[napi]
 pub fn clear_socket_protect() -> Result<()> {
-    hanyconnect_core::set_socket_protect_handler(None);
+    hopenconnect_core::set_socket_protect_handler(None);
     Ok(())
 }
 
@@ -175,9 +175,9 @@ pub fn expire_platform_vpn_start() -> Result<bool> {
 
 fn dry_run_from_env() -> bool {
     // Real OpenConnect is the default when the binary is built with
-    // `native-anyconnect`. Explicit HANYCONNECT_DRY_RUN=1 keeps the development
+    // `native-anyconnect`. Explicit HOPENCONNECT_DRY_RUN=1 keeps the development
     // mock path available without adding commands to production abilities.
-    match std::env::var("HANYCONNECT_DRY_RUN") {
+    match std::env::var("HOPENCONNECT_DRY_RUN") {
         Ok(value) => value == "1" || value.eq_ignore_ascii_case("true"),
         Err(_) => {
             #[cfg(feature = "native-anyconnect")]
@@ -236,7 +236,7 @@ pub async fn stop_vpn() -> Result<()> {
 /// Submit answers for the current OpenConnect auth challenge (multi-round MFA).
 #[napi]
 pub fn submit_auth_challenge(reply_json: String) -> Result<()> {
-    let reply: hanyconnect_core::AuthChallengeReply =
+    let reply: hopenconnect_core::AuthChallengeReply =
         serde_json::from_str(&reply_json).map_err(to_napi_error)?;
     shared_engine()
         .submit_auth_challenge(reply)

@@ -1,12 +1,12 @@
 {
   "name": "entry",
   "version": "1.0.0",
-  "description": "H-AnyConnect entry module",
+  "description": "H-OpenConnect entry module",
   "main": "",
   "author": "harmony-contrib",
   "license": "MIT OR Apache-2.0",
   "dependencies": {
     "@ohos-rs/ability": "0.4.0-beta.7",
-    "libhanyconnect_ui.so": "file:./src/main/cpp/types/libhanyconnect_ui"
+    "libhopenconnect_ui.so": "file:./src/main/cpp/types/libhopenconnect_ui"
   }
 }

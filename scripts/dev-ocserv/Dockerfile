@@ -1,4 +1,4 @@
-# Dev AnyConnect-compatible headend for H-AnyConnect.
+# Dev AnyConnect-compatible headend for H-OpenConnect.
 FROM debian:bookworm-slim
 
 ENV DEBIAN_FRONTEND=noninteractive

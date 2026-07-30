@@ -762,7 +762,7 @@ pub(crate) fn connection_editor_page(state: Signal<State>, id: String) -> Elemen
                                     Input {
                                         value: Some(draft.user_agent.clone()),
                                         width: Some("100%".to_owned()),
-                                        placeholder: Some(hanyconnect_core::default_user_agent()),
+                                        placeholder: Some(hopenconnect_core::default_user_agent()),
                                         on_change: move |value| dispatch(state, Action::SetDraftUserAgent(value)),
                                     }
                                 }
@@ -771,7 +771,7 @@ pub(crate) fn connection_editor_page(state: Signal<State>, id: String) -> Elemen
                                     Input {
                                         value: Some(draft.client_version.clone()),
                                         width: Some("100%".to_owned()),
-                                        placeholder: Some(hanyconnect_core::default_client_version()),
+                                        placeholder: Some(hopenconnect_core::default_client_version()),
                                         on_change: move |value| dispatch(state, Action::SetDraftClientVersion(value)),
                                     }
                                 }

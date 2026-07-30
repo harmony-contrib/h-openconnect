@@ -2,19 +2,19 @@
   "string": [
     {
       "name": "module_desc",
-      "value": "H-AnyConnect secure VPN client"
+      "value": "H-OpenConnect secure VPN client"
     },
     {
       "name": "EntryAbility_desc",
-      "value": "H-AnyConnect"
+      "value": "H-OpenConnect"
     },
     {
       "name": "EntryAbility_label",
-      "value": "H-AnyConnect"
+      "value": "H-OpenConnect"
     },
     {
       "name": "grant_internet",
-      "value": "H-AnyConnect needs network access to establish VPN tunnels."
+      "value": "H-OpenConnect needs network access to establish VPN tunnels."
     }
   ]
 }

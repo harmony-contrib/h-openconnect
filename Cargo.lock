@@ -1046,39 +1046,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e4eba85ea1d0a966a983acd07deee566e67395d2d96b6fb39e62b5a833f1eb0b"
 
 [[package]]
-name = "hanyconnect_core"
-version = "1.0.0"
-dependencies = [
- "anyconnect",
- "libc",
- "ohos-ashmem-binding",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror",
- "time",
- "tokio",
- "tracing",
- "tracing-appender",
- "tracing-subscriber",
-]
-
-[[package]]
-name = "hanyconnect_ui"
-version = "1.0.0"
-dependencies = [
- "arkit",
- "dioxus",
- "hanyconnect_core",
- "napi-build-ohos",
- "napi-derive-ohos",
- "napi-ohos",
- "serde",
- "serde_json",
- "tokio",
-]
-
-[[package]]
 name = "hashbrown"
 version = "0.17.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1134,6 +1101,39 @@ dependencies = [
  "thiserror",
  "tokio",
  "tracing",
+]
+
+[[package]]
+name = "hopenconnect_core"
+version = "1.0.0"
+dependencies = [
+ "anyconnect",
+ "libc",
+ "ohos-ashmem-binding",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+ "time",
+ "tokio",
+ "tracing",
+ "tracing-appender",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "hopenconnect_ui"
+version = "1.0.0"
+dependencies = [
+ "arkit",
+ "dioxus",
+ "hopenconnect_core",
+ "napi-build-ohos",
+ "napi-derive-ohos",
+ "napi-ohos",
+ "serde",
+ "serde_json",
+ "tokio",
 ]
 
 [[package]]

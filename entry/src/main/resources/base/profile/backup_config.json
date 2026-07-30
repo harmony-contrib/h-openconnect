@@ -2,6 +2,6 @@
   "allowToBackupRestore": false,
   "includes": [],
   "excludes": [
-    "/data/storage/el2/base/files/h-anyconnect"
+    "/data/storage/el2/base/files/h-openconnect"
   ]
 }

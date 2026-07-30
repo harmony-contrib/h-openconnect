@@ -1,7 +1,7 @@
-//! Session engine for H-AnyConnect.
+//! Session engine for H-OpenConnect.
 //!
 //! Architecture (aligned with paws):
-//! - UI (`hanyconnect_ui`) owns presentation and dispatches connect/disconnect.
+//! - UI (`hopenconnect_ui`) owns presentation and dispatches connect/disconnect.
 //! - This crate owns profile persistence, lifecycle, diagnostics, and
 //!   the AnyConnect protocol path (`anyconnect-rs`) when enabled.
 //! - HarmonyOS VpnExtensionAbility owns the TUN fd and notifies native code.

@@ -1,15 +1,15 @@
 //! Optional live AnyConnect headend test.
 //!
 //! ```sh
-//! HANY_E2E_SERVER=https://vpn.example.com \
-//! HANY_E2E_USER=alice \
-//! HANY_E2E_PASSWORD=secret \
-//! cargo test -p hanyconnect_core --features native-anyconnect --test live_connect -- --ignored --nocapture
+//! HOPEN_E2E_SERVER=https://vpn.example.com \
+//! HOPEN_E2E_USER=alice \
+//! HOPEN_E2E_PASSWORD=secret \
+//! cargo test -p hopenconnect_core --features native-anyconnect --test live_connect -- --ignored --nocapture
 //! ```
 
 #![cfg(feature = "native-anyconnect")]
 
-use hanyconnect_core::{
+use hopenconnect_core::{
     AuthMethod, ConnectRequest, ConnectionProfile, ProtocolKind, SessionEngine,
 };
 
@@ -20,10 +20,10 @@ fn env(name: &str) -> Option<String> {
 #[tokio::test]
 #[ignore = "requires a reachable AnyConnect/OpenConnect headend"]
 async fn live_prepare_connect_against_headend() {
-    let server = env("HANY_E2E_SERVER").expect("HANY_E2E_SERVER");
-    let username = env("HANY_E2E_USER").unwrap_or_default();
-    let password = env("HANY_E2E_PASSWORD").unwrap_or_default();
-    let group = env("HANY_E2E_GROUP").unwrap_or_default();
+    let server = env("HOPEN_E2E_SERVER").expect("HOPEN_E2E_SERVER");
+    let username = env("HOPEN_E2E_USER").unwrap_or_default();
+    let password = env("HOPEN_E2E_PASSWORD").unwrap_or_default();
+    let group = env("HOPEN_E2E_GROUP").unwrap_or_default();
 
     let home = tempfile::tempdir().expect("create isolated live-test home");
     let engine = SessionEngine::new();
@@ -56,7 +56,7 @@ async fn live_prepare_connect_against_headend() {
         .prepare_in_extension(&options_json)
         .await
         .expect("resume cookie and establish CSTP");
-    let options: hanyconnect_core::VpnOptions =
+    let options: hopenconnect_core::VpnOptions =
         serde_json::from_str(&resumed_json).expect("parse resumed options");
     assert!(!options.addresses.is_empty());
     let snap = engine.snapshot().unwrap();

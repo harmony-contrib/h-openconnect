@@ -5,7 +5,7 @@ use crate::model::{
     VpnConnection,
 };
 use crate::platform_callbacks;
-use hanyconnect_core::{shared_engine, ConnectRequest, LogRecordingStatus, SessionEngine};
+use hopenconnect_core::{shared_engine, ConnectRequest, LogRecordingStatus, SessionEngine};
 use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
@@ -126,7 +126,7 @@ pub(crate) enum Action {
     },
     GroupsDiscovered {
         server: String,
-        result: Result<hanyconnect_core::AuthGroupDiscovery, String>,
+        result: Result<hopenconnect_core::AuthGroupDiscovery, String>,
     },
     SetDraftGroup(String),
     SetDraftUsername(String),
@@ -264,7 +264,7 @@ impl State {
     pub fn new() -> Self {
         let system_locale = detect_system_locale();
         let system_dark = detect_system_dark();
-        let dry_run = match std::env::var("HANYCONNECT_DRY_RUN") {
+        let dry_run = match std::env::var("HOPENCONNECT_DRY_RUN") {
             Ok(value) => value == "1" || value.eq_ignore_ascii_case("true"),
             Err(_) => {
                 // Prefer real anyconnect-rs when the binary was built with it.
@@ -357,7 +357,7 @@ impl State {
                 self.challenge_values = challenge
                     .fields
                     .iter()
-                    .filter(|field| !matches!(field.kind, hanyconnect_core::AuthFieldKind::Hidden))
+                    .filter(|field| !matches!(field.kind, hopenconnect_core::AuthFieldKind::Hidden))
                     .map(|field| (field.key.clone(), field.value.clone()))
                     .collect();
                 self.challenge_seed_id = Some(challenge.id);
@@ -478,7 +478,7 @@ pub(crate) fn reduce(state: &mut State, action: Action) -> Command<Action> {
             }
             state.system_dark = detect_system_dark();
             // SAML/SSO: extension queues browser-request.json; open system browser here.
-            if let Some(req) = hanyconnect_core::take_browser_open_pending() {
+            if let Some(req) = hopenconnect_core::take_browser_open_pending() {
                 if let Err(err) = platform_callbacks::open_external_browser(req.uri.clone()) {
                     state.push_toast(format!(
                         "{}: {err}",
@@ -543,7 +543,7 @@ pub(crate) fn reduce(state: &mut State, action: Action) -> Command<Action> {
             };
             // Require non-empty values for required interactive fields (including Unknown OTP).
             for field in &challenge.fields {
-                if matches!(field.kind, hanyconnect_core::AuthFieldKind::Hidden) {
+                if matches!(field.kind, hopenconnect_core::AuthFieldKind::Hidden) {
                     continue;
                 }
                 if !field.required {
@@ -1165,7 +1165,7 @@ fn start_connect(state: &mut State, s: &crate::l10n::UiStrings) -> Command<Actio
     state.challenge_values.clear();
     state.challenge_seed_id = None;
     state.last_lifecycle = ConnectionLifecycle::Connecting;
-    hanyconnect_core::clear_browser_open_pending();
+    hopenconnect_core::clear_browser_open_pending();
     let dry_run = state.dry_run;
     Command::perform(engine_connect(active, dry_run), Action::ConnectionFinished)
 }
@@ -1229,7 +1229,7 @@ async fn group_discovery_delay() {
 
 async fn discover_groups(
     profile: VpnConnection,
-) -> Result<hanyconnect_core::AuthGroupDiscovery, String> {
+) -> Result<hopenconnect_core::AuthGroupDiscovery, String> {
     shared_engine()
         .discover_auth_groups(profile)
         .await
@@ -1245,14 +1245,14 @@ fn server_looks_ready(server: &str) -> bool {
 }
 
 fn detect_system_locale() -> UiLocale {
-    std::env::var("HANYCONNECT_UI_LOCALE")
+    std::env::var("HOPENCONNECT_UI_LOCALE")
         .or_else(|_| std::env::var("HMETA_UI_LOCALE"))
         .map(|value| UiLocale::from_tag(&value))
         .unwrap_or_default()
 }
 
 fn detect_system_dark() -> bool {
-    std::env::var("HANYCONNECT_SYSTEM_COLOR_MODE")
+    std::env::var("HOPENCONNECT_SYSTEM_COLOR_MODE")
         .or_else(|_| std::env::var("HMETA_SYSTEM_COLOR_MODE"))
         .ok()
         .and_then(|value| value.parse::<i32>().ok())

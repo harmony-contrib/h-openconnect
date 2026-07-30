@@ -1,10 +1,10 @@
 # Open-source notices
 
-H-AnyConnect is open source under your choice of the
+H-OpenConnect is open source under your choice of the
 [MIT license](LICENSE-MIT) or [Apache License 2.0](LICENSE-APACHE). Its
 corresponding source is available from:
 
-https://github.com/harmony-contrib/h-anyconnect
+https://github.com/harmony-contrib/h-openconnect
 
 The exact Rust dependency graph for a release is recorded in `Cargo.lock`.
 License files and notices supplied by each Rust package remain part of that
@@ -34,7 +34,7 @@ inputs required by the supported source build:
 
 https://crates.io/crates/anyconnect-sys/0.1.0
 
-The public H-AnyConnect source and the build instructions in `README.md`
+The public H-OpenConnect source and the build instructions in `README.md`
 provide the application material needed to rebuild the native library and HAP
 with a modified compatible OpenConnect build. The application does not impose
 additional restrictions on modification or reverse engineering performed for
@@ -57,12 +57,12 @@ source and library override contract.
 Connection profiles and credentials are stored in the application-private
 directory with restricted permissions and are excluded from HarmonyOS backup.
 Diagnostic recording is disabled by default and writes local daily archives
-only after the user enables it. H-AnyConnect does not contain analytics or
+only after the user enables it. H-OpenConnect does not contain analytics or
 telemetry upload code; network requests are initiated for the VPN gateways and
 authentication services configured by the user.
 
 ## Trademarks
 
-H-AnyConnect is an independent project and is not affiliated with or endorsed
+H-OpenConnect is an independent project and is not affiliated with or endorsed
 by Cisco. Cisco and AnyConnect names and trademarks belong to their respective
 owners.

@@ -1,5 +1,5 @@
 #!/usr/bin/env sh
-# Local AnyConnect-compatible VPN headend (ocserv) for H-AnyConnect device tests.
+# Local AnyConnect-compatible VPN headend (ocserv) for H-OpenConnect device tests.
 #
 # Usage:
 #   ./scripts/dev-ocserv.sh start     # build image if needed, start, print client fields
@@ -20,8 +20,8 @@ set -eu
 ROOT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 CTX_DIR="$ROOT_DIR/scripts/dev-ocserv"
 DATA_DIR="${OCSERV_DATA_DIR:-$ROOT_DIR/.dev-ocserv}"
-CONTAINER_NAME="${OCSERV_NAME:-hanyconnect-ocserv}"
-IMAGE_NAME="${OCSERV_IMAGE_NAME:-hanyconnect-ocserv:local}"
+CONTAINER_NAME="${OCSERV_NAME:-hopenconnect-ocserv}"
+IMAGE_NAME="${OCSERV_IMAGE_NAME:-hopenconnect-ocserv:local}"
 HOST_PORT="${OCSERV_PORT:-4433}"
 USER_NAME="${OCSERV_USER:-demo}"
 USER_PASS="${OCSERV_PASS:-demo}"
@@ -66,7 +66,7 @@ print_client_hints() {
   cat <<EOF
 
 ============================================
- H-AnyConnect -> local ocserv
+ H-OpenConnect -> local ocserv
 ============================================
   Server URL : ${url}
   Username   : ${USER_NAME}
@@ -169,7 +169,7 @@ prepare_data() {
       -keyout "$DATA_DIR/server-key.pem" \
       -out "$DATA_DIR/server-cert.pem" \
       -days 3650 \
-      -subj "/CN=hanyconnect-ocserv-dev/O=H-AnyConnect/C=CN" \
+      -subj "/CN=hopenconnect-ocserv-dev/O=H-OpenConnect/C=CN" \
       >/dev/null 2>&1
     chmod 644 "$DATA_DIR/server-cert.pem" "$DATA_DIR/server-key.pem"
   fi
@@ -305,7 +305,7 @@ Environment:
   OCSERV_HOST_IP      force advertised LAN IP
   OCSERV_NAME         container name
   OCSERV_DATA_DIR     state dir (default .dev-ocserv/)
-  OCSERV_IMAGE_NAME   image tag (default hanyconnect-ocserv:local)
+  OCSERV_IMAGE_NAME   image tag (default hopenconnect-ocserv:local)
 USAGE
 }
 

@@ -1,19 +1,19 @@
 import { DefaultXComponent } from '@ohos-rs/ability';
-import hanyconnectUi from 'libhanyconnect_ui.so';
+import hopenconnectUi from 'libhopenconnect_ui.so';
 
 @Entry
 @Component
 struct Index {
   onBackPress(): boolean | void {
-    if (typeof hanyconnectUi.onBackPressIntercept === 'function') {
-      return hanyconnectUi.onBackPressIntercept();
+    if (typeof hopenconnectUi.onBackPressIntercept === 'function') {
+      return hopenconnectUi.onBackPressIntercept();
     }
     return false;
   }
 
   build() {
     RelativeContainer() {
-      DefaultXComponent({ moduleName: 'hanyconnect_ui' })
+      DefaultXComponent({ moduleName: 'hopenconnect_ui' })
         .height('100%')
         .width('100%')
         .alignRules({
@@ -22,7 +22,7 @@ struct Index {
           left: { anchor: '__container__', align: HorizontalAlign.Start },
           right: { anchor: '__container__', align: HorizontalAlign.End },
         })
-        .id('hanyconnectRoot')
+        .id('hopenconnectRoot')
     }
     .height('100%')
     .width('100%')

@@ -48,8 +48,8 @@
         ]
       },
       {
-        "name": "HAnyConnectVpnExtensionAbility",
-        "srcEntry": "./ets/vpnability/HAnyConnectVpnExtensionAbility.ets",
+        "name": "HOpenConnectVpnExtensionAbility",
+        "srcEntry": "./ets/vpnability/HOpenConnectVpnExtensionAbility.ets",
         "type": "vpn",
         "exported": false
       }
@@ -61,7 +61,7 @@
         "usedScene": {
           "abilities": [
             "EntryAbility",
-            "HAnyConnectVpnExtensionAbility"
+            "HOpenConnectVpnExtensionAbility"
           ],
           "when": "inuse"
         }

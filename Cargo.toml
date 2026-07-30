@@ -6,12 +6,12 @@ resolver = "2"
 version = "1.0.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/harmony-contrib/h-anyconnect"
-homepage = "https://github.com/harmony-contrib/h-anyconnect"
+repository = "https://github.com/harmony-contrib/h-openconnect"
+homepage = "https://github.com/harmony-contrib/h-openconnect"
 rust-version = "1.89"
 
 [workspace.dependencies]
-hanyconnect_core = { path = "crates/hanyconnect_core", default-features = false }
+hopenconnect_core = { path = "crates/hopenconnect_core", default-features = false }
 arkit = { git = "https://github.com/richerfu/arkit.git", rev = "765b1f4ff591fcd02af6fdbc115d28d297f70d6a", package = "arkit", features = ["router", "shadcn"] }
 dioxus = { version = "0.7", default-features = false, features = ["signals", "hooks", "macro"] }
 napi-build-ohos = "1.1"

@@ -13,8 +13,8 @@ pub(crate) const MAX_IN_MEMORY_LOGS: usize = 256;
 const MAX_PENDING_RUNTIME_LOGS: usize = 4096;
 const LOG_DIRECTORY: &str = "logs";
 const RECORDING_MARKER: &str = ".recording";
-const LOG_FILE_PREFIX: &str = "h-anyconnect.";
-const LEGACY_LOG_FILE_PREFIX: &str = "h-anyconnect-";
+const LOG_FILE_PREFIX: &str = "h-openconnect.";
+const LEGACY_LOG_FILE_PREFIX: &str = "h-openconnect-";
 const LOG_FILE_SUFFIX: &str = ".log";
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -296,7 +296,7 @@ fn build_daily_appender(root: &Path) -> CoreResult<RollingFileAppender> {
     ensure_private_dir(&directory)?;
     let appender = RollingFileAppender::builder()
         .rotation(Rotation::DAILY)
-        .filename_prefix("h-anyconnect")
+        .filename_prefix("h-openconnect")
         .filename_suffix("log")
         .build(&directory)
         .map_err(|error| {
@@ -360,7 +360,7 @@ fn log_file_date(file_name: &str) -> Option<&str> {
 fn current_archive_file_name() -> String {
     let date = time::OffsetDateTime::now_utc().date();
     format!(
-        "h-anyconnect.{:04}-{:02}-{:02}.log",
+        "h-openconnect.{:04}-{:02}-{:02}.log",
         date.year(),
         date.month() as u8,
         date.day()
@@ -394,7 +394,7 @@ mod tests {
 
     fn temp_root(label: &str) -> PathBuf {
         std::env::temp_dir().join(format!(
-            "hanyconnect-log-recording-{label}-{}",
+            "hopenconnect-log-recording-{label}-{}",
             now_unix_nanos()
         ))
     }
@@ -449,9 +449,9 @@ mod tests {
     #[test]
     fn archive_names_cannot_escape_the_log_directory() {
         let root = temp_root("safe-name");
-        assert!(read_archive(&root, "../h-anyconnect-2026-01-01.log").is_err());
+        assert!(read_archive(&root, "../h-openconnect-2026-01-01.log").is_err());
         assert!(read_archive(&root, "other.log").is_err());
-        assert!(delete_archive(&root, "../h-anyconnect-2026-01-01.log").is_err());
+        assert!(delete_archive(&root, "../h-openconnect-2026-01-01.log").is_err());
         assert!(delete_archive(&root, "other.log").is_err());
         let _ = fs::remove_dir_all(root);
     }
@@ -469,7 +469,7 @@ mod tests {
         let file_name = status.archives[0].file_name.clone();
         assert!(delete_archive(&root, &file_name).is_err());
 
-        let old_file_name = "h-anyconnect.2000-01-01.log";
+        let old_file_name = "h-openconnect.2000-01-01.log";
         fs::write(log_directory(&root).join(old_file_name), "old log").unwrap();
         delete_archive(&root, old_file_name).unwrap();
         assert!(!log_directory(&root).join(old_file_name).exists());

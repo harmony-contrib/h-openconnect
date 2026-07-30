@@ -397,7 +397,7 @@ fn should_use_system_trust(server_cert_hash: &str, accept_untrusted: bool) -> bo
 fn persist_server_config(config: &[u8]) -> anyconnect::ConfigWriteResult {
     use anyconnect::ConfigWriteResult;
 
-    let Ok(home) = std::env::var("HANYCONNECT_HOME") else {
+    let Ok(home) = std::env::var("HOPENCONNECT_HOME") else {
         // Host tools may not have an application data directory; accepting the
         // config keeps authentication compatible without pretending a failure.
         return ConfigWriteResult::Accepted;
@@ -524,7 +524,7 @@ fn apply_openconnect_prefs(
 }
 
 fn last_progress_lines_interesting(n: usize) -> Option<String> {
-    let home = std::env::var("HANYCONNECT_HOME").ok()?;
+    let home = std::env::var("HOPENCONNECT_HOME").ok()?;
     let path = std::path::Path::new(&home).join("openconnect-progress.log");
     let text = std::fs::read_to_string(path).ok()?;
     let skip = [
@@ -591,7 +591,7 @@ fn handle_auth_form(
     // reclassifying the second main/password as an OTP prompt.
     let can_submit_automatically = can_autofill_without_ui(&fields) && user_input_fields.is_empty();
     tracing::info!(
-        target: "hanyconnect_core::auth",
+        target: "hopenconnect_core::auth",
         form_id = form_id.as_deref().unwrap_or(""),
         form_role = ?role,
         active_second_auth,
@@ -708,7 +708,7 @@ fn handle_auth_form(
 }
 
 /// Resolve the saved protocol value to a live server choice. Matching the
-/// label is a migration path for profiles written by earlier H-AnyConnect
+/// label is a migration path for profiles written by earlier H-OpenConnect
 /// builds; new profiles persist the protocol value, as ics-openconnect does.
 fn configured_auth_group_index(
     configured_group: &str,
@@ -1318,7 +1318,7 @@ pub fn spawn_mainloop(
     }
 
     let join = std::thread::Builder::new()
-        .name("hanyconnect-mainloop".to_owned())
+        .name("hopenconnect-mainloop".to_owned())
         .spawn(move || {
             // 300s reconnect timeout, 10s interval — same order of magnitude as
             // the openconnect CLI defaults for interactive clients.

@@ -1,6 +1,0 @@
-{
-  "name": "libhanyconnect_ui.so",
-  "types": "./Index.d.ts",
-  "version": "0.1.0",
-  "description": "H-AnyConnect arkit native UI and N-API bindings"
-}

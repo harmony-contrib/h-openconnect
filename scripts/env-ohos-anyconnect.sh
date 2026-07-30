@@ -2,7 +2,7 @@
 # Source this before ohrs/cargo builds that link anyconnect-rs for OpenHarmony.
 #
 #   . ./scripts/env-ohos-anyconnect.sh
-#   ohrs build --arch aarch --release -p hanyconnect_ui -- --features native-anyconnect
+#   ohrs build --arch aarch --release -p hopenconnect_ui -- --features native-anyconnect
 #
 # Requires:
 # - OHOS_NDK_HOME / OHOS_SDK_NATIVE (DevEco OpenHarmony Native SDK)
@@ -82,12 +82,12 @@ export CC_aarch64_unknown_linux_ohos="${CC_aarch64_unknown_linux_ohos:-$OHOS_SDK
 export AR_aarch64_unknown_linux_ohos="${AR_aarch64_unknown_linux_ohos:-$OHOS_SDK_NATIVE/llvm/bin/llvm-ar}"
 export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_OHOS_LINKER="${CARGO_TARGET_AARCH64_UNKNOWN_LINUX_OHOS_LINKER:-$OHOS_SDK_NATIVE/llvm/bin/aarch64-unknown-linux-ohos-clang}"
 
-# Real session by default in the packaged app (override with HANYCONNECT_DRY_RUN=1).
-export HANYCONNECT_DRY_RUN="${HANYCONNECT_DRY_RUN:-0}"
+# Real session by default in the packaged app (override with HOPENCONNECT_DRY_RUN=1).
+export HOPENCONNECT_DRY_RUN="${HOPENCONNECT_DRY_RUN:-0}"
 
 echo "OHOS anyconnect env ready"
 echo "  OHOS_SDK_NATIVE=$OHOS_SDK_NATIVE"
 echo "  ANYCONNECT_LIBXML2_DIR=$LIBXML2_PREFIX"
 echo "  ANYCONNECT_SOURCE_DIR=$ANYCONNECT_SOURCE_DIR"
 echo "  OPENSSL=$OPENSSL_MODE"
-echo "  HANYCONNECT_DRY_RUN=$HANYCONNECT_DRY_RUN"
+echo "  HOPENCONNECT_DRY_RUN=$HOPENCONNECT_DRY_RUN"

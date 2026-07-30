@@ -7,7 +7,7 @@
 //! - Full auth runs in the VPN **extension** process (no UI Ability).
 //! - Opening the system browser needs the **UI** process (`startAbility`).
 //! - When no in-process handler is registered, we write
-//!   `browser-request.json` under `HANYCONNECT_HOME` for the UI to poll.
+//!   `browser-request.json` under `HOPENCONNECT_HOME` for the UI to poll.
 
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -63,7 +63,7 @@ pub fn open(uri: &str) -> bool {
 }
 
 fn home_dir() -> Option<PathBuf> {
-    std::env::var_os("HANYCONNECT_HOME").map(PathBuf::from)
+    std::env::var_os("HOPENCONNECT_HOME").map(PathBuf::from)
 }
 
 fn request_path(home: &Path) -> PathBuf {

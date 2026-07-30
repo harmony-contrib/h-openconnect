@@ -117,7 +117,7 @@ pub(crate) fn register_platform_callbacks(callbacks: Object<'static>) -> Result<
             .map_err(|_| Error::from_reason("failed to store socket protect callback"))?
             .replace(Arc::new(tsfn));
         // OpenConnect protect_socket_handler → ArkTS vpnConnection.protect(fd)
-        hanyconnect_core::set_socket_protect_handler(Some(Box::new(|fd| {
+        hopenconnect_core::set_socket_protect_handler(Some(Box::new(|fd| {
             let _ = protect_socket_fd(fd);
         })));
     }
@@ -133,7 +133,7 @@ pub(crate) fn register_platform_callbacks(callbacks: Object<'static>) -> Result<
             .map_err(|_| Error::from_reason("failed to store open browser callback"))?
             .replace(Arc::new(tsfn));
         // OpenConnect external_browser_handler → ArkTS system browser
-        hanyconnect_core::set_external_browser_handler(Some(Box::new(|uri| {
+        hopenconnect_core::set_external_browser_handler(Some(Box::new(|uri| {
             open_external_browser(uri.to_owned()).is_ok()
         })));
     }
