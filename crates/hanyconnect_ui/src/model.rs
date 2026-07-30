@@ -3,9 +3,9 @@
 //! Keep presentation code free of core crate paths while remaining SDK-ready.
 
 pub use hanyconnect_core::{
-    AuthChallenge, AuthChallengeReply, AuthFieldChoice, AuthFieldKind, AuthFieldValue, AuthMethod,
-    ConnectionLifecycle, ConnectionProfile as VpnConnection, NetworkSnapshot, ProtocolKind,
-    SessionSnapshot, SessionStats, SoftwareToken, SplitTunnelMode,
+    AuthChallenge, AuthChallengeReply, AuthFieldChoice, AuthFieldKey, AuthFieldKind,
+    AuthFieldValue, AuthMethod, ConnectionLifecycle, ConnectionProfile as VpnConnection,
+    NetworkSnapshot, ProtocolKind, SessionSnapshot, SessionStats, SoftwareToken, SplitTunnelMode,
 };
 
 pub fn format_bytes(bytes: u64) -> String {

@@ -7,6 +7,7 @@
 //! - HarmonyOS VpnExtensionAbility owns the TUN fd and notifies native code.
 
 mod auth_bridge;
+mod client_identity;
 mod engine;
 mod error;
 mod log_recording;
@@ -27,14 +28,15 @@ pub use platform_browser::{
 pub use platform_protect::set_handler as set_socket_protect_handler;
 
 pub use auth_bridge::AuthInteraction;
+pub use client_identity::{default_client_version, default_user_agent};
 pub use engine::{shared_engine, SessionEngine};
 pub use error::{CoreError, CoreResult};
 pub use log_recording::{LogArchiveSummary, LogRecordingStatus};
 pub use model::{
-    AuthChallenge, AuthChallengeReply, AuthField, AuthFieldChoice, AuthFieldKind, AuthFieldValue,
-    AuthGroupDiscovery, AuthMethod, ConnectRequest, ConnectionLifecycle, ConnectionProfile,
-    NetworkSnapshot, ProtocolKind, SessionSnapshot, SessionStats, SoftwareToken, SplitTunnelMode,
-    VpnOptions,
+    AuthChallenge, AuthChallengeReply, AuthField, AuthFieldChoice, AuthFieldKey, AuthFieldKind,
+    AuthFieldValue, AuthGroupDiscovery, AuthMethod, ConnectRequest, ConnectionLifecycle,
+    ConnectionProfile, NetworkSnapshot, ProtocolKind, SessionSnapshot, SessionStats, SoftwareToken,
+    SplitTunnelMode, VpnOptions,
 };
 pub use store::{Preferences, ProfileStore};
 

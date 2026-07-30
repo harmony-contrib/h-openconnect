@@ -1,11 +1,10 @@
 mod pages;
 mod route;
-mod themed_input;
 
 use crate::l10n::{strings, tr, UiLocale};
 use crate::model::{
-    format_bytes, format_duration, AuthFieldChoice, AuthMethod, ConnectionLifecycle, ProtocolKind,
-    SoftwareToken, SplitTunnelMode, VpnConnection,
+    format_bytes, format_duration, AuthMethod, ConnectionLifecycle, ProtocolKind, SoftwareToken,
+    SplitTunnelMode, VpnConnection,
 };
 use crate::platform_callbacks;
 use crate::state::{reduce, Action, Command, LanguagePreference, State, ThemePreference};
@@ -15,8 +14,8 @@ use arkit::router::{use_back_handler, use_navigator, use_route, AnimatedOutlet, 
 use arkit::shadcn::components::{
     Badge, BadgeVariant, BottomNavigation, BottomNavigationItem, ButtonSize, CardContent,
     CardHeader, CardTitle, Field, FieldContent, FieldDescription, FieldOrientation, FieldTitle,
-    Form, FormItem, InputMode, RadioGroup, Select, Separator, Sonner, SonnerPosition, SonnerToast,
-    Spinner, Switch, Textarea, ToastVariant,
+    Form, FormItem, Input, InputMode, RadioGroup, Select, Separator, Sonner, SonnerPosition,
+    SonnerToast, Spinner, Switch, Textarea, ToastVariant,
 };
 use arkit::shadcn::theme::{use_theme, Theme, ThemeMode, ThemePreset, ThemeProvider};
 use pages::{
@@ -25,7 +24,6 @@ use pages::{
 };
 use route::Route;
 use std::rc::Rc;
-use themed_input::Input;
 
 fn bg() -> u32 {
     use_theme().colors.background

@@ -28,7 +28,7 @@ type VpnStopCall<'a> = Function<'a, (), Unknown<'a>>;
 type VpnStopThreadsafeFunction = ThreadsafeFunction<(), Unknown<'static>, (), Status, false>;
 type VpnStopSlot = LazyLock<RwLock<Option<Arc<VpnStopThreadsafeFunction>>>>;
 
-/// ics-openconnect / Android VpnService.protect(fd) — keep CSTP/DTLS off-tunnel.
+/// Keep OpenConnect CSTP/DTLS sockets off the OpenHarmony tunnel.
 type SocketProtectCall<'a> = Function<'a, i32, Promise<()>>;
 type SocketProtectThreadsafeFunction = ThreadsafeFunction<i32, Promise<()>, i32, Status, false>;
 type SocketProtectSlot = LazyLock<RwLock<Option<Arc<SocketProtectThreadsafeFunction>>>>;
@@ -176,11 +176,10 @@ pub(crate) fn register_platform_callbacks(callbacks: Object<'static>) -> Result<
 
 /// Call platform `vpnConnection.protect(fd)` and wait for its Promise.
 ///
-/// Android's `VpnService.protect(fd)` is synchronous, while OpenHarmony exposes
-/// the same operation as a Promise. OpenConnect starts `connect(2)` immediately
-/// after this callback returns, so merely scheduling the Promise introduces a
-/// race with an already-active VPN. Waiting here preserves the ics/OpenConnect
-/// ordering: protect completes before the socket is connected.
+/// OpenHarmony exposes socket protection as a Promise. OpenConnect starts
+/// `connect(2)` immediately after this callback returns, so merely scheduling
+/// the Promise introduces a race with an already-active VPN. Waiting here
+/// preserves the OpenConnect ordering: protection completes first.
 pub(crate) fn protect_socket_fd(fd: i32) -> Result<()> {
     if fd < 0 {
         return Ok(());

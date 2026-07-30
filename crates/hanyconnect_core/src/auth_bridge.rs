@@ -8,8 +8,8 @@
 //! 4. Worker unblocks, applies values, returns `Submit` / `Cancelled` to OpenConnect.
 
 use crate::error::{CoreError, CoreResult};
-use crate::model::{AuthChallenge, AuthChallengeReply, AuthField, AuthFieldKind, AuthFieldValue};
-use std::collections::HashMap;
+use crate::model::{AuthChallenge, AuthChallengeReply, AuthField, AuthFieldKind};
+use std::collections::HashSet;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -205,69 +205,120 @@ impl AuthInteraction {
     }
 }
 
-/// Prefill known fields from the connection profile.
-#[allow(dead_code)] // used from native_session when `native-anyconnect` is on
-pub fn apply_credentials_to_fields(fields: &mut [AuthField], creds: &AuthCredentials) {
-    for field in fields.iter_mut() {
-        let name = field.name.to_ascii_lowercase();
-        let label = field.label.to_ascii_lowercase();
-        // Primary password only — never treat secondary_password / OTP as the
-        // profile password (would silently submit wrong value for MFA).
-        let is_primary_password = matches!(field.kind, AuthFieldKind::Password)
-            && matches!(
-                name.as_str(),
-                "password" | "passwd" | "pass" | "pwd" | "user_password"
-            )
-            && !name.contains("secondary")
-            && !name.contains("otp")
-            && !name.contains("token")
-            && !name.contains("sms")
-            && !label.contains("otp")
-            && !label.contains("短信")
-            && !label.contains("验证码");
-        let is_username = matches!(field.kind, AuthFieldKind::Text)
-            && (matches!(
-                name.as_str(),
-                "username" | "user" | "uname" | "login" | "userid" | "user_name"
-            ) || label.contains("用户")
-                || label.contains("账号"));
-        let is_group = field.auth_group
-            || (matches!(field.kind, AuthFieldKind::Text | AuthFieldKind::Select)
-                && matches!(
-                    name.as_str(),
-                    "group_list" | "group" | "auth_group" | "group_list[]" | "grouplist"
-                ));
+/// Match OpenConnect CLI's configured-username rule.
+///
+/// `process_auth_form_cb()` accepts text option names beginning with `user` or
+/// `uname`. Labels are never used to infer identity semantics.
+fn accepts_configured_username(field: &AuthField) -> bool {
+    let name = field.name.to_ascii_lowercase();
+    matches!(field.kind, AuthFieldKind::Text)
+        && !field.second_auth
+        && (name.starts_with("user") || name.starts_with("uname"))
+}
 
-        if is_username && field.value.is_empty() && !creds.username.is_empty() {
+/// Result of applying immutable profile credentials to one server form.
+///
+/// Indices are used instead of field names because a broken headend may reuse
+/// the same name for primary and secondary fields in a single form.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub(crate) struct CredentialApplication {
+    /// Values supplied from the profile and therefore hidden from the prompt.
+    profile_owned: HashSet<usize>,
+    /// Visible options explicitly owned by a server challenge.
+    user_owned: HashSet<usize>,
+}
+
+/// AnyConnect protocol role of one server authentication form.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)] // constructed from native_session when `native-anyconnect` is on
+pub(crate) enum AuthFormRole {
+    /// Primary login form (`main` for AnyConnect).
+    Primary,
+    /// Any non-`main` follow-up form reported by OpenConnect.
+    Challenge,
+}
+
+impl AuthFormRole {
+    /// Classify by the AnyConnect form identity, not by option names or labels.
+    ///
+    /// `main` is the protocol's primary-login form. Other named forms include
+    /// `challenge`, `next_tokencode`, and vendor-defined follow-up forms. They
+    /// all have the same UI rule: collect only the visible options actually
+    /// supplied by the server. A missing id falls back to primary so malformed
+    /// forms can never consume the configured password as an inferred OTP.
+    #[allow(dead_code)] // used from native_session when `native-anyconnect` is on
+    pub(crate) fn for_anyconnect(form_id: Option<&str>) -> Self {
+        match form_id {
+            Some("main") | None => Self::Primary,
+            Some(_) => Self::Challenge,
+        }
+    }
+}
+
+/// Apply configured primary credentials using OpenConnect's form semantics.
+///
+/// Primary credentials are immutable session inputs and are applied on every
+/// primary form. A follow-up form never consumes or inherits them: every
+/// visible option is returned to the UI exactly as declared by the server.
+/// A primary form may also contain options carrying OpenConnect's explicit
+/// `OC_FORM_OPT_SECOND_AUTH` flag; those exact visible options are returned to
+/// the UI without interpreting their names or labels as OTP/SMS metadata.
+#[allow(dead_code)] // used from native_session when `native-anyconnect` is on
+pub fn apply_credentials_to_fields(
+    fields: &mut [AuthField],
+    creds: &AuthCredentials,
+    role: AuthFormRole,
+) -> CredentialApplication {
+    let mut applied = CredentialApplication::default();
+    let mut password_available =
+        matches!(role, AuthFormRole::Primary) && !creds.password.is_empty();
+
+    for (index, field) in fields.iter_mut().enumerate() {
+        if matches!(field.kind, AuthFieldKind::Hidden) {
+            field.required = false;
+        } else if matches!(role, AuthFormRole::Challenge) || field.second_auth {
+            field.required = field.value.trim().is_empty();
+            applied.user_owned.insert(index);
+        } else if accepts_configured_username(field) && !creds.username.is_empty() {
             field.value = creds.username.clone();
             field.required = false;
-        } else if is_primary_password && field.value.is_empty() && !creds.password.is_empty() {
+            applied.profile_owned.insert(index);
+        } else if password_available
+            && !field.second_auth
+            && matches!(field.kind, AuthFieldKind::Password)
+        {
+            // Consume the configured password at the first protocol-designated
+            // primary PASSWORD option. Do not bind it to a guessed name.
             field.value = creds.password.clone();
             field.required = false;
-        } else if is_group && field.value.is_empty() && !creds.group.is_empty() {
-            // Prefer exact choice name when select options are present.
-            if !field.choices.is_empty() {
-                let want = creds.group.as_str();
-                if let Some(choice) = field.choices.iter().find(|c| {
-                    c.name.eq_ignore_ascii_case(want) || c.label.eq_ignore_ascii_case(want)
-                }) {
-                    field.value = choice.name.clone();
-                } else {
-                    field.value = creds.group.clone();
-                }
-            } else {
-                field.value = creds.group.clone();
-            }
-            field.required = false;
-        } else if matches!(field.kind, AuthFieldKind::Hidden) {
-            field.required = false;
-        } else if field.value.trim().is_empty()
-            && !matches!(field.kind, AuthFieldKind::Hidden | AuthFieldKind::Unknown)
-        {
-            // Token / secondary password / SMS / OTP must go to the UI.
+            applied.profile_owned.insert(index);
+            password_available = false;
+        } else if field.value.trim().is_empty() && !matches!(field.kind, AuthFieldKind::Hidden) {
+            // Only a follow-up form or an explicit SECOND_AUTH protocol flag
+            // can transfer option ownership to the UI. Other unresolved
+            // primary options are never guessed to be an OTP.
             field.required = true;
         }
     }
+    applied
+}
+
+/// Clone only fields whose values must be collected from the current user.
+///
+/// Only visible options from a server follow-up form or options carrying the
+/// explicit SECOND_AUTH protocol flag are eligible. Ordinary primary-login
+/// options are never converted into an OTP prompt.
+#[allow(dead_code)] // used from native_session when `native-anyconnect` is on
+pub fn fields_for_user_input(
+    fields: &[AuthField],
+    applied: &CredentialApplication,
+) -> Vec<AuthField> {
+    fields
+        .iter()
+        .enumerate()
+        .filter(|(index, _)| applied.user_owned.contains(index))
+        .map(|(_, field)| field.clone())
+        .collect()
 }
 
 /// True when every interactive field already has a non-empty value.
@@ -275,7 +326,7 @@ pub fn apply_credentials_to_fields(fields: &mut [AuthField], creds: &AuthCredent
 pub fn can_autofill_without_ui(fields: &[AuthField]) -> bool {
     let interactive: Vec<&AuthField> = fields
         .iter()
-        .filter(|field| !matches!(field.kind, AuthFieldKind::Hidden | AuthFieldKind::Unknown))
+        .filter(|field| !matches!(field.kind, AuthFieldKind::Hidden))
         .collect();
     // Banner-only / empty forms can be submitted without UI.
     if interactive.is_empty() {
@@ -286,27 +337,53 @@ pub fn can_autofill_without_ui(fields: &[AuthField]) -> bool {
         .all(|field| !field.value.trim().is_empty())
 }
 
-/// Merge reply values over the challenge field list (for applying to OpenConnect).
+/// Bind an ordered reply to the exact options that produced it.
+///
+/// The result stays aligned with `fields`; no field-name map is built. Reply
+/// values must be an in-order subset of the original option sequence, and
+/// every key must match form id, raw option ordinal, and structural digest.
 #[allow(dead_code)] // used from native_session when `native-anyconnect` is on
-pub fn merge_reply_values(
+pub fn bind_reply_values_by_option(
     fields: &[AuthField],
     reply: &AuthChallengeReply,
-) -> HashMap<String, String> {
-    let mut map: HashMap<String, String> = fields
+) -> CoreResult<Vec<Option<String>>> {
+    let mut values = fields
         .iter()
-        .filter(|f| !f.value.is_empty())
-        .map(|f| (f.name.clone(), f.value.clone()))
-        .collect();
-    for AuthFieldValue { name, value } in &reply.values {
-        map.insert(name.clone(), value.clone());
+        .map(|field| (!field.value.is_empty()).then(|| field.value.clone()))
+        .collect::<Vec<_>>();
+    let mut reply_values = reply.values.iter().peekable();
+
+    for (index, field) in fields.iter().enumerate() {
+        let Some(answer) = reply_values.peek() else {
+            break;
+        };
+        if answer.key == field.key {
+            values[index] = Some(answer.value.clone());
+            reply_values.next();
+        }
     }
-    map
+
+    if reply_values.next().is_some() {
+        return Err(CoreError::msg(
+            "authentication reply contains a stale or out-of-order option",
+        ));
+    }
+    Ok(values)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::{AuthFieldKey, AuthFieldValue};
     use std::thread;
+
+    fn field_key(form_id: &str, option_index: u32, option_digest: &str) -> AuthFieldKey {
+        AuthFieldKey {
+            form_id: Some(form_id.to_owned()),
+            option_index,
+            option_digest: option_digest.to_owned(),
+        }
+    }
 
     #[test]
     fn wait_and_submit_roundtrip() {
@@ -323,12 +400,14 @@ mod tests {
                 form_id: None,
                 method: None,
                 fields: vec![AuthField {
+                    key: field_key("challenge", 0, "otp"),
                     name: "secondary_password".to_owned(),
                     label: "OTP".to_owned(),
                     kind: AuthFieldKind::Password,
                     value: String::new(),
                     choices: Vec::new(),
                     auth_group: false,
+                    second_auth: true,
                     required: true,
                 }],
             })
@@ -346,7 +425,7 @@ mod tests {
             .submit(AuthChallengeReply {
                 id: challenge.id,
                 values: vec![AuthFieldValue {
-                    name: "secondary_password".to_owned(),
+                    key: challenge.fields[0].key.clone(),
                     value: "123456".to_owned(),
                 }],
                 cancelled: false,
@@ -398,19 +477,43 @@ mod tests {
                 ..AuthField::default()
             },
         ];
-        apply_credentials_to_fields(
-            &mut fields,
-            &AuthCredentials {
-                username: "demo".to_owned(),
-                password: "demo".to_owned(),
-                group: String::new(),
-            },
-        );
+        let creds = AuthCredentials {
+            username: "demo".to_owned(),
+            password: "demo".to_owned(),
+            group: String::new(),
+        };
+        let applied = apply_credentials_to_fields(&mut fields, &creds, AuthFormRole::Primary);
         assert!(can_autofill_without_ui(&fields));
+        assert_eq!(fields[0].value, "demo");
+        assert_eq!(fields[1].value, "demo");
+        assert_eq!(applied.profile_owned, HashSet::from([0, 1]));
+        assert!(fields_for_user_input(&fields, &applied).is_empty());
+        assert_eq!(creds.password, "demo");
     }
 
     #[test]
-    fn otp_requires_ui() {
+    fn anyconnect_form_role_only_reserves_main_for_primary_login() {
+        assert_eq!(
+            AuthFormRole::for_anyconnect(Some("main")),
+            AuthFormRole::Primary
+        );
+        assert_eq!(
+            AuthFormRole::for_anyconnect(Some("challenge")),
+            AuthFormRole::Challenge
+        );
+        assert_eq!(
+            AuthFormRole::for_anyconnect(Some("next_tokencode")),
+            AuthFormRole::Challenge
+        );
+        assert_eq!(
+            AuthFormRole::for_anyconnect(Some("vendor-follow-up")),
+            AuthFormRole::Challenge
+        );
+        assert_eq!(AuthFormRole::for_anyconnect(None), AuthFormRole::Primary);
+    }
+
+    #[test]
+    fn primary_form_exposes_only_protocol_marked_second_auth_options() {
         let mut fields = vec![
             AuthField {
                 name: "username".to_owned(),
@@ -427,18 +530,409 @@ mod tests {
             AuthField {
                 name: "secondary_password".to_owned(),
                 kind: AuthFieldKind::Password,
+                second_auth: true,
                 required: true,
                 ..AuthField::default()
             },
         ];
-        apply_credentials_to_fields(
+        let applied = apply_credentials_to_fields(
             &mut fields,
             &AuthCredentials {
                 username: "demo".to_owned(),
                 password: "demo".to_owned(),
                 group: String::new(),
             },
+            AuthFormRole::Primary,
         );
         assert!(!can_autofill_without_ui(&fields));
+        let user_fields = fields_for_user_input(&fields, &applied);
+        assert_eq!(user_fields, vec![fields[2].clone()]);
+        assert!(fields[2].required);
+        assert_eq!(fields[0].value, "demo");
+        assert_eq!(fields[1].value, "demo");
+    }
+
+    #[test]
+    fn second_auth_password_never_consumes_primary_profile_password() {
+        let mut fields = vec![AuthField {
+            name: "password".to_owned(),
+            label: "Password".to_owned(),
+            kind: AuthFieldKind::Password,
+            second_auth: true,
+            required: true,
+            ..AuthField::default()
+        }];
+
+        let applied = apply_credentials_to_fields(
+            &mut fields,
+            &AuthCredentials {
+                username: "primary-user".to_owned(),
+                password: "primary-secret".to_owned(),
+                group: String::new(),
+            },
+            AuthFormRole::Primary,
+        );
+
+        assert!(fields[0].value.is_empty());
+        assert!(fields[0].required);
+        assert!(applied.profile_owned.is_empty());
+        assert_eq!(fields_for_user_input(&fields, &applied), fields);
+    }
+
+    #[test]
+    fn second_auth_username_is_server_owned_not_profile_owned() {
+        let mut fields = vec![AuthField {
+            name: "username".to_owned(),
+            label: "Secondary username".to_owned(),
+            kind: AuthFieldKind::Text,
+            second_auth: true,
+            required: true,
+            ..AuthField::default()
+        }];
+
+        let applied = apply_credentials_to_fields(
+            &mut fields,
+            &AuthCredentials {
+                username: "primary-user".to_owned(),
+                password: "primary-secret".to_owned(),
+                group: String::new(),
+            },
+            AuthFormRole::Primary,
+        );
+
+        assert!(fields[0].value.is_empty());
+        assert!(fields[0].required);
+        assert_eq!(fields_for_user_input(&fields, &applied), fields);
+        assert!(!can_autofill_without_ui(&fields));
+    }
+
+    #[test]
+    fn primary_form_reapplies_profile_password_without_otp_inference() {
+        let creds = AuthCredentials {
+            username: "primary-user".to_owned(),
+            password: "primary-secret".to_owned(),
+            group: String::new(),
+        };
+        let mut fields = vec![
+            AuthField {
+                name: "username".to_owned(),
+                label: "Username".to_owned(),
+                kind: AuthFieldKind::Text,
+                required: true,
+                ..AuthField::default()
+            },
+            AuthField {
+                name: "password".to_owned(),
+                label: "Password".to_owned(),
+                kind: AuthFieldKind::Password,
+                required: true,
+                ..AuthField::default()
+            },
+            AuthField {
+                name: "answer".to_owned(),
+                label: "短信验证码".to_owned(),
+                kind: AuthFieldKind::Password,
+                required: true,
+                ..AuthField::default()
+            },
+        ];
+
+        let applied = apply_credentials_to_fields(&mut fields, &creds, AuthFormRole::Primary);
+        let user_fields = fields_for_user_input(&fields, &applied);
+
+        assert_eq!(fields[0].value, "primary-user");
+        assert_eq!(fields[1].value, "primary-secret");
+        assert!(fields[2].value.is_empty());
+        assert_eq!(applied.profile_owned, HashSet::from([0, 1]));
+        assert!(user_fields.is_empty());
+        assert_eq!(creds.password, "primary-secret");
+        assert!(!can_autofill_without_ui(&fields));
+    }
+
+    #[test]
+    fn ambiguous_password_only_challenge_is_never_autofilled() {
+        let creds = AuthCredentials {
+            password: "primary-secret".to_owned(),
+            ..AuthCredentials::default()
+        };
+        let mut fields = vec![AuthField {
+            name: "password".to_owned(),
+            label: "Password".to_owned(),
+            kind: AuthFieldKind::Password,
+            required: true,
+            ..AuthField::default()
+        }];
+
+        let applied = apply_credentials_to_fields(&mut fields, &creds, AuthFormRole::Challenge);
+        let user_fields = fields_for_user_input(&fields, &applied);
+
+        assert!(fields[0].value.is_empty());
+        assert!(applied.profile_owned.is_empty());
+        assert_eq!(user_fields.len(), 1);
+        assert_eq!(user_fields[0].name, "password");
+        assert_eq!(user_fields[0].kind, AuthFieldKind::Password);
+        assert_eq!(creds.password, "primary-secret");
+        assert!(!can_autofill_without_ui(&fields));
+    }
+
+    #[test]
+    fn main_and_next_tokencode_password_options_never_share_values() {
+        let creds = AuthCredentials {
+            username: "primary-user".to_owned(),
+            password: "primary-secret".to_owned(),
+            group: String::new(),
+        };
+        let mut main = vec![AuthField {
+            key: field_key("main", 1, "password"),
+            name: "password".to_owned(),
+            label: "Password".to_owned(),
+            kind: AuthFieldKind::Password,
+            required: true,
+            ..AuthField::default()
+        }];
+        let main_applied = apply_credentials_to_fields(
+            &mut main,
+            &creds,
+            AuthFormRole::for_anyconnect(Some("main")),
+        );
+        assert_eq!(main[0].value, "primary-secret");
+        assert!(fields_for_user_input(&main, &main_applied).is_empty());
+
+        let mut next_token = vec![AuthField {
+            key: field_key("next_tokencode", 1, "password"),
+            // The same option name must not route the configured password.
+            name: "password".to_owned(),
+            label: "Next PASSCODE".to_owned(),
+            kind: AuthFieldKind::Password,
+            required: true,
+            ..AuthField::default()
+        }];
+        let token_applied = apply_credentials_to_fields(
+            &mut next_token,
+            &creds,
+            AuthFormRole::for_anyconnect(Some("next_tokencode")),
+        );
+        assert!(next_token[0].value.is_empty());
+        assert_eq!(
+            fields_for_user_input(&next_token, &token_applied),
+            next_token
+        );
+
+        let reply = AuthChallengeReply {
+            values: vec![AuthFieldValue {
+                key: next_token[0].key.clone(),
+                value: "654321".to_owned(),
+            }],
+            ..AuthChallengeReply::default()
+        };
+        assert_eq!(
+            bind_reply_values_by_option(&next_token, &reply).unwrap(),
+            vec![Some("654321".to_owned())]
+        );
+        assert_eq!(creds.password, "primary-secret");
+    }
+
+    #[test]
+    fn primary_password_is_reused_on_each_primary_form() {
+        let creds = AuthCredentials {
+            username: "primary-user".to_owned(),
+            password: "primary-secret".to_owned(),
+            group: String::new(),
+        };
+        let mut login = vec![AuthField {
+            name: "password".to_owned(),
+            label: "Password".to_owned(),
+            kind: AuthFieldKind::Password,
+            required: true,
+            ..AuthField::default()
+        }];
+        let first = apply_credentials_to_fields(&mut login, &creds, AuthFormRole::Primary);
+        assert_eq!(first.profile_owned, HashSet::from([0]));
+        assert_eq!(login[0].value, "primary-secret");
+
+        // A later primary form receives the same immutable login password. The
+        // worker's form-fingerprint guard, not password consumption, prevents
+        // automatic main/challenge/main loops.
+        let mut challenge = vec![AuthField {
+            name: "password".to_owned(),
+            label: "Password".to_owned(),
+            kind: AuthFieldKind::Password,
+            required: true,
+            ..AuthField::default()
+        }];
+        let second = apply_credentials_to_fields(&mut challenge, &creds, AuthFormRole::Primary);
+        let user_fields = fields_for_user_input(&challenge, &second);
+
+        assert_eq!(second.profile_owned, HashSet::from([0]));
+        assert_eq!(challenge[0].value, "primary-secret");
+        assert!(user_fields.is_empty());
+        assert!(can_autofill_without_ui(&challenge));
+    }
+
+    #[test]
+    fn configured_password_uses_first_primary_password_option_not_its_name() {
+        let creds = AuthCredentials {
+            password: "primary-secret".to_owned(),
+            ..AuthCredentials::default()
+        };
+        let mut fields = vec![
+            AuthField {
+                name: "credential".to_owned(),
+                label: "Primary secret".to_owned(),
+                kind: AuthFieldKind::Password,
+                required: true,
+                ..AuthField::default()
+            },
+            AuthField {
+                name: "answer".to_owned(),
+                label: "Server response".to_owned(),
+                kind: AuthFieldKind::Password,
+                required: true,
+                ..AuthField::default()
+            },
+        ];
+
+        let applied = apply_credentials_to_fields(&mut fields, &creds, AuthFormRole::Primary);
+
+        assert_eq!(fields[0].value, "primary-secret");
+        assert!(fields[1].value.is_empty());
+        assert_eq!(applied.profile_owned, HashSet::from([0]));
+        assert!(fields_for_user_input(&fields, &applied).is_empty());
+    }
+
+    #[test]
+    fn labels_do_not_change_username_or_password_classification() {
+        let creds = AuthCredentials {
+            username: "primary-user".to_owned(),
+            password: "primary-secret".to_owned(),
+            ..AuthCredentials::default()
+        };
+        let mut fields = vec![
+            AuthField {
+                name: "account".to_owned(),
+                label: "用户名".to_owned(),
+                kind: AuthFieldKind::Text,
+                required: true,
+                ..AuthField::default()
+            },
+            AuthField {
+                name: "otp".to_owned(),
+                label: "Password".to_owned(),
+                kind: AuthFieldKind::Text,
+                required: true,
+                ..AuthField::default()
+            },
+        ];
+
+        let applied = apply_credentials_to_fields(&mut fields, &creds, AuthFormRole::Primary);
+
+        assert!(fields.iter().all(|field| field.value.is_empty()));
+        assert!(applied.profile_owned.is_empty());
+        assert!(applied.profile_owned.is_empty());
+    }
+
+    #[test]
+    fn unknown_one_time_code_field_still_requires_the_ui() {
+        let mut fields = vec![AuthField {
+            name: "answer".to_owned(),
+            label: "Verification code".to_owned(),
+            kind: AuthFieldKind::Unknown,
+            ..AuthField::default()
+        }];
+
+        let applied = apply_credentials_to_fields(
+            &mut fields,
+            &AuthCredentials::default(),
+            AuthFormRole::Challenge,
+        );
+
+        assert!(fields[0].required);
+        assert_eq!(fields_for_user_input(&fields, &applied), fields);
+        assert!(!can_autofill_without_ui(&fields));
+    }
+
+    #[test]
+    fn duplicate_option_names_bind_by_key_and_original_order() {
+        let fields = vec![
+            AuthField {
+                key: field_key("challenge", 2, "first"),
+                name: "password".to_owned(),
+                kind: AuthFieldKind::Password,
+                ..AuthField::default()
+            },
+            AuthField {
+                key: field_key("challenge", 4, "second"),
+                name: "password".to_owned(),
+                kind: AuthFieldKind::Password,
+                ..AuthField::default()
+            },
+        ];
+        let reply = AuthChallengeReply {
+            values: vec![
+                AuthFieldValue {
+                    key: fields[0].key.clone(),
+                    value: "login-secret".to_owned(),
+                },
+                AuthFieldValue {
+                    key: fields[1].key.clone(),
+                    value: "123456".to_owned(),
+                },
+            ],
+            ..AuthChallengeReply::default()
+        };
+
+        assert_eq!(
+            bind_reply_values_by_option(&fields, &reply).unwrap(),
+            vec![Some("login-secret".to_owned()), Some("123456".to_owned())]
+        );
+    }
+
+    #[test]
+    fn stale_form_key_is_rejected_instead_of_falling_back_to_name() {
+        let field = AuthField {
+            key: field_key("challenge", 1, "answer"),
+            name: "password".to_owned(),
+            kind: AuthFieldKind::Password,
+            ..AuthField::default()
+        };
+        let reply = AuthChallengeReply {
+            values: vec![AuthFieldValue {
+                key: field_key("main", 1, "answer"),
+                value: "123456".to_owned(),
+            }],
+            ..AuthChallengeReply::default()
+        };
+
+        let error = bind_reply_values_by_option(&[field], &reply).unwrap_err();
+        assert!(error.to_string().contains("stale or out-of-order"));
+    }
+
+    #[test]
+    fn out_of_order_reply_is_rejected() {
+        let fields = vec![
+            AuthField {
+                key: field_key("challenge", 0, "first"),
+                ..AuthField::default()
+            },
+            AuthField {
+                key: field_key("challenge", 1, "second"),
+                ..AuthField::default()
+            },
+        ];
+        let reply = AuthChallengeReply {
+            values: vec![
+                AuthFieldValue {
+                    key: fields[1].key.clone(),
+                    value: "second".to_owned(),
+                },
+                AuthFieldValue {
+                    key: fields[0].key.clone(),
+                    value: "first".to_owned(),
+                },
+            ],
+            ..AuthChallengeReply::default()
+        };
+
+        assert!(bind_reply_values_by_option(&fields, &reply).is_err());
     }
 }

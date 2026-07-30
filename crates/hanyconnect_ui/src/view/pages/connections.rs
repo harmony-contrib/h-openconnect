@@ -1,14 +1,5 @@
 use super::super::*;
 
-fn group_choice_display(choice: &AuthFieldChoice) -> String {
-    let label = choice.label.trim();
-    if label.is_empty() || label == choice.name {
-        choice.name.clone()
-    } else {
-        format!("{label} ({})", choice.name)
-    }
-}
-
 pub(crate) fn connections_page(state: Signal<State>) -> Element {
     let current = state.read().clone();
     let s = strings(current.locale);
@@ -230,12 +221,14 @@ pub(crate) fn connection_editor_page(state: Signal<State>, id: String) -> Elemen
     let group_choices = state.read().group_choices.clone();
     let group_discovery_loading = state.read().group_discovery_loading;
     let group_discovery_error = state.read().group_discovery_error.clone();
-    let group_options: Vec<String> = group_choices.iter().map(group_choice_display).collect();
+    let group_options: Vec<String> = group_choices
+        .iter()
+        .map(|choice| choice.label.clone())
+        .collect();
     let selected_group = group_choices
         .iter()
         .position(|choice| {
-            choice.name.eq_ignore_ascii_case(draft.group.trim())
-                || choice.label.trim().eq_ignore_ascii_case(draft.group.trim())
+            choice.name == draft.group.trim() || choice.label.trim() == draft.group.trim()
         })
         .and_then(|index| group_options.get(index).cloned())
         .or_else(|| group_options.first().cloned())
@@ -338,10 +331,10 @@ pub(crate) fn connection_editor_page(state: Signal<State>, id: String) -> Elemen
                                                 open: None,
                                                 default_open: false,
                                                 on_open_change: None,
-                                                on_select: Some(EventHandler::new(move |display: String| {
+                                                on_select: Some(EventHandler::new(move |label: String| {
                                                     if let Some(choice) = choices_for_handler
                                                         .iter()
-                                                        .find(|choice| group_choice_display(choice) == display)
+                                                        .find(|choice| choice.label == label)
                                                     {
                                                         dispatch(
                                                             state,
@@ -768,7 +761,7 @@ pub(crate) fn connection_editor_page(state: Signal<State>, id: String) -> Elemen
                                     Input {
                                         value: Some(draft.user_agent.clone()),
                                         width: Some("100%".to_owned()),
-                                        placeholder: Some("AnyConnect Android 4.10.07061".to_owned()),
+                                        placeholder: Some(hanyconnect_core::default_user_agent()),
                                         on_change: move |value| dispatch(state, Action::SetDraftUserAgent(value)),
                                     }
                                 }
@@ -777,7 +770,7 @@ pub(crate) fn connection_editor_page(state: Signal<State>, id: String) -> Elemen
                                     Input {
                                         value: Some(draft.client_version.clone()),
                                         width: Some("100%".to_owned()),
-                                        placeholder: Some("4.10.07061".to_owned()),
+                                        placeholder: Some(hanyconnect_core::default_client_version()),
                                         on_change: move |value| dispatch(state, Action::SetDraftClientVersion(value)),
                                     }
                                 }

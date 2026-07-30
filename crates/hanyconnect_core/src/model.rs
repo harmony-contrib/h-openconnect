@@ -248,13 +248,14 @@ pub struct ConnectionProfile {
     /// ics `use_dtls` (default true).
     #[serde(default = "default_true")]
     pub use_dtls: bool,
-    /// ics `reported_os` (android / linux / win / mac-intel / apple-ios).
+    /// AnyConnect protocol platform. Legacy `OpenHarmony` profile values map
+    /// to the Android-compatible device ID at the native boundary.
     #[serde(default = "default_reported_os")]
     pub reported_os: String,
-    /// Optional exact User-Agent override (empty = AnyConnect default).
+    /// Optional exact User-Agent override (empty = AnyConnect Android default).
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub user_agent: String,
-    /// Version reported in AnyConnect XML independently from the HTTP UA.
+    /// Version reported in AnyConnect XML (empty = compatible AnyConnect version).
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub client_version: String,
     /// TLS SNI override (ics `sni`).
@@ -530,10 +531,29 @@ pub struct AuthGroupDiscovery {
     pub groups: Vec<AuthFieldChoice>,
 }
 
+/// Stable identity of one option in a server authentication form.
+///
+/// Option names are not unique in the OpenConnect protocol. The form id,
+/// original option ordinal, and a value-free structural digest together bind
+/// a UI answer to the exact option that produced it.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct AuthFieldKey {
+    #[serde(default)]
+    pub form_id: Option<String>,
+    #[serde(default)]
+    pub option_index: u32,
+    #[serde(default)]
+    pub option_digest: String,
+}
+
 /// One input on an authentication form / challenge page.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct AuthField {
+    /// Exact server option identity used for draft storage and reply binding.
+    #[serde(default)]
+    pub key: AuthFieldKey,
     pub name: String,
     pub label: String,
     pub kind: AuthFieldKind,
@@ -542,10 +562,15 @@ pub struct AuthField {
     pub value: String,
     #[serde(default)]
     pub choices: Vec<AuthFieldChoice>,
-    /// The protocol-designated authentication-group selector. Changing this
-    /// field requires `OC_FORM_RESULT_NEWGROUP`, not a normal form submit.
+    /// The protocol-designated authentication-group selector. Connection-time
+    /// challenges keep this server-selected field out of user-editable values.
     #[serde(default)]
     pub auth_group: bool,
+    /// OpenConnect's `OC_FORM_OPT_SECOND_AUTH` marker. Primary profile
+    /// credentials must never be assigned to a field carrying this protocol
+    /// flag; clients must not infer OTP/SMS semantics from its name or label.
+    #[serde(default)]
+    pub second_auth: bool,
     /// True when the UI must collect this field (empty required interactive).
     #[serde(default)]
     pub required: bool,
@@ -578,7 +603,7 @@ pub struct AuthChallenge {
 #[serde(rename_all = "camelCase")]
 pub struct AuthChallengeReply {
     pub id: u64,
-    /// Field name → value. Hidden fields need not be included.
+    /// Values in the same order as the visible challenge options.
     #[serde(default)]
     pub values: Vec<AuthFieldValue>,
     #[serde(default)]
@@ -588,7 +613,8 @@ pub struct AuthChallengeReply {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct AuthFieldValue {
-    pub name: String,
+    /// Exact option identity copied from [`AuthField::key`].
+    pub key: AuthFieldKey,
     pub value: String,
 }
 

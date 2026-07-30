@@ -3,8 +3,8 @@ use crate::model::{AuthChallenge, AuthFieldKind};
 
 /// Full-screen modal sheet shown while OpenConnect waits for form values.
 ///
-/// All multi-round challenge fields use **visible plain-text** inputs (including
-/// password/token kinds) so OTP / SMS codes are easy to verify while typing.
+/// Field labels and input kinds are rendered from the server form without
+/// reclassifying names such as `password`, `answer`, or `secondary_password`.
 pub(crate) fn auth_challenge_overlay(state: Signal<State>, challenge: AuthChallenge) -> Element {
     let locale = state.read().locale;
     let s = strings(locale);
@@ -23,8 +23,8 @@ pub(crate) fn auth_challenge_overlay(state: Signal<State>, challenge: AuthChalle
         });
     let subtitle = tr(
         locale,
-        "第 {n} 轮认证表单 · 输入内容明文可见",
-        "Authentication form · round {n} · plain text",
+        "第 {n} 轮认证表单",
+        "Authentication form · round {n}",
     )
     .replace("{n}", &challenge.round.to_string());
     let error = challenge.error.clone().filter(|e| !e.trim().is_empty());
@@ -97,19 +97,31 @@ pub(crate) fn auth_challenge_overlay(state: Signal<State>, challenge: AuthChalle
                             width: "100%",
                             align_items: "stretch",
                             {fields.into_iter().map(|field| {
-                            let name = field.name.clone();
-                            let name_for_input = field.name.clone();
+                            let field_key = field.key.clone();
+                            let key_for_input = field.key.clone();
+                            let render_key = format!(
+                                "{}:{}:{}",
+                                field.key.form_id.as_deref().unwrap_or(""),
+                                field.key.option_index,
+                                field.key.option_digest,
+                            );
                             let label = if field.label.trim().is_empty() {
                                 field.name.clone()
                             } else {
                                 field.label.clone()
                             };
-                            let current = values.get(&name).cloned().unwrap_or_default();
+                            let current = values.get(&field_key).cloned().unwrap_or_default();
                             let is_select = matches!(field.kind, AuthFieldKind::Select);
+                            let input_mode = if matches!(field.kind, AuthFieldKind::Password) {
+                                InputMode::Password
+                            } else {
+                                InputMode::Text
+                            };
+                            let is_auth_group = field.auth_group;
                             let choices = field.choices.clone();
                             rsx! {
                                 column {
-                                    key: "{name}",
+                                    key: "{render_key}",
                                     width: "100%",
                                     margin_bottom: 12.0,
                                     text {
@@ -127,24 +139,16 @@ pub(crate) fn auth_challenge_overlay(state: Signal<State>, challenge: AuthChalle
                                         {
                                             let options: Vec<String> = choices
                                                 .iter()
-                                                .map(|c| {
-                                                    if c.label.is_empty() {
-                                                        c.name.clone()
-                                                    } else {
-                                                        c.label.clone()
-                                                    }
-                                                })
+                                                .map(|c| c.label.clone())
+                                                .filter(|label| !label.trim().is_empty())
                                                 .collect();
                                             let selected_label = choices
                                                 .iter()
-                                                .find(|c| c.name == current || c.label == current)
-                                                .map(|c| {
-                                                    if c.label.is_empty() {
-                                                        c.name.clone()
-                                                    } else {
-                                                        c.label.clone()
-                                                    }
+                                                .find(|c| {
+                                                    c.label == current
+                                                        || (!is_auth_group && c.name == current)
                                                 })
+                                                .map(|c| c.label.clone())
                                                 .or_else(|| options.first().cloned())
                                                 .unwrap_or_default();
                                             let choices_for_handler = choices.clone();
@@ -160,13 +164,19 @@ pub(crate) fn auth_challenge_overlay(state: Signal<State>, challenge: AuthChalle
                                                     on_select: Some(EventHandler::new(move |label: String| {
                                                         let value = choices_for_handler
                                                             .iter()
-                                                            .find(|c| c.label == label || c.name == label)
-                                                            .map(|c| c.name.clone())
+                                                            .find(|c| c.label == label)
+                                                            .map(|c| {
+                                                                if is_auth_group {
+                                                                    c.label.clone()
+                                                                } else {
+                                                                    c.name.clone()
+                                                                }
+                                                            })
                                                             .unwrap_or(label);
                                                         dispatch(
                                                             state,
                                                             Action::SetChallengeField {
-                                                                name: name_for_input.clone(),
+                                                                key: key_for_input.clone(),
                                                                 value,
                                                             },
                                                         );
@@ -175,20 +185,20 @@ pub(crate) fn auth_challenge_overlay(state: Signal<State>, challenge: AuthChalle
                                             }
                                         }
                                     } else {
-                                        // Always plain-text (visible) — never password mask.
                                         Input {
                                             value: Some(current),
                                             width: Some("100%".to_owned()),
+                                            mode: input_mode,
                                             placeholder: Some(tr(
                                                 locale,
-                                                "在此输入（明文可见）",
-                                                "Type here (visible)",
+                                                "在此输入",
+                                                "Type here",
                                             ).to_owned()),
                                             on_change: move |value| {
                                                 dispatch(
                                                     state,
                                                     Action::SetChallengeField {
-                                                        name: name_for_input.clone(),
+                                                        key: key_for_input.clone(),
                                                         value,
                                                     },
                                                 );

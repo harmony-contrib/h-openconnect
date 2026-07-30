@@ -2,22 +2,18 @@
 //! handoff, then run OpenConnect's mainloop on a dedicated thread.
 
 use crate::auth_bridge::{
-    apply_credentials_to_fields, can_autofill_without_ui, merge_reply_values, AuthCredentials,
-    AuthInteraction,
+    apply_credentials_to_fields, bind_reply_values_by_option, can_autofill_without_ui,
+    fields_for_user_input, AuthCredentials, AuthFormRole, AuthInteraction,
 };
+use crate::client_identity::{default_client_version, default_user_agent, openconnect_reported_os};
 use crate::error::{CoreError, CoreResult};
 use crate::model::{
-    AuthChallenge, AuthField, AuthFieldChoice, AuthFieldKind, AuthGroupDiscovery,
-    ConnectionProfile, NetworkSnapshot, SessionStats, VpnOptions,
+    AuthChallenge, AuthChallengeReply, AuthField, AuthFieldChoice, AuthFieldKind,
+    AuthGroupDiscovery, ConnectionProfile, NetworkSnapshot, SessionStats, VpnOptions,
 };
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::Duration;
-
-const DEFAULT_ANYCONNECT_VERSION: &str = "4.10.07061";
-const DEFAULT_ANYCONNECT_USER_AGENT: &str = "AnyConnect Android 4.10.07061";
-const DEFAULT_MOBILE_PLATFORM: &str = "OpenHarmony";
-const DEFAULT_MOBILE_DEVICE_TYPE: &str = "phone";
 
 /// Live statistics mirrored from OpenConnect's stats callback / OC_CMD_STATS.
 #[derive(Debug, Default)]
@@ -103,6 +99,7 @@ pub fn authenticate(
         password: profile.password.clone(),
         group: profile.group.clone(),
     };
+    let configured_auth_group = profile.group.trim().to_owned();
     // Untrusted certificates are accepted only when both safety switches are
     // explicitly disabled.
     let accept_untrusted = !profile.strict_certificate_trust && !profile.block_untrusted_servers;
@@ -112,10 +109,8 @@ pub fn authenticate(
     let interaction = interaction.clone();
     let auth_form_error = Arc::new(Mutex::new(None::<String>));
     let callback_error = Arc::clone(&auth_form_error);
-    let initial_auth_group = profile.group.trim().to_owned();
-    let mut auth_group_initialized = !initial_auth_group.is_empty();
+    let mut auth_form_state = AuthFormState::default();
 
-    // Stable AnyConnect UA (do not embed our crate version — headends fingerprint it).
     let user_agent = effective_user_agent(profile);
     let mut builder = Client::builder()
         .url(url.clone())
@@ -126,7 +121,7 @@ pub fn authenticate(
                 form,
                 &creds,
                 interaction.as_ref(),
-                &mut auth_group_initialized,
+                &mut auth_form_state,
                 &callback_error,
             )
         })
@@ -164,8 +159,9 @@ pub fn authenticate(
 
     let mut client = builder.build()?;
     client.set_log_level(LogLevel::Info);
-    client
-        .set_auth_group((!initial_auth_group.is_empty()).then_some(initial_auth_group.as_str()))?;
+    client.set_auth_group(
+        (!configured_auth_group.is_empty()).then_some(configured_auth_group.as_str()),
+    )?;
     apply_openconnect_prefs(&mut client, profile, accept_untrusted)?;
 
     client.obtain_cookie().map_err(|err| {
@@ -232,14 +228,14 @@ pub fn authenticate(
     options.force_global = profile.force_global;
     // Carry protocol prefs for extension rebuild.
     options.use_dtls = profile.use_dtls;
-    options.reported_os = profile.reported_os.clone();
+    options.reported_os = effective_reported_os(profile).to_owned();
     options.sni = profile.sni.clone();
     options.require_pfs = profile.require_pfs;
     options.disable_xml_post = profile.disable_xml_post;
     options.dpd_seconds = profile.dpd_seconds;
     options.vpn_protocol = profile.protocol.as_openconnect().to_owned();
-    options.user_agent = profile.user_agent.clone();
-    options.client_version = profile.client_version.clone();
+    options.user_agent = effective_user_agent(profile);
+    options.client_version = effective_client_version(profile);
     options.allow_insecure_crypto = profile.allow_insecure_crypto;
     options.fips_mode = profile.fips_mode;
     options.external_auth_allowed = wants_external_browser(profile);
@@ -359,16 +355,25 @@ fn peer_cert_decision(accept_untrusted: bool, _reason: &str, _fingerprint: Optio
 fn effective_user_agent(profile: &ConnectionProfile) -> String {
     let configured = profile.user_agent.trim();
     if configured.is_empty() {
-        DEFAULT_ANYCONNECT_USER_AGENT.to_owned()
+        default_user_agent()
     } else {
         configured.to_owned()
     }
 }
 
-fn effective_client_version(profile: &ConnectionProfile) -> &str {
+fn effective_client_version(profile: &ConnectionProfile) -> String {
     let configured = profile.client_version.trim();
     if configured.is_empty() {
-        DEFAULT_ANYCONNECT_VERSION
+        default_client_version()
+    } else {
+        configured.to_owned()
+    }
+}
+
+fn effective_reported_os(profile: &ConnectionProfile) -> &str {
+    let configured = profile.reported_os.trim();
+    if configured.is_empty() {
+        "android"
     } else {
         configured
     }
@@ -417,22 +422,18 @@ fn apply_openconnect_prefs(
         ));
     }
 
-    let os = if profile.reported_os.trim().is_empty() {
-        "android"
-    } else {
-        profile.reported_os.trim()
-    };
+    let configured_os = effective_reported_os(profile);
+    let os = openconnect_reported_os(configured_os);
     client.set_exact_user_agent(effective_user_agent(profile))?;
     client.set_client_version(effective_client_version(profile))?;
     client.set_reported_os(os)?;
-    if os == "android" || os == "apple-ios" {
+    if matches!(os, "android" | "apple-ios") {
         let unique_id = profile.id.trim();
         if !unique_id.is_empty() {
-            client.set_mobile_info(
-                DEFAULT_MOBILE_PLATFORM,
-                DEFAULT_MOBILE_DEVICE_TYPE,
-                unique_id,
-            )?;
+            // Match ics-openconnect's mobile-header shape. Real OpenHarmony
+            // device details remain application metadata and must not alter
+            // the gateway's authentication policy branch.
+            client.set_mobile_info("1.0", os, unique_id)?;
         }
     }
     if !profile.sni.trim().is_empty() {
@@ -550,76 +551,128 @@ fn handle_auth_form(
     form: &mut anyconnect::AuthForm<'_>,
     creds: &AuthCredentials,
     interaction: Option<&Arc<AuthInteraction>>,
-    auth_group_initialized: &mut bool,
+    state: &mut AuthFormState,
     auth_form_error: &Arc<Mutex<Option<String>>>,
 ) -> anyconnect::AuthFormResult {
     use anyconnect::{AuthFormResult, FormOptionKind};
 
-    if !creds.group.trim().is_empty() {
-        if let Some(result) =
-            select_auth_group(form, &creds.group, auth_group_initialized, auth_form_error)
-        {
-            return result;
-        }
+    if let Some(result) = apply_configured_auth_group(form, &creds.group, state, auth_form_error) {
+        return result;
     }
 
-    let mut fields = snapshot_form_fields(form);
-    apply_credentials_to_fields(&mut fields, creds);
+    let has_active_input = form_has_active_input(form);
+    if !state.accept_form(has_active_input) {
+        return AuthFormResult::Cancelled;
+    }
 
-    let values = if can_autofill_without_ui(&fields) {
-        fields
-            .iter()
-            .filter(|f| !f.value.is_empty())
-            .map(|f| (f.name.clone(), f.value.clone()))
-            .collect::<std::collections::HashMap<_, _>>()
+    let form_id = form.id();
+    let banner = form.banner();
+    let message = form.message();
+    let server_error = form.error();
+    let active_second_auth = form.has_active_second_auth();
+    let mut fields = snapshot_form_fields(form, form_id.as_deref());
+    let role = AuthFormRole::for_anyconnect(form_id.as_deref());
+    let applied = apply_credentials_to_fields(&mut fields, creds, role);
+    let user_input_fields = fields_for_user_input(&fields, &applied);
+    let fingerprint = AuthFormFingerprint::from_fields(form_id.clone(), &fields);
+    // Primary credentials can satisfy every primary form, but the same
+    // value-free form identity is never submitted automatically twice in one
+    // session. This catches main -> hidden challenge -> main cycles without
+    // reclassifying the second main/password as an OTP prompt.
+    let can_submit_automatically = can_autofill_without_ui(&fields) && user_input_fields.is_empty();
+    tracing::info!(
+        target: "hanyconnect_core::auth",
+        form_id = form_id.as_deref().unwrap_or(""),
+        form_role = ?role,
+        active_second_auth,
+        field_count = fields.len(),
+        user_field_count = user_input_fields.len(),
+        automatic = can_submit_automatically,
+        field_schema = ?fingerprint,
+        "processed server authentication form without logging credential values"
+    );
+    if can_submit_automatically && state.was_automatically_submitted(&fingerprint) {
+        let message = if let Some(hidden_follow_up) = state.hidden_follow_up_without_input() {
+            let server_detail = server_error
+                .as_deref()
+                .filter(|detail| !detail.trim().is_empty())
+                .map(|detail| format!("；网关原始响应：{detail}"))
+                .unwrap_or_default();
+            format!(
+                "服务器在二次认证表单 {hidden_follow_up:?} 中只提供了隐藏字段，没有提供可见的验证码 option，随后又返回 main；已停止重放登录密码以避免再次触发短信{server_detail}"
+            )
+        } else {
+            "服务器再次返回了同一认证表单，已停止自动提交以避免重复发送短信；main/password 仍按登录密码处理".to_owned()
+        };
+        return auth_form_failure(auth_form_error, message);
+    }
+
+    let values = if can_submit_automatically {
+        match bind_reply_values_by_option(&fields, &AuthChallengeReply::default()) {
+            Ok(values) => values,
+            Err(err) => {
+                return auth_form_failure(
+                    auth_form_error,
+                    format!("failed to bind automatic authentication values: {err}"),
+                );
+            }
+        }
     } else if let Some(interaction) = interaction {
+        if user_input_fields.is_empty() {
+            return auth_form_failure(
+                auth_form_error,
+                "服务器返回了未满足的登录表单；只有明确的 challenge option 才允许收集验证码"
+                    .to_owned(),
+            );
+        }
         let challenge = AuthChallenge {
             id: 0,
             round: 0,
-            banner: form.banner(),
-            message: form.message(),
-            error: form.error(),
-            form_id: form.id(),
+            banner,
+            message,
+            error: server_error,
+            form_id: form_id.clone(),
             method: form.method(),
-            fields: fields.clone(),
+            fields: user_input_fields,
         };
         let reply = interaction.wait_for_reply(challenge);
         if reply.cancelled {
             return AuthFormResult::Cancelled;
         }
-        merge_reply_values(&fields, &reply)
+        match bind_reply_values_by_option(&fields, &reply) {
+            Ok(values) => values,
+            Err(err) => {
+                return auth_form_failure(
+                    auth_form_error,
+                    format!("failed to bind authentication challenge reply: {err}"),
+                );
+            }
+        }
     } else {
         // Extension and host-only paths are non-interactive. Authentication
         // challenges are completed in the UI before the cookie handoff.
-        if !can_autofill_without_ui(&fields) {
-            return AuthFormResult::Cancelled;
-        }
-        fields
-            .iter()
-            .filter(|f| !f.value.is_empty())
-            .map(|f| (f.name.clone(), f.value.clone()))
-            .collect()
+        return AuthFormResult::Cancelled;
     };
 
-    // A group picked in the interactive form changes which AAA fields are
-    // active. Refresh the form instead of submitting fields belonging to the
-    // old/default RADIUS policy.
-    if let Some(group_field) = fields.iter().find(|field| field.auth_group) {
-        if let Some(value) = values.get(&group_field.name) {
-            if let Some(result) =
-                select_auth_group(form, value, auth_group_initialized, auth_form_error)
-            {
-                return result;
-            }
-        }
-    }
-
-    for mut option in form.options() {
-        let name = option.name().unwrap_or_default();
-        if matches!(option.kind(), FormOptionKind::Hidden) || option.is_ignored() {
+    let mut field_index = 0usize;
+    for (raw_option_index, mut option) in form.options().enumerate() {
+        let option_index = u32::try_from(raw_option_index).unwrap_or(u32::MAX);
+        let Some(field) = fields.get(field_index) else {
+            break;
+        };
+        if field.key.option_index != option_index {
             continue;
         }
-        if let Some(value) = values.get(&name) {
+        let value = values.get(field_index).and_then(Option::as_deref);
+        field_index = field_index.saturating_add(1);
+        let name = option.name().unwrap_or_default();
+        if matches!(option.kind(), FormOptionKind::Hidden)
+            || option.is_ignored()
+            || option.is_auth_group()
+        {
+            continue;
+        }
+        if let Some(value) = value {
             let result = if matches!(option.kind(), FormOptionKind::Select) {
                 option.set_choice(value)
             } else {
@@ -633,64 +686,197 @@ fn handle_auth_form(
             }
         }
     }
+    if field_index != fields.len() {
+        return auth_form_failure(
+            auth_form_error,
+            "server authentication options changed while binding the reply".to_owned(),
+        );
+    }
+    state.record_follow_up_submission(role, has_active_input, form_id.as_deref());
+    state.record_submission(fingerprint, can_submit_automatically);
     AuthFormResult::Submit
 }
 
-/// Select the exact server-advertised group value. The first selection, or a
-/// later change, requires `NewGroup` so the headend can return the matching
-/// primary/secondary authentication fields.
-fn select_auth_group(
+/// Resolve the saved protocol value to a live server choice. Matching the
+/// label is a migration path for profiles written by earlier H-AnyConnect
+/// builds; new profiles persist the protocol value, as ics-openconnect does.
+fn configured_auth_group_index(
+    configured_group: &str,
+    choices: &[AuthFieldChoice],
+) -> Option<usize> {
+    let configured_group = configured_group.trim();
+    if configured_group.is_empty() {
+        return None;
+    }
+    choices
+        .iter()
+        .position(|choice| choice.name == configured_group)
+        .or_else(|| {
+            choices
+                .iter()
+                .position(|choice| choice.label.trim() == configured_group)
+        })
+}
+
+/// Apply the saved group exactly as ics-openconnect's `setAuthgroup()` does.
+/// A refreshed form is requested only when the selected protocol choice
+/// actually changes.
+fn apply_configured_auth_group(
     form: &mut anyconnect::AuthForm<'_>,
-    requested: &str,
-    initialized: &mut bool,
+    configured_group: &str,
+    state: &mut AuthFormState,
     auth_form_error: &Arc<Mutex<Option<String>>>,
 ) -> Option<anyconnect::AuthFormResult> {
     use anyconnect::AuthFormResult;
 
-    let requested = requested.trim();
-    if requested.is_empty() {
-        return None;
-    }
     let choices = form.auth_group_choices();
     if choices.is_empty() {
         // Other protocols can expose realm/domain as an ordinary named field.
         return None;
     }
-    let Some(selection) = choices.iter().position(|choice| {
-        choice.name.eq_ignore_ascii_case(requested)
-            || choice.label.trim().eq_ignore_ascii_case(requested)
-    }) else {
-        let available = choices
+    if configured_group.trim().is_empty() {
+        return None;
+    }
+    let group_choices = choices
+        .iter()
+        .map(|choice| AuthFieldChoice {
+            name: choice.name.clone(),
+            label: choice.label.clone(),
+        })
+        .collect::<Vec<_>>();
+    let Some(selection) = configured_auth_group_index(configured_group, &group_choices) else {
+        let available = group_choices
             .iter()
-            .map(|choice| {
-                if choice.label.trim().is_empty() || choice.label == choice.name {
-                    choice.name.clone()
-                } else {
-                    format!("{} ({})", choice.label, choice.name)
-                }
-            })
+            .map(|choice| format!("{} ({})", choice.label, choice.name))
             .collect::<Vec<_>>()
             .join(", ");
         return Some(auth_form_failure(
             auth_form_error,
             format!(
-                "authentication group {requested:?} is not offered by the server; available groups: {available}"
+                "configured authentication group {configured_group:?} is not offered by the server; available groups: {available}"
             ),
         ));
     };
-
     let selection_changed = form.auth_group_selection() != selection as i32;
     if let Err(err) = form.set_auth_group_selection(selection) {
         return Some(auth_form_failure(
             auth_form_error,
-            format!("failed to select authentication group {requested:?}: {err}"),
+            format!("failed to apply configured authentication group {configured_group:?}: {err}"),
         ));
     }
-    if !*initialized || selection_changed {
-        *initialized = true;
-        return Some(AuthFormResult::NewGroup);
+
+    if state.take_auth_group_refresh(selection_changed) {
+        Some(AuthFormResult::NewGroup)
+    } else {
+        None
     }
-    None
+}
+
+#[derive(Debug, Default)]
+struct AuthFormState {
+    auth_group_set: bool,
+    consecutive_empty_forms: u8,
+    automatically_submitted_forms: Vec<AuthFormFingerprint>,
+    hidden_follow_up_without_input: Option<String>,
+}
+
+impl AuthFormState {
+    fn take_auth_group_refresh(&mut self, selection_changed: bool) -> bool {
+        if self.auth_group_set {
+            false
+        } else {
+            self.auth_group_set = true;
+            selection_changed
+        }
+    }
+
+    /// Match OpenConnect's empty-form loop guard: the third consecutive form
+    /// without an active text/password/select/token input cancels auth.
+    fn accept_form(&mut self, has_active_input: bool) -> bool {
+        if has_active_input {
+            self.consecutive_empty_forms = 0;
+            return true;
+        }
+        self.consecutive_empty_forms = self.consecutive_empty_forms.saturating_add(1);
+        self.consecutive_empty_forms < 3
+    }
+
+    fn was_automatically_submitted(&self, fingerprint: &AuthFormFingerprint) -> bool {
+        self.automatically_submitted_forms.contains(fingerprint)
+    }
+
+    fn record_submission(&mut self, fingerprint: AuthFormFingerprint, automatic: bool) {
+        if automatic && !self.was_automatically_submitted(&fingerprint) {
+            self.automatically_submitted_forms.push(fingerprint);
+        }
+    }
+
+    fn record_follow_up_submission(
+        &mut self,
+        role: AuthFormRole,
+        has_active_input: bool,
+        form_id: Option<&str>,
+    ) {
+        if matches!(role, AuthFormRole::Challenge) {
+            self.hidden_follow_up_without_input = if has_active_input {
+                None
+            } else {
+                Some(form_id.unwrap_or("<missing>").to_owned())
+            };
+        }
+    }
+
+    fn hidden_follow_up_without_input(&self) -> Option<&str> {
+        self.hidden_follow_up_without_input.as_deref()
+    }
+}
+
+/// Value-free form identity equivalent to ics-openconnect's `formPfx`.
+///
+/// Values are intentionally excluded so a server cannot evade the repeated
+/// form guard by echoing a previously submitted credential.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct AuthFormFingerprint {
+    form_id: Option<String>,
+    options: Vec<AuthFieldFingerprint>,
+}
+
+impl AuthFormFingerprint {
+    fn from_fields(form_id: Option<String>, fields: &[AuthField]) -> Self {
+        Self {
+            form_id,
+            options: fields
+                .iter()
+                .map(|field| AuthFieldFingerprint {
+                    option_index: field.key.option_index,
+                    option_digest: field.key.option_digest.clone(),
+                })
+                .collect(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct AuthFieldFingerprint {
+    option_index: u32,
+    option_digest: String,
+}
+
+fn form_has_active_input(form: &mut anyconnect::AuthForm<'_>) -> bool {
+    use anyconnect::FormOptionKind;
+
+    form.options().any(|option| {
+        !option.is_ignored()
+            && !option.is_auth_group()
+            && matches!(
+                option.kind(),
+                FormOptionKind::Text
+                    | FormOptionKind::Password
+                    | FormOptionKind::Select
+                    | FormOptionKind::Token
+                    | FormOptionKind::Unknown(_)
+            )
+    })
 }
 
 fn auth_form_failure(
@@ -703,13 +889,15 @@ fn auth_form_failure(
     anyconnect::AuthFormResult::Error
 }
 
-fn snapshot_form_fields(form: &mut anyconnect::AuthForm<'_>) -> Vec<AuthField> {
+fn snapshot_form_fields(
+    form: &mut anyconnect::AuthForm<'_>,
+    form_id: Option<&str>,
+) -> Vec<AuthField> {
     use anyconnect::FormOptionKind;
 
     let mut fields = Vec::new();
-    let selected_auth_group = form.selected_auth_group().map(|choice| choice.name);
-    for option in form.options() {
-        if option.is_ignored() {
+    for (raw_option_index, option) in form.options().enumerate() {
+        if option.is_ignored() || option.is_auth_group() {
             continue;
         }
         let option_kind = option.kind();
@@ -734,12 +922,9 @@ fn snapshot_form_fields(form: &mut anyconnect::AuthForm<'_>) -> Vec<AuthField> {
             .label()
             .filter(|s| !s.trim().is_empty())
             .unwrap_or_else(|| name.clone());
-        let auth_group = option.is_auth_group();
-        let mut value = option.value().unwrap_or_default();
-        if auth_group && value.is_empty() {
-            value = selected_auth_group.clone().unwrap_or_default();
-        }
-        let choices = option
+        let second_auth = option.is_second_auth();
+        let value = option.value().unwrap_or_default();
+        let choices: Vec<AuthFieldChoice> = option
             .choices()
             .into_iter()
             .map(|c| {
@@ -752,19 +937,58 @@ fn snapshot_form_fields(form: &mut anyconnect::AuthForm<'_>) -> Vec<AuthField> {
                 AuthFieldChoice { name, label }
             })
             .collect();
-        let required = !matches!(kind, AuthFieldKind::Hidden | AuthFieldKind::Unknown)
-            && value.trim().is_empty();
+        let option_digest = auth_option_digest(&name, &label, kind, &choices, second_auth);
+        let required = !matches!(kind, AuthFieldKind::Hidden) && value.trim().is_empty();
         fields.push(AuthField {
+            key: crate::model::AuthFieldKey {
+                form_id: form_id.map(str::to_owned),
+                option_index: u32::try_from(raw_option_index).unwrap_or(u32::MAX),
+                option_digest,
+            },
             name,
             label,
             kind,
             value,
             choices,
-            auth_group,
+            auth_group: false,
+            second_auth,
             required,
         });
     }
     fields
+}
+
+/// Deterministic, value-free FNV-1a digest of one server option.
+///
+/// This is an identity checksum, not a security primitive. Length-prefixing
+/// every component prevents ambiguous concatenations.
+fn auth_option_digest(
+    name: &str,
+    label: &str,
+    kind: AuthFieldKind,
+    choices: &[AuthFieldChoice],
+    second_auth: bool,
+) -> String {
+    const FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
+    const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
+
+    fn update(hash: &mut u64, bytes: &[u8]) {
+        for byte in (bytes.len() as u64).to_le_bytes().iter().chain(bytes) {
+            *hash ^= u64::from(*byte);
+            *hash = hash.wrapping_mul(FNV_PRIME);
+        }
+    }
+
+    let mut hash = FNV_OFFSET;
+    update(&mut hash, name.as_bytes());
+    update(&mut hash, label.as_bytes());
+    update(&mut hash, &[kind as u8]);
+    update(&mut hash, &[u8::from(second_auth)]);
+    for choice in choices {
+        update(&mut hash, choice.name.as_bytes());
+        update(&mut hash, choice.label.as_bytes());
+    }
+    format!("{hash:016x}")
 }
 
 fn protocol_owns_auth_value(kind: anyconnect::FormOptionKind) -> bool {
@@ -882,8 +1106,6 @@ fn resume_from_options_once(options: &VpnOptions) -> CoreResult<PendingNativeSes
         ));
     }
 
-    let initial_auth_group = group.trim().to_owned();
-    let mut auth_group_initialized = !initial_auth_group.is_empty();
     let creds = AuthCredentials {
         username,
         password: password.clone(),
@@ -891,6 +1113,7 @@ fn resume_from_options_once(options: &VpnOptions) -> CoreResult<PendingNativeSes
     };
     let auth_form_error = Arc::new(Mutex::new(None::<String>));
     let callback_error = Arc::clone(&auth_form_error);
+    let mut auth_form_state = AuthFormState::default();
 
     let proto = if options.vpn_protocol.trim().is_empty() {
         "anyconnect"
@@ -898,7 +1121,7 @@ fn resume_from_options_once(options: &VpnOptions) -> CoreResult<PendingNativeSes
         options.vpn_protocol.as_str()
     };
     let user_agent = if options.user_agent.trim().is_empty() {
-        DEFAULT_ANYCONNECT_USER_AGENT.to_owned()
+        default_user_agent()
     } else {
         options.user_agent.clone()
     };
@@ -908,13 +1131,7 @@ fn resume_from_options_once(options: &VpnOptions) -> CoreResult<PendingNativeSes
         .protocol(proto)
         .user_agent(user_agent)
         .authentication_handler(move |form| {
-            handle_auth_form(
-                form,
-                &creds,
-                None,
-                &mut auth_group_initialized,
-                &callback_error,
-            )
+            handle_auth_form(form, &creds, None, &mut auth_form_state, &callback_error)
         })
         .certificate_validator(move |error| {
             peer_cert_decision(
@@ -974,9 +1191,6 @@ fn resume_from_options_once(options: &VpnOptions) -> CoreResult<PendingNativeSes
     resume_profile.allow_insecure_crypto = options.allow_insecure_crypto;
     resume_profile.fips_mode = options.fips_mode;
     resume_profile.external_browser_auth = options.external_auth_allowed;
-    client.set_auth_group(
-        (!resume_profile.group.trim().is_empty()).then_some(resume_profile.group.trim()),
-    )?;
     apply_openconnect_prefs(&mut client, &resume_profile, accept_untrusted)?;
 
     let cookie_value = cookie.as_deref().expect("cookie checked above");
@@ -1198,5 +1412,186 @@ mod tests {
         assert!(!should_use_system_trust("", true));
         assert!(!should_use_system_trust("sha256:0011", false));
         assert!(!should_use_system_trust("pin-sha256:AbCdEf+/=", true));
+    }
+
+    #[test]
+    fn default_protocol_identity_matches_anyconnect_android() {
+        let profile = ConnectionProfile::new_draft();
+
+        assert_eq!(
+            effective_user_agent(&profile),
+            "AnyConnect Android 4.10.07061"
+        );
+        assert_eq!(effective_client_version(&profile), "4.10.07061");
+        assert_eq!(
+            openconnect_reported_os(effective_reported_os(&profile)),
+            "android"
+        );
+    }
+
+    #[test]
+    fn legacy_openharmony_profile_identity_migrates_at_protocol_boundary() {
+        let mut profile = ConnectionProfile::new_draft();
+        profile.reported_os = "OpenHarmony".to_owned();
+
+        assert_eq!(effective_reported_os(&profile), "OpenHarmony");
+        assert_eq!(
+            openconnect_reported_os(effective_reported_os(&profile)),
+            "android"
+        );
+    }
+
+    #[test]
+    fn configured_auth_group_prefers_protocol_value_and_migrates_saved_label() {
+        let choices = vec![
+            AuthFieldChoice {
+                name: "password".to_owned(),
+                label: "密码认证".to_owned(),
+            },
+            AuthFieldChoice {
+                name: "sms".to_owned(),
+                label: "短信认证".to_owned(),
+            },
+        ];
+
+        assert_eq!(configured_auth_group_index("sms", &choices), Some(1));
+        assert_eq!(configured_auth_group_index("短信认证", &choices), Some(1));
+        assert_eq!(configured_auth_group_index("", &choices), None);
+    }
+
+    #[test]
+    fn configured_auth_group_never_falls_back_to_another_choice() {
+        let choices = vec![AuthFieldChoice {
+            name: "sms".to_owned(),
+            label: "短信认证".to_owned(),
+        }];
+        assert_eq!(configured_auth_group_index("不存在", &choices), None);
+    }
+
+    #[test]
+    fn unchanged_authentication_group_does_not_refresh_the_form() {
+        let mut unchanged = AuthFormState::default();
+        assert!(!unchanged.take_auth_group_refresh(false));
+        assert!(!unchanged.take_auth_group_refresh(true));
+    }
+
+    #[test]
+    fn changed_authentication_group_refreshes_exactly_once() {
+        let mut changed = AuthFormState::default();
+        assert!(changed.take_auth_group_refresh(true));
+        assert!(!changed.take_auth_group_refresh(true));
+        assert!(!changed.take_auth_group_refresh(false));
+    }
+
+    #[test]
+    fn automatic_main_form_is_guarded_across_an_intervening_challenge() {
+        let mut state = AuthFormState::default();
+        let main = AuthFormFingerprint::from_fields(
+            Some("main".to_owned()),
+            &[AuthField {
+                key: crate::model::AuthFieldKey {
+                    form_id: Some("main".to_owned()),
+                    option_index: 1,
+                    option_digest: "password".to_owned(),
+                },
+                name: "password".to_owned(),
+                label: "Password".to_owned(),
+                kind: AuthFieldKind::Password,
+                ..AuthField::default()
+            }],
+        );
+        let challenge = AuthFormFingerprint::from_fields(
+            Some("challenge".to_owned()),
+            &[AuthField {
+                key: crate::model::AuthFieldKey {
+                    form_id: Some("challenge".to_owned()),
+                    option_index: 0,
+                    option_digest: "hidden-trigger".to_owned(),
+                },
+                kind: AuthFieldKind::Hidden,
+                ..AuthField::default()
+            }],
+        );
+
+        assert!(!state.was_automatically_submitted(&main));
+        state.record_submission(main.clone(), true);
+        state.record_submission(challenge, true);
+        assert!(state.was_automatically_submitted(&main));
+    }
+
+    #[test]
+    fn hidden_follow_up_is_remembered_until_a_visible_follow_up_arrives() {
+        let mut state = AuthFormState::default();
+
+        state.record_follow_up_submission(AuthFormRole::Challenge, false, Some("next_tokencode"));
+        assert_eq!(
+            state.hidden_follow_up_without_input(),
+            Some("next_tokencode")
+        );
+
+        state.record_follow_up_submission(AuthFormRole::Challenge, true, Some("challenge"));
+        assert_eq!(state.hidden_follow_up_without_input(), None);
+    }
+
+    #[test]
+    fn repeated_form_fingerprint_ignores_echoed_credential_values() {
+        let mut first = AuthField {
+            name: "password".to_owned(),
+            label: "Password".to_owned(),
+            kind: AuthFieldKind::Password,
+            value: "first-secret".to_owned(),
+            ..AuthField::default()
+        };
+        let first_fingerprint =
+            AuthFormFingerprint::from_fields(Some("main".to_owned()), std::slice::from_ref(&first));
+        first.value = "echoed-or-different-secret".to_owned();
+        let repeated_fingerprint =
+            AuthFormFingerprint::from_fields(Some("main".to_owned()), &[first]);
+
+        assert_eq!(first_fingerprint, repeated_fingerprint);
+    }
+
+    #[test]
+    fn form_fingerprint_includes_server_form_id() {
+        let field = AuthField {
+            key: crate::model::AuthFieldKey {
+                option_index: 0,
+                option_digest: "same-option".to_owned(),
+                ..crate::model::AuthFieldKey::default()
+            },
+            ..AuthField::default()
+        };
+
+        assert_ne!(
+            AuthFormFingerprint::from_fields(Some("main".to_owned()), std::slice::from_ref(&field)),
+            AuthFormFingerprint::from_fields(Some("challenge".to_owned()), &[field])
+        );
+    }
+
+    #[test]
+    fn option_digest_is_value_free_but_sensitive_to_structure() {
+        let first = auth_option_digest("password", "Password", AuthFieldKind::Password, &[], false);
+        let same = auth_option_digest("password", "Password", AuthFieldKind::Password, &[], false);
+        let challenge = auth_option_digest(
+            "password",
+            "Verification code",
+            AuthFieldKind::Password,
+            &[],
+            false,
+        );
+
+        assert_eq!(first, same);
+        assert_ne!(first, challenge);
+    }
+
+    #[test]
+    fn third_consecutive_empty_authentication_form_is_rejected() {
+        let mut state = AuthFormState::default();
+
+        assert!(state.accept_form(false));
+        assert!(state.accept_form(false));
+        assert!(!state.accept_form(false));
+        assert!(state.accept_form(true));
+        assert!(state.accept_form(false));
     }
 }

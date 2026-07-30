@@ -1,7 +1,8 @@
 use crate::l10n::{strings, UiLocale};
 use crate::model::{
-    AuthChallengeReply, AuthFieldChoice, AuthFieldValue, AuthMethod, ConnectionLifecycle,
-    NetworkSnapshot, ProtocolKind, SessionSnapshot, SessionStats, VpnConnection,
+    AuthChallengeReply, AuthFieldChoice, AuthFieldKey, AuthFieldValue, AuthMethod,
+    ConnectionLifecycle, NetworkSnapshot, ProtocolKind, SessionSnapshot, SessionStats,
+    VpnConnection,
 };
 use crate::platform_callbacks;
 use hanyconnect_core::{shared_engine, ConnectRequest, LogRecordingStatus, SessionEngine};
@@ -191,7 +192,7 @@ pub(crate) enum Action {
     DismissToast(u64),
     /// Update one field on the in-progress auth challenge form.
     SetChallengeField {
-        name: String,
+        key: AuthFieldKey,
         value: String,
     },
     /// Submit the current challenge form to the OpenConnect worker.
@@ -249,8 +250,8 @@ pub(crate) struct State {
     pub toasts: Vec<FeedbackToast>,
     next_toast_id: u64,
     pub dry_run: bool,
-    /// Local draft values for the pending auth challenge (field name → value).
-    pub challenge_values: HashMap<String, String>,
+    /// Local draft values bound to exact server form options.
+    pub challenge_values: HashMap<AuthFieldKey, String>,
     /// Last challenge id we seeded `challenge_values` from.
     challenge_seed_id: Option<u64>,
     /// User initiated disconnect (skip the unexpected-drop auto-reconnect).
@@ -356,14 +357,8 @@ impl State {
                 self.challenge_values = challenge
                     .fields
                     .iter()
-                    .filter(|field| {
-                        !matches!(
-                            field.kind,
-                            hanyconnect_core::AuthFieldKind::Hidden
-                                | hanyconnect_core::AuthFieldKind::Unknown
-                        )
-                    })
-                    .map(|field| (field.name.clone(), field.value.clone()))
+                    .filter(|field| !matches!(field.kind, hanyconnect_core::AuthFieldKind::Hidden))
+                    .map(|field| (field.key.clone(), field.value.clone()))
                     .collect();
                 self.challenge_seed_id = Some(challenge.id);
             }
@@ -533,8 +528,8 @@ pub(crate) fn reduce(state: &mut State, action: Action) -> Command<Action> {
                 Action::TickSession
             })
         }
-        Action::SetChallengeField { name, value } => {
-            state.challenge_values.insert(name, value);
+        Action::SetChallengeField { key, value } => {
+            state.challenge_values.insert(key, value);
             Command::none()
         }
         Action::SubmitChallenge => {
@@ -556,7 +551,7 @@ pub(crate) fn reduce(state: &mut State, action: Action) -> Command<Action> {
                 }
                 let value = state
                     .challenge_values
-                    .get(&field.name)
+                    .get(&field.key)
                     .map(|s| s.trim())
                     .unwrap_or("");
                 if value.is_empty() {
@@ -570,13 +565,18 @@ pub(crate) fn reduce(state: &mut State, action: Action) -> Command<Action> {
             }
             let reply = AuthChallengeReply {
                 id: challenge.id,
-                values: state
-                    .challenge_values
+                values: challenge
+                    .fields
                     .iter()
-                    .filter(|(_, value)| !value.trim().is_empty())
-                    .map(|(name, value)| AuthFieldValue {
-                        name: name.clone(),
-                        value: value.clone(),
+                    .filter_map(|field| {
+                        state
+                            .challenge_values
+                            .get(&field.key)
+                            .filter(|value| !value.trim().is_empty())
+                            .map(|value| AuthFieldValue {
+                                key: field.key.clone(),
+                                value: value.clone(),
+                            })
                     })
                     .collect(),
                 cancelled: false,
@@ -693,11 +693,13 @@ pub(crate) fn reduce(state: &mut State, action: Action) -> Command<Action> {
                         .dedup_by(|left, right| left.name == right.name);
                     let requested = state.draft.group.trim().to_owned();
                     let mut warning = None;
-                    if let Some(group) = discovery.groups.iter().find(|group| {
-                        group.name.eq_ignore_ascii_case(&requested)
-                            || group.label.trim().eq_ignore_ascii_case(&requested)
-                    }) {
-                        // Persist/submit the protocol value, never the display label.
+                    if let Some(group) = discovery
+                        .groups
+                        .iter()
+                        .find(|group| group.name == requested || group.label.trim() == requested)
+                    {
+                        // Persist the protocol value; accepting a matching
+                        // label migrates profiles saved by older builds.
                         state.draft.group = group.name.clone();
                     } else {
                         let fallback = discovery
