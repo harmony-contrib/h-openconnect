@@ -11,6 +11,7 @@ import {
   HAnyPlatformSharedMemoryFds,
   setHAnyBundleName,
 } from '../vpnability/VpnConfig';
+import { configureNativePlatformIdentity } from '../common/PlatformIdentity';
 
 const LOG_DOMAIN: number = 0x0000;
 const LOG_TAG: string = 'HAnyConnectEntry';
@@ -374,6 +375,7 @@ export default class EntryAbility extends NativeAbility {
   public async onCreate(want: Want, launchParam: AbilityConstant.LaunchParam): Promise<void> {
     try {
       this.configureNativeHome();
+      configureNativePlatformIdentity(hanyconnectUi);
       this.initializePlatformSharedMemory();
       this.configureNativeLocale();
       this.configureNativeAppearance();

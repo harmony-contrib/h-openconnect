@@ -13,6 +13,7 @@ import { Want } from '@kit.AbilityKit';
 import { vpnExtension, VpnExtensionAbility } from '@kit.NetworkKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import hanyconnectUi from 'libhanyconnect_ui.so';
+import { configureNativePlatformIdentity } from '../common/PlatformIdentity';
 import {
   buildVpnConfig,
   parseOptions,
@@ -125,6 +126,7 @@ export default class HAnyConnectVpnExtensionAbility extends VpnExtensionAbility 
   private startFromWant(want: Want): void {
     try {
       this.configureNativeHome();
+      configureNativePlatformIdentity(hanyconnectUi);
     } catch (err) {
       hilog.error(LOG_DOMAIN, LOG_TAG, 'VPN request rejected %{public}s', describeError(err));
       return;

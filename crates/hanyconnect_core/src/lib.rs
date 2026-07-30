@@ -28,7 +28,9 @@ pub use platform_browser::{
 pub use platform_protect::set_handler as set_socket_protect_handler;
 
 pub use auth_bridge::AuthInteraction;
-pub use client_identity::{default_client_version, default_user_agent};
+pub use client_identity::{
+    configure_platform_identity, default_client_version, default_user_agent,
+};
 pub use engine::{shared_engine, SessionEngine};
 pub use error::{CoreError, CoreResult};
 pub use log_recording::{LogArchiveSummary, LogRecordingStatus};

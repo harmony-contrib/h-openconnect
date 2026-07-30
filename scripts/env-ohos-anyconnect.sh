@@ -48,6 +48,19 @@ fi
 export AARCH64_UNKNOWN_LINUX_OHOS_ANYCONNECT_LIBXML2_DIR="$LIBXML2_PREFIX"
 export ANYCONNECT_LIBXML2_DIR="$LIBXML2_PREFIX"
 
+# OpenConnect 9.20 rejects unknown reported-OS values before serializing the
+# AnyConnect XML. Build the pinned source with the project's narrow extension
+# so `<device-id>OpenHarmony</device-id>` reaches the gateway unchanged.
+if [ -z "${ANYCONNECT_SOURCE_DIR:-}" ]; then
+  ANYCONNECT_SOURCE_DIR="$(sh "$ROOT_DIR/scripts/prepare-openconnect-openharmony.sh")" ||
+    return 1 2>/dev/null || exit 1
+  export ANYCONNECT_SOURCE_DIR
+fi
+if [ ! -f "$ANYCONNECT_SOURCE_DIR/openconnect.h" ]; then
+  echo "OpenConnect source is incomplete: $ANYCONNECT_SOURCE_DIR" >&2
+  return 1 2>/dev/null || exit 1
+fi
+
 # Optional prebuilt OpenSSL (native-anyconnect defaults to vendored-openssl).
 OPENSSL_PREFIX="${OPENSSL_PREFIX:-/Volumes/PSSD/code/ohos-rs/ohos-openssl/prelude/arm64-v8a}"
 if [ -f "$OPENSSL_PREFIX/include/openssl/ssl.h" ] && [ "${OHOS_ANYCONNECT_VENDORED_OPENSSL:-1}" != "1" ]; then
@@ -75,5 +88,6 @@ export HANYCONNECT_DRY_RUN="${HANYCONNECT_DRY_RUN:-0}"
 echo "OHOS anyconnect env ready"
 echo "  OHOS_SDK_NATIVE=$OHOS_SDK_NATIVE"
 echo "  ANYCONNECT_LIBXML2_DIR=$LIBXML2_PREFIX"
+echo "  ANYCONNECT_SOURCE_DIR=$ANYCONNECT_SOURCE_DIR"
 echo "  OPENSSL=$OPENSSL_MODE"
 echo "  HANYCONNECT_DRY_RUN=$HANYCONNECT_DRY_RUN"

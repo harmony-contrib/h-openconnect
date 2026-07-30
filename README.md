@@ -148,13 +148,19 @@ The default native build uses:
 
 | Dependency             | Source                                                       |
 | ---------------------- | ------------------------------------------------------------ |
-| AnyConnect/OpenConnect | crates.io `anyconnect 0.1.0`, OpenConnect 9.20               |
+| AnyConnect/OpenConnect | crates.io `anyconnect 0.1.0`, patched OpenConnect 9.20       |
 | Native UI              | `richerfu/arkit` commit `765b1f4`                            |
 | TLS                    | Vendored OpenSSL                                             |
 | XML                    | Static OHOS libxml2 under `third_party/libxml2-ohos-aarch64` |
 
 If the static libxml2 prefix is missing, `scripts/build-libxml2-ohos.sh` builds
 it for `aarch64-unknown-linux-ohos`.
+
+OpenConnect 9.20 rejects `OpenHarmony` as a reported OS before serializing the
+AnyConnect request. The OHOS build runs
+`scripts/prepare-openconnect-openharmony.sh`, applies the checked-in narrow
+allow-list patch to a generated source copy under `target/`, and builds that
+copy so the gateway receives `<device-id>OpenHarmony</device-id>`.
 
 ### Build an unsigned release HAP
 

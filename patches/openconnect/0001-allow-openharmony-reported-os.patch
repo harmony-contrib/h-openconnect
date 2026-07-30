@@ -1,0 +1,15 @@
+diff --git a/library.c b/library.c
+--- a/library.c
++++ b/library.c
+@@ -539 +539,2 @@
+-	static const char * const allowed[] = {"linux", "linux-64", "win", "mac-intel", "android", "apple-ios"};
++	static const char * const allowed[] = {"linux", "linux-64", "win", "mac-intel",
++					       "android", "apple-ios", "OpenHarmony"};
+diff --git a/openconnect.h b/openconnect.h
+--- a/openconnect.h
++++ b/openconnect.h
+@@ -631,2 +631,2 @@
+-   "android", and "apple-ios". This also selects the corresponding CSD
+-   trojan binary. */
++   "android", "apple-ios", and "OpenHarmony". This also selects the
++   corresponding CSD trojan binary. */

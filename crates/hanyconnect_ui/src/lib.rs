@@ -39,6 +39,23 @@ pub fn configure_app_home_for_extension(home_dir: String) -> Result<()> {
 }
 
 #[napi]
+pub fn configure_platform_identity(
+    os_full_name: String,
+    display_version: String,
+    sdk_api_version: String,
+    device_type: String,
+    app_version: String,
+) {
+    hanyconnect_core::configure_platform_identity(
+        os_full_name,
+        display_version,
+        sdk_api_version,
+        device_type,
+        app_version,
+    );
+}
+
+#[napi]
 pub fn initialize_platform_shared_memory() -> Result<String> {
     let fds = shared_engine()
         .initialize_platform_shared_memory()

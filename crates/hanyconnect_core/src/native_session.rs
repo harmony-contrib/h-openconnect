@@ -5,7 +5,10 @@ use crate::auth_bridge::{
     apply_credentials_to_fields, bind_reply_values_by_option, can_autofill_without_ui,
     fields_for_user_input, AuthCredentials, AuthFormRole, AuthInteraction,
 };
-use crate::client_identity::{default_client_version, default_user_agent, openconnect_reported_os};
+use crate::client_identity::{
+    default_client_version, default_user_agent, mobile_identity, openconnect_reported_os,
+    OPENHARMONY_REPORTED_OS,
+};
 use crate::error::{CoreError, CoreResult};
 use crate::model::{
     AuthChallenge, AuthChallengeReply, AuthField, AuthFieldChoice, AuthFieldKind,
@@ -373,7 +376,7 @@ fn effective_client_version(profile: &ConnectionProfile) -> String {
 fn effective_reported_os(profile: &ConnectionProfile) -> &str {
     let configured = profile.reported_os.trim();
     if configured.is_empty() {
-        "android"
+        OPENHARMONY_REPORTED_OS
     } else {
         configured
     }
@@ -427,12 +430,12 @@ fn apply_openconnect_prefs(
     client.set_exact_user_agent(effective_user_agent(profile))?;
     client.set_client_version(effective_client_version(profile))?;
     client.set_reported_os(os)?;
-    if matches!(os, "android" | "apple-ios") {
-        let unique_id = profile.id.trim();
-        if !unique_id.is_empty() {
-            // Match ics-openconnect's mobile-header shape. Real OpenHarmony
-            // device details remain application metadata and must not alter
-            // the gateway's authentication policy branch.
+    let unique_id = profile.id.trim();
+    if !unique_id.is_empty() {
+        if os == OPENHARMONY_REPORTED_OS {
+            let identity = mobile_identity();
+            client.set_mobile_info(&identity.platform_version, &identity.device_type, unique_id)?;
+        } else if matches!(os, "android" | "apple-ios") {
             client.set_mobile_info("1.0", os, unique_id)?;
         }
     }
@@ -1415,29 +1418,29 @@ mod tests {
     }
 
     #[test]
-    fn default_protocol_identity_matches_anyconnect_android() {
+    fn default_protocol_identity_matches_openharmony() {
         let profile = ConnectionProfile::new_draft();
 
         assert_eq!(
             effective_user_agent(&profile),
-            "AnyConnect Android 4.10.07061"
+            format!("AnyConnect OpenHarmony {}", env!("CARGO_PKG_VERSION"))
         );
         assert_eq!(effective_client_version(&profile), "4.10.07061");
         assert_eq!(
             openconnect_reported_os(effective_reported_os(&profile)),
-            "android"
+            "OpenHarmony"
         );
     }
 
     #[test]
-    fn legacy_openharmony_profile_identity_migrates_at_protocol_boundary() {
+    fn configured_openharmony_identity_passes_through_to_openconnect() {
         let mut profile = ConnectionProfile::new_draft();
         profile.reported_os = "OpenHarmony".to_owned();
 
         assert_eq!(effective_reported_os(&profile), "OpenHarmony");
         assert_eq!(
             openconnect_reported_os(effective_reported_os(&profile)),
-            "android"
+            "OpenHarmony"
         );
     }
 

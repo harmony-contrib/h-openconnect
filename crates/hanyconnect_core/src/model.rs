@@ -248,11 +248,10 @@ pub struct ConnectionProfile {
     /// ics `use_dtls` (default true).
     #[serde(default = "default_true")]
     pub use_dtls: bool,
-    /// AnyConnect protocol platform. Legacy `OpenHarmony` profile values map
-    /// to the Android-compatible device ID at the native boundary.
+    /// AnyConnect protocol platform sent as the XML `device-id`.
     #[serde(default = "default_reported_os")]
     pub reported_os: String,
-    /// Optional exact User-Agent override (empty = AnyConnect Android default).
+    /// Optional exact User-Agent override (empty = runtime OpenHarmony identity).
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub user_agent: String,
     /// Version reported in AnyConnect XML (empty = compatible AnyConnect version).
@@ -294,7 +293,7 @@ fn default_true() -> bool {
 }
 
 fn default_reported_os() -> String {
-    "android".to_owned()
+    "OpenHarmony".to_owned()
 }
 
 /// Private / link-local IPv4 prefixes kept off-tunnel when allow_local_lan.

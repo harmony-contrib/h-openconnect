@@ -744,7 +744,7 @@ pub(crate) fn connection_editor_page(state: Signal<State>, id: String) -> Elemen
                                     Input {
                                         value: Some(draft.reported_os.clone()),
                                         width: Some("100%".to_owned()),
-                                        placeholder: Some("android".to_owned()),
+                                        placeholder: Some("OpenHarmony".to_owned()),
                                         on_change: move |value| dispatch(state, Action::SetDraftReportedOs(value)),
                                     }
                                 }
