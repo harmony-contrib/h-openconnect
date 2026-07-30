@@ -13,9 +13,9 @@ dependencies = [
 
 [[package]]
 name = "anyconnect"
-version = "0.1.0"
+version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5fe684ae0caf992f796541e7347eb24946f51443dd1db84b330498dfc90f5a2d"
+checksum = "36f42ba06fabd2eacb03c910fb1e528f038a23711acc6d89a42752180af168e9"
 dependencies = [
  "anyconnect-sys",
  "hickory-resolver",
@@ -25,9 +25,9 @@ dependencies = [
 
 [[package]]
 name = "anyconnect-sys"
-version = "0.1.0"
+version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "02b7a028cf0574cba7046fadbe864209f97c794957707d53b9af6d8726a98315"
+checksum = "423966cb8467034baa010a28751554a046329fe34cb5d427bd113b53c26ff109"
 dependencies = [
  "bindgen",
  "cc",

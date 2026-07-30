@@ -10,10 +10,11 @@ description = "H-OpenConnect session engine (anyconnect-rs + platform VPN orches
 
 [features]
 default = []
-# Link source-built OpenConnect via anyconnect-rs (vendored OpenSSL).
-# For OHOS set OHOS_SDK_NATIVE + ANYCONNECT_LIBXML2_DIR (see scripts/env-ohos-anyconnect.sh).
+# Link source-built OpenConnect via anyconnect-rs with bundled OpenSSL and libxml2.
+# For OHOS set OHOS_SDK_NATIVE (see scripts/env-ohos-anyconnect.sh).
 native-anyconnect = [
     "dep:anyconnect",
+    "anyconnect/vendored-libxml2",
     "anyconnect/vendored-openssl",
     "anyconnect/rediect-tun-dns",
 ]
@@ -30,7 +31,7 @@ tracing-subscriber.workspace = true
 libc = "0.2"
 ohos-ashmem-binding.workspace = true
 
-anyconnect = { version = "0.1.0", optional = true, default-features = true }
+anyconnect = { version = "0.1.1", optional = true, default-features = true }
 
 [dev-dependencies]
 tempfile = "3"

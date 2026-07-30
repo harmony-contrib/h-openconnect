@@ -32,7 +32,8 @@ UI (arkit) ──► hopenconnect_core::SessionEngine
 ```
 
 OpenConnect 9.20 由 `anyconnect-rs` 源码静态编译进 `libhopenconnect_ui.so`。
-OHOS 交叉编译需要 NDK + 静态 libxml2；OpenSSL 默认走 `vendored-openssl`。
+OHOS 交叉编译需要 NDK；libxml2 与 OpenSSL 分别走 `vendored-libxml2` 和
+`vendored-openssl`。
 
 ## 本地 ocserv 测试头端
 
@@ -76,7 +77,7 @@ FEATURES= ./scripts/package-hap.sh
 | OpenHarmony NDK | `OHOS_SDK_NATIVE` / `OHOS_NDK_HOME` |
 | zlib | NDK sysroot（自动） |
 | OpenSSL | `vendored-openssl`（默认）或 ohos-openssl prebuilt |
-| libxml2 | `third_party/libxml2-ohos-aarch64`，缺失时由项目脚本构建 |
+| libxml2 | `anyconnect-sys` 内置的 2.15.3 源码（`vendored-libxml2`） |
 
 连接行为：
 
@@ -88,7 +89,7 @@ FEATURES= ./scripts/package-hap.sh
 ## 主机协议 E2E
 
 ```bash
-# 需要本机已安装 libxml2 / openssl 开发包（或 vendored-openssl）
+# 主机测试仍按目标平台发现系统 libxml2；OpenSSL 可使用 vendored-openssl
 ./scripts/e2e-host-anyconnect.sh
 
 # 可选：连真实 VPN

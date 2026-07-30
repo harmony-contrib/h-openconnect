@@ -6,11 +6,9 @@
 #
 # Requires:
 # - OHOS_NDK_HOME / OHOS_SDK_NATIVE (DevEco OpenHarmony Native SDK)
-# - static libxml2 for aarch64-unknown-linux-ohos (auto-built if missing)
+# - libxml2 is built from anyconnect-sys's bundled source.
 # - OpenSSL: prefer vendored-openssl feature (default with native-anyconnect).
 #   Optional prebuilt: OPENSSL_PREFIX / ohos-openssl arm64-v8a.
-
-ROOT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 
 export OHOS_NDK_HOME="${OHOS_NDK_HOME:-/Applications/DevEco-Studio.app/Contents/sdk/default/openharmony}"
 export OHOS_SDK_NATIVE="${OHOS_SDK_NATIVE:-$OHOS_NDK_HOME/native}"
@@ -18,46 +16,6 @@ export DEVECO_SDK_HOME="${DEVECO_SDK_HOME:-/Applications/DevEco-Studio.app/Conte
 
 if [ ! -d "$OHOS_SDK_NATIVE/sysroot" ] || [ ! -x "$OHOS_SDK_NATIVE/llvm/bin/clang" ]; then
   echo "OHOS_SDK_NATIVE is incomplete: $OHOS_SDK_NATIVE" >&2
-  return 1 2>/dev/null || exit 1
-fi
-
-# Use the project-owned OHOS libxml2 prefix. The Rust AnyConnect implementation
-# itself is resolved from crates.io and does not require a sibling checkout.
-LIBXML2_PREFIX="${LIBXML2_PREFIX:-}"
-if [ -z "$LIBXML2_PREFIX" ] &&
-  [ -f "$ROOT_DIR/third_party/libxml2-ohos-aarch64/lib/libxml2.a" ]; then
-  LIBXML2_PREFIX="$ROOT_DIR/third_party/libxml2-ohos-aarch64"
-fi
-
-if [ -z "$LIBXML2_PREFIX" ] || [ ! -f "$LIBXML2_PREFIX/include/libxml2/libxml/parser.h" ]; then
-  if [ -x "$ROOT_DIR/scripts/build-libxml2-ohos.sh" ]; then
-    echo "building libxml2 via scripts/build-libxml2-ohos.sh…"
-    "$ROOT_DIR/scripts/build-libxml2-ohos.sh"
-    LIBXML2_PREFIX="$ROOT_DIR/third_party/libxml2-ohos-aarch64"
-  else
-    echo "libxml2 OHOS prefix missing and no build script found" >&2
-    return 1 2>/dev/null || exit 1
-  fi
-fi
-
-if [ ! -f "$LIBXML2_PREFIX/include/libxml2/libxml/parser.h" ]; then
-  echo "libxml2 OHOS headers missing under $LIBXML2_PREFIX" >&2
-  return 1 2>/dev/null || exit 1
-fi
-
-export AARCH64_UNKNOWN_LINUX_OHOS_ANYCONNECT_LIBXML2_DIR="$LIBXML2_PREFIX"
-export ANYCONNECT_LIBXML2_DIR="$LIBXML2_PREFIX"
-
-# OpenConnect 9.20 rejects unknown reported-OS values before serializing the
-# AnyConnect XML. Build the pinned source with the project's narrow extension
-# so `<device-id>OpenHarmony</device-id>` reaches the gateway unchanged.
-if [ -z "${ANYCONNECT_SOURCE_DIR:-}" ]; then
-  ANYCONNECT_SOURCE_DIR="$(sh "$ROOT_DIR/scripts/prepare-openconnect-openharmony.sh")" ||
-    return 1 2>/dev/null || exit 1
-  export ANYCONNECT_SOURCE_DIR
-fi
-if [ ! -f "$ANYCONNECT_SOURCE_DIR/openconnect.h" ]; then
-  echo "OpenConnect source is incomplete: $ANYCONNECT_SOURCE_DIR" >&2
   return 1 2>/dev/null || exit 1
 fi
 
@@ -87,7 +45,6 @@ export HOPENCONNECT_DRY_RUN="${HOPENCONNECT_DRY_RUN:-0}"
 
 echo "OHOS anyconnect env ready"
 echo "  OHOS_SDK_NATIVE=$OHOS_SDK_NATIVE"
-echo "  ANYCONNECT_LIBXML2_DIR=$LIBXML2_PREFIX"
-echo "  ANYCONNECT_SOURCE_DIR=$ANYCONNECT_SOURCE_DIR"
+echo "  LIBXML2=vendored-libxml2"
 echo "  OPENSSL=$OPENSSL_MODE"
 echo "  HOPENCONNECT_DRY_RUN=$HOPENCONNECT_DRY_RUN"

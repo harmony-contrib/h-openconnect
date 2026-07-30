@@ -14,13 +14,13 @@ package's source distribution.
 
 | Component | Version or revision | License | Source |
 | --- | --- | --- | --- |
-| anyconnect | 0.1.0 | MIT OR Apache-2.0 | https://github.com/networks-rs/anyconnect-rs |
-| anyconnect-sys / OpenConnect | 0.1.0 / 9.20 (`8ae87c089bac597d9e09902bbedd03e0c45d8269`) | LGPL-2.1-only | https://github.com/networks-rs/anyconnect-rs |
+| anyconnect | 0.1.1 | MIT OR Apache-2.0 | https://github.com/networks-rs/anyconnect-rs |
+| anyconnect-sys / OpenConnect | 0.1.1 / 9.20 (`8ae87c089bac597d9e09902bbedd03e0c45d8269`) | LGPL-2.1-only | https://github.com/networks-rs/anyconnect-rs |
 | Arkit | `75ff91c619f5e4774fe6badea5cd9c619f189b2f` | MIT OR Apache-2.0 | https://github.com/richerfu/arkit |
 | Dioxus | 0.7.9 | MIT OR Apache-2.0 | https://github.com/DioxusLabs/dioxus |
 | ohos-rs bindings | versions locked in `Cargo.lock` | MIT or MIT OR Apache-2.0 | https://github.com/ohos-rs |
 | OpenSSL | 3.6.3 | Apache-2.0 | https://github.com/openssl/openssl |
-| libxml2 | 2.12.9 | MIT | https://gitlab.gnome.org/GNOME/libxml2 |
+| libxml2 | 2.15.3 | MIT | https://gitlab.gnome.org/GNOME/libxml2 |
 
 HarmonyOS platform libraries referenced dynamically by the HAP are supplied by
 the operating system and are not redistributed by this repository.
@@ -32,7 +32,7 @@ The release feature statically links OpenConnect 9.20 through
 OpenConnect source, its LGPL license text, provenance, and the generated build
 inputs required by the supported source build:
 
-https://crates.io/crates/anyconnect-sys/0.1.0
+https://crates.io/crates/anyconnect-sys/0.1.1
 
 The public H-OpenConnect source and the build instructions in `README.md`
 provide the application material needed to rebuild the native library and HAP

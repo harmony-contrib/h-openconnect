@@ -121,7 +121,7 @@ License 2.0.
 The release build includes the `anyconnect` Rust wrapper and a statically linked
 OpenConnect 9.20 library. OpenConnect is licensed under LGPL-2.1-only; its exact
 pinned source and relinkable build inputs are distributed by
-[`anyconnect-sys` 0.1.0](https://crates.io/crates/anyconnect-sys/0.1.0).
+[`anyconnect-sys` 0.1.1](https://crates.io/crates/anyconnect-sys/0.1.1).
 See [open-source notices](OPEN_SOURCE.md) for component versions, source
 locations, licenses, and rebuild information.
 
@@ -148,19 +148,18 @@ The default native build uses:
 
 | Dependency             | Source                                                       |
 | ---------------------- | ------------------------------------------------------------ |
-| AnyConnect/OpenConnect | crates.io `anyconnect 0.1.0`, patched OpenConnect 9.20       |
+| AnyConnect/OpenConnect | crates.io `anyconnect 0.1.1`, bundled OpenConnect 9.20       |
 | Native UI              | `richerfu/arkit` commit `75ff91c`                            |
 | TLS                    | Vendored OpenSSL                                             |
-| XML                    | Static OHOS libxml2 under `third_party/libxml2-ohos-aarch64` |
+| XML                    | Vendored libxml2 2.15.3 from `anyconnect-sys`                 |
 
-If the static libxml2 prefix is missing, `scripts/build-libxml2-ohos.sh` builds
-it for `aarch64-unknown-linux-ohos`.
+The `native-anyconnect` feature enables `anyconnect/vendored-libxml2`, so the
+OHOS build does not require a separately installed or project-local libxml2
+prefix.
 
-OpenConnect 9.20 rejects `OpenHarmony` as a reported OS before serializing the
-AnyConnect request. The OHOS build runs
-`scripts/prepare-openconnect-openharmony.sh`, applies the checked-in narrow
-allow-list patch to a generated source copy under `target/`, and builds that
-copy so the gateway receives `<device-id>OpenHarmony</device-id>`.
+The OpenConnect source bundled by `anyconnect-sys 0.1.1` accepts `OpenHarmony`
+as a reported OS, so the gateway receives `<device-id>OpenHarmony</device-id>`
+without a project-local source copy or patch.
 
 ### Build an unsigned release HAP
 

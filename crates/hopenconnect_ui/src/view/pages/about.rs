@@ -82,7 +82,7 @@ pub(crate) fn about_page(state: Signal<State>) -> Element {
                     open_source_row(
                         state,
                         "boxes",
-                        "anyconnect-rs 0.1.0",
+                        "anyconnect-rs 0.1.1",
                         "MIT OR Apache-2.0",
                         "https://github.com/networks-rs/anyconnect-rs",
                     ),
