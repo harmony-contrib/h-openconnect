@@ -39,6 +39,12 @@ type OpenBrowserThreadsafeFunction =
     ThreadsafeFunction<String, Unknown<'static>, String, Status, false>;
 type OpenBrowserSlot = LazyLock<RwLock<Option<Arc<OpenBrowserThreadsafeFunction>>>>;
 
+/// Generic external URL opened from the application UI.
+type OpenExternalUrlCall<'a> = Function<'a, String, Unknown<'a>>;
+type OpenExternalUrlThreadsafeFunction =
+    ThreadsafeFunction<String, Unknown<'static>, String, Status, false>;
+type OpenExternalUrlSlot = LazyLock<RwLock<Option<Arc<OpenExternalUrlThreadsafeFunction>>>>;
+
 /// Document picker request: JSON `{ id, kind }`.
 type PickFileCall<'a> = Function<'a, String, Unknown<'a>>;
 type PickFileThreadsafeFunction =
@@ -55,6 +61,7 @@ static REQUEST_START_VPN: VpnStartSlot = LazyLock::new(|| RwLock::new(None));
 static REQUEST_STOP_VPN: VpnStopSlot = LazyLock::new(|| RwLock::new(None));
 static SOCKET_PROTECT: SocketProtectSlot = LazyLock::new(|| RwLock::new(None));
 static OPEN_BROWSER: OpenBrowserSlot = LazyLock::new(|| RwLock::new(None));
+static OPEN_EXTERNAL_URL: OpenExternalUrlSlot = LazyLock::new(|| RwLock::new(None));
 static PICK_FILE: PickFileSlot = LazyLock::new(|| RwLock::new(None));
 static EXPORT_LOG: ExportLogSlot = LazyLock::new(|| RwLock::new(None));
 static PICK_FILE_SEQ: AtomicU64 = AtomicU64::new(1);
@@ -129,6 +136,18 @@ pub(crate) fn register_platform_callbacks(callbacks: Object<'static>) -> Result<
         hanyconnect_core::set_external_browser_handler(Some(Box::new(|uri| {
             open_external_browser(uri.to_owned()).is_ok()
         })));
+    }
+    if callbacks.has_named_property("openExternalUrl")? {
+        let open_external_url: OpenExternalUrlCall<'static> =
+            callbacks.get_named_property("openExternalUrl")?;
+        let tsfn = open_external_url
+            .build_threadsafe_function()
+            .callee_handled::<false>()
+            .build()?;
+        OPEN_EXTERNAL_URL
+            .write()
+            .map_err(|_| Error::from_reason("failed to store external URL callback"))?
+            .replace(Arc::new(tsfn));
     }
     if callbacks.has_named_property("pickCertFile")? {
         let pick_file: PickFileCall<'static> = callbacks.get_named_property("pickCertFile")?;
@@ -232,6 +251,19 @@ pub(crate) fn open_external_browser(uri: String) -> std::result::Result<(), Stri
             "call openExternalBrowser failed with status: {status:?}"
         ))
     }
+}
+
+pub(crate) async fn open_external_url(url: String) -> std::result::Result<(), String> {
+    if url.trim().is_empty() {
+        return Err("empty external URL".to_owned());
+    }
+    let tsfn = OPEN_EXTERNAL_URL
+        .read()
+        .map_err(|_| "failed to read external URL callback".to_owned())?
+        .as_ref()
+        .map(Arc::clone)
+        .ok_or_else(|| "external URL callback is not registered".to_owned())?;
+    invoke_string_void_callback(tsfn, url, "external URL").await
 }
 
 /// Certificate file role for the system document picker.

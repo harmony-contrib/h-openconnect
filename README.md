@@ -111,6 +111,24 @@ permissions and is excluded from HarmonyOS backup. Production abilities do not
 accept credentials, trust overrides, or auto-connect instructions through
 `Want` parameters.
 
+## Open source
+
+The complete source for H-AnyConnect is published at
+[harmony-contrib/h-anyconnect](https://github.com/harmony-contrib/h-anyconnect).
+The application is available under your choice of the MIT license or Apache
+License 2.0.
+
+The release build includes the `anyconnect` Rust wrapper and a statically linked
+OpenConnect 9.20 library. OpenConnect is licensed under LGPL-2.1-only; its exact
+pinned source and relinkable build inputs are distributed by
+[`anyconnect-sys` 0.1.0](https://crates.io/crates/anyconnect-sys/0.1.0).
+See [open-source notices](OPEN_SOURCE.md) for component versions, source
+locations, licenses, and rebuild information.
+
+H-AnyConnect is an independent project and is not affiliated with or endorsed
+by Cisco. Cisco and AnyConnect names and trademarks belong to their respective
+owners.
+
 ## Building
 
 ### Prerequisites
@@ -297,6 +315,7 @@ docs/                           Architecture, UI mapping, and validation notes
 third_party/                    OHOS static native dependencies
 ```
 
-## LICENSE
+## License
 
-[MIT](./LICENSE-MIT) or [Apache 2.0](./LICENSE-APACHE)
+[MIT](./LICENSE-MIT) or [Apache 2.0](./LICENSE-APACHE). Third-party components
+remain under their respective licenses; see [OPEN_SOURCE.md](OPEN_SOURCE.md).

@@ -3,6 +3,8 @@ name = "hanyconnect_ui"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+repository.workspace = true
+homepage.workspace = true
 rust-version.workspace = true
 description = "H-AnyConnect Arkit UI + NAPI shell over hanyconnect_core / anyconnect-rs"
 

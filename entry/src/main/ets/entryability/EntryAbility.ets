@@ -382,6 +382,7 @@ export default class EntryAbility extends NativeAbility {
         requestStartVpn: async (optionsJson: string) => await this.requestStartVpn(optionsJson),
         requestStopVpn: async () => await this.requestStopVpn(),
         openExternalBrowser: async (uri: string) => await this.openExternalBrowser(uri),
+        openExternalUrl: async (url: string) => await this.openExternalBrowser(url),
         pickCertFile: async (requestJson: string) => await this.pickCertFile(requestJson),
         exportLog: async (requestJson: string) => await this.exportLogToSystem(requestJson),
       });

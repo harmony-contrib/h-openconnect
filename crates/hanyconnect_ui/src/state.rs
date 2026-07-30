@@ -179,6 +179,8 @@ pub(crate) enum Action {
     SaveDraft,
     DeleteConnection(String),
     ToggleFavorite(String),
+    OpenExternalUrl(String),
+    ExternalUrlOpened(Result<(), String>),
     ToggleLogRecording,
     LogRecordingChanged(Result<LogRecordingChangeResult, String>),
     ExportLogArchive(String),
@@ -981,6 +983,19 @@ pub(crate) fn reduce(state: &mut State, action: Action) -> Command<Action> {
                 connection.favorite = !connection.favorite;
                 let _ = shared_engine().upsert_profile(connection);
                 state.sync_engine();
+            }
+            Command::none()
+        }
+        Action::OpenExternalUrl(url) => Command::perform(
+            platform_callbacks::open_external_url(url),
+            Action::ExternalUrlOpened,
+        ),
+        Action::ExternalUrlOpened(result) => {
+            if let Err(error) = result {
+                state.push_toast(format!(
+                    "{}{error}",
+                    tr_msg(state.locale, "无法打开链接：", "Could not open link: ")
+                ));
             }
             Command::none()
         }
