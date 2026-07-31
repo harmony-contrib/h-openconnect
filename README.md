@@ -186,6 +186,13 @@ FEATURES= scripts/package-hap.sh
 The UI-only build does not provide a real OpenConnect tunnel and must not be
 used for VPN acceptance testing.
 
+With a valid `default` signing configuration, require and print the signed
+release artifact instead:
+
+```sh
+SIGN_HAP=1 scripts/package-hap.sh
+```
+
 ### Manual native build
 
 ```sh
@@ -247,6 +254,14 @@ Use a standard-system image that includes VPN Manager, `VpnExtension`,
 dialog. The [ohos-qemu](https://github.com/harmony-contrib/ohos-qemu) project
 provides suitable prebuilt images.
 
+Install the pinned ARM64 image used by CI with the project's official network
+installer:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/harmony-contrib/ohos-qemu/main/scripts/install.sh |
+  bash -s -- --release v20260728 --arch arm64
+```
+
 After starting QEMU, connect the forwarded HDC endpoint:
 
 ```sh
@@ -273,6 +288,54 @@ hdc shell chmod 755 /data/local/tmp/device-net-probe
 hdc shell /data/local/tmp/device-net-probe 20010042 internal.example
 hdc shell /data/local/tmp/device-net-probe 20010042 10.10.10.1 443
 ```
+
+The automated production-path test starts a clean copy of that ARM64 image and
+a local `ocserv`, installs a signed release HAP, exercises the first-use system
+authorization and API 24 pending-call deadline, creates a real CSTP/TUN
+connection, checks routes plus application-UID DNS/TCP, then verifies
+disconnect and reconnect:
+
+```sh
+QEMU_PACKAGE_DIR="$HOME/.ohos-qemu/openharmony-qemu-arm64-arm64_virt" \
+HAP_PATH="$PWD/entry/build/default/outputs/default/entry-default-signed.hap" \
+scripts/e2e-qemu-arm64.sh
+```
+
+## Continuous integration
+
+Every pull request runs formatting and the full `hopenconnect_core` test suite
+both with and without the native AnyConnect implementation. This covers auth
+form ownership, group refresh, multi-round challenge handling, network option
+mapping, ashmem frames, persistence, and VPN startup terminal-state behavior.
+The trusted QEMU job also runs the ArkTS unit tests before packaging.
+
+Pushes to `main` and manual workflow runs additionally use a dedicated Apple
+Silicon runner labelled `self-hosted`, `macOS`, `ARM64`, and
+`openharmony-qemu`. The runner needs DevEco Studio, Rust/`ohrs`, Homebrew QEMU,
+Docker, and enough free space to clone the image for each run. The workflow
+downloads the official ARM64 QEMU release once into the runner tool cache and
+keeps every test run's userdata isolated.
+
+Signed installation is mandatory on this standard-system image. Either keep a
+valid default signing configuration on the private runner or define one
+repository secret named `OHOS_CI_SIGNING_JSON`:
+
+```json
+{
+  "certBase64": "...",
+  "profileBase64": "...",
+  "storeBase64": "...",
+  "keyAlias": "debugKey",
+  "keyPassword": "...",
+  "storePassword": "...",
+  "signAlg": "SHA256withECDSA"
+}
+```
+
+The binary fields are the base64 contents of the `.cer`, `.p7b`, and `.p12`
+files. CI writes them only under `RUNNER_TEMP`, restores `build-profile.json5`,
+and removes the disposable files after the run. The self-hosted QEMU job does
+not run pull-request code; pull requests remain on GitHub-hosted runners.
 
 ## Tests
 

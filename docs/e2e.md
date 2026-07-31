@@ -66,6 +66,9 @@ export DEVECO_SDK_HOME=/Applications/DevEco-Studio.app/Contents/sdk
 # 默认 FEATURES=native-anyconnect，会 source env-ohos-anyconnect.sh
 ./scripts/package-hap.sh
 
+# CI/QEMU 标准系统需要签名包；缺少 signed HAP 时直接失败
+SIGN_HAP=1 ./scripts/package-hap.sh
+
 # 仅 UI / 无 OpenConnect：
 FEATURES= ./scripts/package-hap.sh
 ```
@@ -128,6 +131,36 @@ export DEVECO_SDK_HOME=/Applications/DevEco-Studio.app/Contents/sdk
 6. **disconnect / extension destroy** — `Command::Cancel`，join 主循环，销毁 TUN
 
 ## QEMU 网络验证
+
+CI 和本地完整验证统一使用 `harmony-contrib/ohos-qemu` 的官方安装脚本与
+ARM64 standard-system 包：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/harmony-contrib/ohos-qemu/main/scripts/install.sh |
+  bash -s -- --release v20260728 --arch arm64
+```
+
+先构建签名 release HAP，再运行完整的生产路径测试：
+
+```bash
+SIGN_HAP=1 ./scripts/package-hap.sh
+
+QEMU_PACKAGE_DIR="$HOME/.ohos-qemu/openharmony-qemu-arm64-arm64_virt" \
+HAP_PATH="$PWD/entry/build/default/outputs/default/entry-default-signed.hap" \
+./scripts/e2e-qemu-arm64.sh
+```
+
+脚本每次克隆一份干净 userdata，启动本地 `ocserv`，并依次验证：API 24 首次系统
+VPN 授权取消后，系统 Promise 一直 pending 且 Extension 未接管的真实路径不会被
+任意短超时提前终止，而会由 120 秒全局 deadline 收敛到 `Failed` 且不创建 TUN；
+重新授权后真实 CSTP/TUN 建立，服务端路由和 DNS 已写入系统，应用 UID 能够访问
+隧道内地址并完成 DNS/TCP，断开后还能以新的 attempt 重连。系统调用明确 reject
+以及 Extension 已接管后的权威终态由宿主测试覆盖。测试不向正式 Ability 注入测试
+Want，也不依赖运行时代码 marker。
+
+GitHub Actions 中该测试只在 `main` 推送或手动触发时进入带
+`self-hosted`/`macOS`/`ARM64`/`openharmony-qemu` 标签的专用 Apple Silicon
+runner；PR 只运行宿主协议与生命周期测试，避免不受信任代码接触自托管 runner。
 
 HDC 的 root shell 不受应用 UID 的 VPN 策略约束，不能用 root `ping` 判断应用是否走隧道。
 使用仓库内探针降权到目标应用 UID 后再解析或连接：

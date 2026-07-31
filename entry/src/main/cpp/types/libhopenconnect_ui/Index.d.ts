@@ -71,6 +71,8 @@ export declare function attachPlatformSharedMemory(ashmemFd: number, notificatio
 
 export declare function awaitPlatformVpnStart(attemptId: string): Promise<string>
 
+export declare function awaitPlatformVpnStartAttachment(attemptId: string, timeoutMs: number): Promise<boolean>
+
 export declare function beginPlatformVpnStart(): string
 
 export declare function bindPlatformVpnStart(attemptId: string): void

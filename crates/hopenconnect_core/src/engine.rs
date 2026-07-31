@@ -82,6 +82,7 @@ pub struct PlatformSharedMemoryFds {
 struct PlatformStartEvent {
     attempt_id: String,
     outcome: PlatformStartOutcome,
+    extension_attached: bool,
     error: Option<String>,
 }
 
@@ -661,6 +662,47 @@ impl SessionEngine {
             self.persist_platform_locked(&mut inner)?;
         }
         Ok(())
+    }
+
+    /// Wait briefly for the VPN Extension to accept the matching Want.
+    ///
+    /// Some HarmonyOS authorization dialogs start the Extension with a new,
+    /// parameter-free Want. Callers use this signal to decide whether the
+    /// original Want containing the shared-memory descriptors must be sent
+    /// again after authorization succeeds.
+    pub async fn await_platform_vpn_start_attachment(
+        &self,
+        attempt_id: &str,
+        timeout: Duration,
+    ) -> CoreResult<bool> {
+        if attempt_id.is_empty() {
+            return Err(CoreError::msg("platform VPN start attempt id is empty"));
+        }
+        let mut receiver = self.platform_start_tx.subscribe();
+        let deadline = tokio::time::Instant::now() + timeout;
+        loop {
+            let event = {
+                let mut inner = self.lock()?;
+                self.sync_platform_locked(&mut inner);
+                self.platform_start_event_locked(&inner)
+            };
+            if event.attempt_id != attempt_id || event.outcome != PlatformStartOutcome::Pending {
+                return Ok(event.attempt_id == attempt_id && event.extension_attached);
+            }
+            if event.extension_attached {
+                return Ok(true);
+            }
+
+            tokio::select! {
+                changed = receiver.changed() => {
+                    changed.map_err(|_| CoreError::msg(
+                        "platform VPN start coordinator closed"
+                    ))?;
+                }
+                _ = tokio::time::sleep(Duration::from_millis(25)) => {}
+                _ = tokio::time::sleep_until(deadline) => return Ok(false),
+            }
+        }
     }
 
     /// Await the authoritative extension terminal state for one transaction.
@@ -1754,13 +1796,20 @@ impl SessionEngine {
         PlatformStartEvent {
             attempt_id: inner.platform_start_attempt_id.clone(),
             outcome: inner.platform_start_outcome,
+            extension_attached: inner.platform_extension_attached,
             error: inner.snapshot.last_error.clone(),
         }
     }
 
     fn notify_platform_start_locked(&self, inner: &Inner) {
-        self.platform_start_tx
-            .send_replace(self.platform_start_event_locked(inner));
+        let event = self.platform_start_event_locked(inner);
+        let changed = {
+            let current = self.platform_start_tx.borrow();
+            *current != event
+        };
+        if changed {
+            self.platform_start_tx.send_replace(event);
+        }
     }
 
     fn set_lifecycle_locked(
@@ -2099,6 +2148,22 @@ mod tests {
             .await
             .unwrap_err();
         assert!(error.to_string().contains("system rejected"));
+    }
+
+    #[tokio::test]
+    async fn platform_start_attachment_wait_distinguishes_authorization_bootstrap() {
+        let engine = SessionEngine::new();
+        let attempt_id = engine.begin_platform_vpn_start().unwrap();
+
+        assert!(!engine
+            .await_platform_vpn_start_attachment(&attempt_id, Duration::from_millis(10))
+            .await
+            .unwrap());
+        engine.bind_platform_vpn_start(&attempt_id).unwrap();
+        assert!(engine
+            .await_platform_vpn_start_attachment(&attempt_id, Duration::from_millis(10))
+            .await
+            .unwrap());
     }
 
     #[test]

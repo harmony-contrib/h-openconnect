@@ -7,10 +7,10 @@ ROOT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 cd "$ROOT_DIR"
 
 echo "==> unit tests: hopenconnect_core (platform/dry-run paths)"
-cargo test -p hopenconnect_core --lib
+cargo test -p hopenconnect_core --all-targets
 
 echo "==> unit tests: hopenconnect_core + native-anyconnect"
-cargo test -p hopenconnect_core --features native-anyconnect --lib
+cargo test -p hopenconnect_core --features native-anyconnect --all-targets
 
 echo "==> crates.io anyconnect integration smoke complete"
 

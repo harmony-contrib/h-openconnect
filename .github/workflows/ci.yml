@@ -1,0 +1,123 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  protocol-tests:
+    name: Rust protocol and lifecycle tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+
+      - name: Install native build prerequisites
+        run: sudo apt-get update && sudo apt-get install -y clang libclang-dev make pkg-config
+
+      - name: Check Rust formatting
+        run: cargo fmt --all -- --check
+
+      - name: Run AnyConnect protocol tests
+        run: ./scripts/e2e-host-anyconnect.sh
+
+  arm64-qemu:
+    name: ARM64 OpenHarmony QEMU VPN E2E
+    needs: protocol-tests
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    runs-on: [self-hosted, macOS, ARM64, openharmony-qemu]
+    timeout-minutes: 45
+    env:
+      DEVECO_STUDIO_HOME: /Applications/DevEco-Studio.app/Contents
+      DEVECO_SDK_HOME: /Applications/DevEco-Studio.app/Contents/sdk
+      OHOS_NDK_HOME: /Applications/DevEco-Studio.app/Contents/sdk/default/openharmony
+      NODE_HOME: /Applications/DevEco-Studio.app/Contents/tools/node
+      HVIGORW: /Applications/DevEco-Studio.app/Contents/tools/hvigor/bin/hvigorw
+      OHPM: /Applications/DevEco-Studio.app/Contents/tools/ohpm/bin/ohpm
+      HDC: /Applications/DevEco-Studio.app/Contents/sdk/default/openharmony/toolchains/hdc
+      OHOS_QEMU_RELEASE: v20260728
+      OHOS_QEMU_INSTALLER_COMMIT: ada7288
+      OHOS_QEMU_PREFIX: ${{ runner.tool_cache }}/ohos-qemu/v20260728
+      QEMU_PACKAGE_DIR: ${{ runner.tool_cache }}/ohos-qemu/v20260728/openharmony-qemu-arm64-arm64_virt
+      QEMU_HDC_HOST_PORT: "5560"
+      QEMU_ACCEL: hvf
+      HDC_TARGET: 127.0.0.1:5560
+      OCSERV_PORT: "14433"
+      ARTIFACT_DIR: ${{ github.workspace }}/smoke-logs/qemu-ci
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+
+      - name: Add Apple Silicon tools to PATH
+        run: echo /opt/homebrew/bin >> "$GITHUB_PATH"
+
+      - name: Verify dedicated runner prerequisites
+        run: |
+          test "$(uname -s)" = Darwin
+          test "$(uname -m)" = arm64
+          for tool in cargo docker ohrs qemu-system-aarch64 "$HDC" "$HVIGORW" "$OHPM"; do
+            command -v "$tool" >/dev/null
+          done
+          docker info >/dev/null
+
+      - name: Install pinned ARM64 OpenHarmony QEMU image
+        env:
+          OHOS_QEMU_GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          if ! test -x "$QEMU_PACKAGE_DIR/launch/macos.command" ||
+             ! test -f "$QEMU_PACKAGE_DIR/images/Image" ||
+             ! test -f "$QEMU_PACKAGE_DIR/images/ramdisk.img" ||
+             ! test -f "$QEMU_PACKAGE_DIR/images/system.img" ||
+             ! test -f "$QEMU_PACKAGE_DIR/images/vendor.img" ||
+             ! test -f "$QEMU_PACKAGE_DIR/images/userdata.img"; then
+            curl -fsSL "https://raw.githubusercontent.com/harmony-contrib/ohos-qemu/${OHOS_QEMU_INSTALLER_COMMIT}/scripts/install.sh" |
+              bash -s -- --prefix "$OHOS_QEMU_PREFIX" --arch arm64 --release "$OHOS_QEMU_RELEASE" --force
+          fi
+          grep -Eq '"guest_arch"[[:space:]]*:[[:space:]]*"arm64"' "$QEMU_PACKAGE_DIR/manifest.json"
+          grep -Eq '"standard_vpn"[[:space:]]*:[[:space:]]*true' "$QEMU_PACKAGE_DIR/manifest.json"
+
+      - name: Configure signing and build release HAP
+        env:
+          OHOS_CI_SIGNING_JSON: ${{ secrets.OHOS_CI_SIGNING_JSON }}
+        run: |
+          cp build-profile.json5 "$RUNNER_TEMP/hopenconnect-build-profile.json5"
+          python3 scripts/configure-ci-signing.py
+          "$OHPM" install --all
+          "$HVIGORW" test --mode module -p module=entry@default --no-daemon
+          SIGN_HAP=1 ./scripts/package-hap.sh
+
+      - name: Run full production-path VPN test
+        id: qemu
+        run: ./scripts/e2e-qemu-arm64.sh
+
+      - name: Upload QEMU diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: arm64-qemu-vpn-${{ github.run_id }}-${{ github.run_attempt }}
+          path: smoke-logs/qemu-ci
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Remove disposable signing material
+        if: always()
+        run: |
+          rm -rf "${RUNNER_TEMP:?}/hopenconnect-signing"
+          if [ -f "$RUNNER_TEMP/hopenconnect-build-profile.json5" ]; then
+            cp "$RUNNER_TEMP/hopenconnect-build-profile.json5" build-profile.json5
+            rm -f "$RUNNER_TEMP/hopenconnect-build-profile.json5"
+          fi

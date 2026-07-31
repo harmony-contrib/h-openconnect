@@ -30,8 +30,19 @@ case "$HAP_BUILD_MODE" in
 esac
 SO_DST="$ROOT_DIR/entry/libs/arm64-v8a/libhopenconnect_ui.so"
 HAP_PATH="${HAP_PATH:-$ROOT_DIR/entry/build/default/outputs/default/entry-default-unsigned.hap}"
+SIGNED_HAP_PATH="${SIGNED_HAP_PATH:-$ROOT_DIR/entry/build/default/outputs/default/entry-default-signed.hap}"
+SIGN_HAP="${SIGN_HAP:-0}"
 HVIGOR_ARGS="${HVIGOR_ARGS:---no-daemon}"
 DEVECO_STUDIO_HOME="${DEVECO_STUDIO_HOME:-/Applications/DevEco-Studio.app/Contents}"
+
+case "$SIGN_HAP" in
+  0|1)
+    ;;
+  *)
+    echo "Unsupported SIGN_HAP: $SIGN_HAP (expected 0 or 1)" >&2
+    exit 1
+    ;;
+esac
 
 if [ -n "${HVIGORW:-}" ]; then
   HVIGORW_BIN="$HVIGORW"
@@ -55,6 +66,9 @@ if [ -n "${DEVECO_JAVA_HOME:-}" ]; then
   export JAVA_HOME="$DEVECO_JAVA_HOME"
 elif [ -d "$DEVECO_STUDIO_HOME/jbr/Contents/Home" ]; then
   export JAVA_HOME="$DEVECO_STUDIO_HOME/jbr/Contents/Home"
+fi
+if [ -z "${NODE_HOME:-}" ] && [ -x "$DEVECO_STUDIO_HOME/tools/node/bin/node" ]; then
+  export NODE_HOME="$DEVECO_STUDIO_HOME/tools/node"
 fi
 if [ -n "${JAVA_HOME:-}" ]; then
   export PATH="$JAVA_HOME/bin:$PATH"
@@ -102,6 +116,8 @@ fi
 
 if [ -x "${OHPM:-}" ]; then
   OHPM_BIN="$OHPM"
+elif [ -x "$DEVECO_STUDIO_HOME/tools/ohpm/bin/ohpm" ]; then
+  OHPM_BIN="$DEVECO_STUDIO_HOME/tools/ohpm/bin/ohpm"
 elif [ -x "/Users/ranger/Downloads/command-line-tools/bin/ohpm" ]; then
   OHPM_BIN="/Users/ranger/Downloads/command-line-tools/bin/ohpm"
 elif command -v ohpm >/dev/null 2>&1; then
@@ -121,4 +137,12 @@ if [ ! -f "$HAP_PATH" ]; then
   exit 1
 fi
 
-echo "$HAP_PATH"
+if [ "$SIGN_HAP" = "1" ]; then
+  if [ ! -f "$SIGNED_HAP_PATH" ]; then
+    echo "Expected signed HAP was not generated: $SIGNED_HAP_PATH" >&2
+    exit 1
+  fi
+  echo "$SIGNED_HAP_PATH"
+else
+  echo "$HAP_PATH"
+fi
