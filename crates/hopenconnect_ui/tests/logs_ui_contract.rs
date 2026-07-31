@@ -1,4 +1,19 @@
 const LOGS_SOURCE: &str = include_str!("../src/view/pages/logs.rs");
+const VIEW_SOURCE: &str = include_str!("../src/view/mod.rs");
+
+fn section<'a>(source: &'a str, start: &str, end: &str) -> &'a str {
+    let start = source.find(start).expect("section start");
+    let tail = &source[start..];
+    let end = tail.find(end).expect("section end");
+    &tail[..end]
+}
+
+#[test]
+fn segmented_filter_buttons_preserve_the_full_label_width() {
+    let segmented = section(VIEW_SOURCE, "fn FlatSegmented(", "struct FlatDialogProps");
+
+    assert!(segmented.contains("padding: 0.0"));
+}
 
 #[test]
 fn logs_use_arkit_rsx_virtual_rows() {
