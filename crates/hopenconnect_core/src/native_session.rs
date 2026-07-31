@@ -1015,7 +1015,7 @@ fn protocol_owns_auth_value(kind: anyconnect::FormOptionKind) -> bool {
 ///
 /// HarmonyOS runs `VpnExtensionAbility` in a **separate process**, so the UI
 /// cannot hand over a live TCP/`Client`. The UI already completed interactive
-/// MFA and wrote a cookie into `session-handoff.json`.
+/// MFA and published its cookie through the attempt-scoped ashmem handoff.
 ///
 pub fn resume_from_options(options: &VpnOptions) -> CoreResult<PendingNativeSession> {
     let primary = options
@@ -1162,8 +1162,8 @@ fn resume_from_options_once(options: &VpnOptions) -> CoreResult<PendingNativeSes
         .protect_socket_handler(crate::platform_protect::invoke);
     if options.external_auth_allowed {
         // SAML/SSO-v2: OpenConnect listens on localhost:29786 then asks us to
-        // open the IdP URL. Extension has no UI Ability, so open() queues a
-        // file for the UI process to launch the system browser.
+        // open the IdP URL. Extension has no UI Ability, so open() publishes a
+        // one-shot ashmem request for the UI process.
         builder = builder.external_browser_handler(|uri| crate::platform_browser::open(uri));
     }
     for pin in server_certificate_hashes(&server_cert_hash) {

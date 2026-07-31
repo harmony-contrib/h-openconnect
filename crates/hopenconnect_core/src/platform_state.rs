@@ -1,16 +1,11 @@
-//! Cross-process VPN payloads used by the paws-aligned platform bridge.
+//! Cross-process VPN payloads used by the paws-aligned ashmem bridge.
 //!
 //! HarmonyOS runs `EntryAbility` and `VpnExtensionAbility` in different
-//! processes. Live lifecycle/network/traffic state is exchanged through
-//! ashmem. `SessionHandoff` remains a private, short-lived file because the
-//! authenticated cookie can exceed HarmonyOS Want parameter limits.
+//! processes. Live state, authenticated session handoff, and one-shot platform
+//! requests all stay in the app-owned ashmem region and never touch disk.
 
-use crate::error::{CoreError, CoreResult};
 use crate::model::{ConnectionLifecycle, DiagnosticEntry, NetworkSnapshot, SessionStats};
-use crate::private_fs::{ensure_private_dir, write_atomic_private};
 use serde::{Deserialize, Serialize};
-use std::fs;
-use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -24,14 +19,16 @@ pub enum PlatformStartOutcome {
     Cancelled,
 }
 
-/// Session handoff for the VPN-extension process (cookie / credentials).
-/// Want parameters can truncate large cookies; the file is the source of truth.
-pub const SESSION_HANDOFF_FILE: &str = "session-handoff.json";
 const SESSION_HANDOFF_MAX_AGE_NANOS: u128 = 10 * 60 * 1_000_000_000;
+const BROWSER_REQUEST_MAX_AGE_MILLIS: u64 = 2 * 60 * 1_000;
 
+/// UI-authenticated cookie and connection parameters for the isolated VPN
+/// Extension process. The attempt id prevents a late Extension request from
+/// consuming credentials prepared for a newer connection.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionHandoff {
+    pub attempt_id: String,
     pub options: crate::model::VpnOptions,
     pub network: crate::model::NetworkSnapshot,
     #[serde(default)]
@@ -39,38 +36,33 @@ pub struct SessionHandoff {
 }
 
 impl SessionHandoff {
-    pub fn path(home: &Path) -> PathBuf {
-        home.join(SESSION_HANDOFF_FILE)
+    pub fn is_valid_for(&self, attempt_id: &str) -> bool {
+        !attempt_id.is_empty()
+            && self.attempt_id == attempt_id
+            && self.updated_at > 0
+            && PlatformVpnState::now_nanos().saturating_sub(self.updated_at)
+                <= SESSION_HANDOFF_MAX_AGE_NANOS
     }
+}
 
-    pub fn save(&self, home: &Path) -> CoreResult<()> {
-        ensure_private_dir(home)?;
-        let path = Self::path(home);
-        let content = serde_json::to_vec_pretty(self)
-            .map_err(|err| CoreError::msg(format!("serialize session handoff: {err}")))?;
-        write_atomic_private(&path, &content)
-    }
+/// One-shot Extension-to-UI request to open an SSO URL in the system browser.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BrowserOpenRequest {
+    pub request_id: String,
+    pub attempt_id: String,
+    pub uri: String,
+    pub requested_at_ms: u64,
+}
 
-    pub fn load(home: &Path) -> Option<Self> {
-        let path = Self::path(home);
-        let content = fs::read(&path).ok()?;
-        let handoff: Self = match serde_json::from_slice(&content) {
-            Ok(handoff) => handoff,
-            Err(_) => {
-                let _ = fs::remove_file(path);
-                return None;
-            }
-        };
-        let age = PlatformVpnState::now_nanos().saturating_sub(handoff.updated_at);
-        if handoff.updated_at == 0 || age > SESSION_HANDOFF_MAX_AGE_NANOS {
-            let _ = fs::remove_file(path);
-            return None;
-        }
-        Some(handoff)
-    }
-
-    pub fn clear(home: &Path) {
-        let _ = fs::remove_file(Self::path(home));
+impl BrowserOpenRequest {
+    pub fn is_valid_for(&self, attempt_id: &str) -> bool {
+        let now = PlatformVpnState::now_millis();
+        !self.request_id.is_empty()
+            && !attempt_id.is_empty()
+            && self.attempt_id == attempt_id
+            && self.requested_at_ms > 0
+            && now.saturating_sub(self.requested_at_ms) <= BROWSER_REQUEST_MAX_AGE_MILLIS
     }
 }
 
@@ -107,5 +99,12 @@ impl PlatformVpnState {
             .duration_since(UNIX_EPOCH)
             .map(|d| d.as_nanos())
             .unwrap_or(0)
+    }
+
+    pub fn now_millis() -> u64 {
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|duration| duration.as_millis() as u64)
+            .unwrap_or_default()
     }
 }

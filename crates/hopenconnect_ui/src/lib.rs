@@ -29,9 +29,8 @@ pub fn configure_app_home(home_dir: String) -> Result<()> {
         .map_err(to_napi_error)
 }
 
-/// VPN-extension process entry. Persistent profiles and the short-lived
-/// authenticated session handoff use the shared app-private directory; live
-/// lifecycle state is exchanged through ashmem.
+/// VPN-extension process entry. Persistent profiles stay in the app-private
+/// directory; authenticated handoff and live lifecycle state use ashmem.
 #[napi]
 pub fn configure_app_home_for_extension(home_dir: String) -> Result<()> {
     std::env::set_var("HOPENCONNECT_HOME", &home_dir);

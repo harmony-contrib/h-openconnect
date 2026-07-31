@@ -76,6 +76,10 @@ HDC_READY=0
 OCSERV_STARTED=0
 
 hdc_cmd() {
+  # Establishing a system VPN can reset QEMU's existing host-forwarded HDC
+  # transport. Refresh the same explicit target before every command so a
+  # successful retry cannot be polluted by an initial "device not found" line.
+  "$HDC" tconn "$HDC_TARGET" >/dev/null 2>&1 || true
   "$HDC" -t "$HDC_TARGET" "$@"
 }
 
@@ -334,6 +338,18 @@ grep -q 'vpn-tun' "$ARTIFACT_DIR/routes-connected.txt"
 docker exec "$OCSERV_NAME" occtl show users | tee "$ARTIFACT_DIR/ocserv-users-connected.txt"
 grep -Eq "[[:space:]]${OCSERV_USER}[[:space:]].*connected" \
   "$ARTIFACT_DIR/ocserv-users-connected.txt"
+
+echo "==> verify transient cross-process payloads never touch disk"
+runtime_payload_files="$(hdc_cmd shell "
+  if [ -e $app_home/session-handoff.json ]; then echo session-handoff.json; fi
+  if [ -e $app_home/browser-request.json ]; then echo browser-request.json; fi
+  if [ -e $app_home/platform-vpn-state.json ]; then echo platform-vpn-state.json; fi
+" | tr -d '\r')"
+if [ -n "$runtime_payload_files" ]; then
+  echo "unexpected runtime payload files:" >&2
+  printf '%s\n' "$runtime_payload_files" >&2
+  exit 1
+fi
 
 echo "==> verify application-UID DNS and TCP through VPN policy routing"
 OHOS_CLANG="${OHOS_CLANG:-${OHOS_NDK_HOME:-}/native/llvm/bin/aarch64-unknown-linux-ohos-clang}"

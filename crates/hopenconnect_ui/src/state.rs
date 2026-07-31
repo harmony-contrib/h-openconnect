@@ -477,7 +477,7 @@ pub(crate) fn reduce(state: &mut State, action: Action) -> Command<Action> {
                 state.locale = state.language_preference.resolve(system_locale);
             }
             state.system_dark = detect_system_dark();
-            // SAML/SSO: extension queues browser-request.json; open system browser here.
+            // SAML/SSO: consume the Extension's one-shot ashmem browser request.
             if let Some(req) = hopenconnect_core::take_browser_open_pending() {
                 if let Err(err) = platform_callbacks::open_external_browser(req.uri.clone()) {
                     state.push_toast(format!(

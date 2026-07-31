@@ -6,7 +6,9 @@ use crate::model::{
     ConnectionProfile, DiagnosticEntry, NetworkSnapshot, SessionSnapshot, SessionStats, VpnOptions,
 };
 use crate::platform_ipc::{PlatformIpc, PlatformIpcError};
-use crate::platform_state::{PlatformStartOutcome, PlatformVpnState, SessionHandoff};
+use crate::platform_state::{
+    BrowserOpenRequest, PlatformStartOutcome, PlatformVpnState, SessionHandoff,
+};
 use crate::store::{Preferences, ProfileStore};
 use std::path::PathBuf;
 use std::sync::{Arc, LazyLock, Mutex, Once, OnceLock};
@@ -27,6 +29,11 @@ const PLATFORM_VPN_START_DEADLINE: Duration = Duration::from_secs(120);
 
 #[cfg(feature = "native-anyconnect")]
 const BACKEND: &str = "anyconnect-rs";
+const OBSOLETE_CROSS_PROCESS_FILES: &[&str] = &[
+    "session-handoff.json",
+    "browser-request.json",
+    "platform-vpn-state.json",
+];
 #[cfg(not(feature = "native-anyconnect"))]
 const BACKEND: &str = "platform-orchestrator";
 
@@ -54,6 +61,10 @@ struct Inner {
     platform_start_attempt_id: String,
     platform_start_outcome: PlatformStartOutcome,
     platform_extension_attached: bool,
+    platform_session_handoff: Option<SessionHandoff>,
+    platform_browser_request: Option<BrowserOpenRequest>,
+    platform_browser_request_sequence: u64,
+    last_platform_browser_request_id: String,
     platform_vpn_state_updated_at: u128,
     last_vpn_options: VpnOptions,
     logs: RecordedLogBuffer,
@@ -106,6 +117,10 @@ impl SessionEngine {
                 platform_start_attempt_id: String::new(),
                 platform_start_outcome: PlatformStartOutcome::Idle,
                 platform_extension_attached: false,
+                platform_session_handoff: None,
+                platform_browser_request: None,
+                platform_browser_request_sequence: 0,
+                last_platform_browser_request_id: String::new(),
                 platform_vpn_state_updated_at: 0,
                 last_vpn_options: VpnOptions::default(),
                 logs: RecordedLogBuffer::new("."),
@@ -183,7 +198,12 @@ impl SessionEngine {
 
     pub fn sync_platform_changes(&self) -> CoreResult<()> {
         let mut inner = self.lock()?;
-        self.sync_platform_locked(&mut inner);
+        if self.sync_platform_locked(&mut inner) {
+            // The UI acknowledged a one-shot browser request. Publish the
+            // Extension lane without that request so a restarted UI cannot
+            // consume it again.
+            self.persist_platform_locked(&mut inner)?;
+        }
         Ok(())
     }
 
@@ -198,6 +218,92 @@ impl SessionEngine {
             .map_err(platform_ipc_error)
     }
 
+    pub fn queue_platform_browser_open_request(&self, uri: String) -> CoreResult<()> {
+        let uri = uri.trim().to_owned();
+        if uri.is_empty() {
+            return Err(CoreError::msg("external browser URI is empty"));
+        }
+        let platform = self
+            .platform_ipc()?
+            .ok_or_else(|| CoreError::msg("platform ashmem is not attached"))?;
+        if platform.is_ui() {
+            return Err(CoreError::msg(
+                "cross-process browser requests must originate from the VPN Extension",
+            ));
+        }
+
+        let mut inner = self.lock()?;
+        if inner.platform_start_attempt_id.is_empty() {
+            return Err(CoreError::msg(
+                "external browser request has no active VPN start attempt",
+            ));
+        }
+        inner.platform_browser_request_sequence =
+            inner.platform_browser_request_sequence.saturating_add(1);
+        let requested_at_ms = PlatformVpnState::now_millis();
+        inner.platform_browser_request = Some(BrowserOpenRequest {
+            request_id: format!(
+                "{}-{requested_at_ms}-{}",
+                inner.platform_start_attempt_id, inner.platform_browser_request_sequence
+            ),
+            attempt_id: inner.platform_start_attempt_id.clone(),
+            uri,
+            requested_at_ms,
+        });
+        self.persist_platform_locked(&mut inner)
+    }
+
+    pub fn take_platform_browser_open_request(&self) -> CoreResult<Option<BrowserOpenRequest>> {
+        let platform = match self.platform_ipc()? {
+            Some(platform) => platform,
+            None => return Ok(None),
+        };
+        if !platform.is_ui() {
+            return Ok(None);
+        }
+        let request = platform
+            .read_remote()
+            .map_err(platform_ipc_error)?
+            .and_then(|envelope| envelope.browser_request);
+        let mut inner = self.lock()?;
+        let previous_ack = inner.last_platform_browser_request_id.clone();
+        let consumed = consume_platform_browser_request_locked(&mut inner, request);
+        if consumed.is_some() {
+            if let Err(error) = self.persist_platform_locked(&mut inner) {
+                inner.last_platform_browser_request_id = previous_ack;
+                return Err(error);
+            }
+        }
+        Ok(consumed)
+    }
+
+    pub fn clear_platform_browser_open_request(&self) -> CoreResult<()> {
+        let platform = match self.platform_ipc()? {
+            Some(platform) => platform,
+            None => return Ok(()),
+        };
+        if platform.is_ui() {
+            let remote_request_id = platform
+                .read_remote()
+                .map_err(platform_ipc_error)?
+                .and_then(|envelope| envelope.browser_request)
+                .map(|request| request.request_id)
+                .unwrap_or_default();
+            let mut inner = self.lock()?;
+            if inner.last_platform_browser_request_id != remote_request_id {
+                inner.last_platform_browser_request_id = remote_request_id;
+                self.persist_platform_locked(&mut inner)?;
+            }
+            return Ok(());
+        }
+
+        let mut inner = self.lock()?;
+        if inner.platform_browser_request.take().is_some() {
+            self.persist_platform_locked(&mut inner)?;
+        }
+        Ok(())
+    }
+
     fn platform_ipc(&self) -> CoreResult<Option<Arc<PlatformIpc>>> {
         self.platform_ipc
             .lock()
@@ -207,6 +313,7 @@ impl SessionEngine {
 
     pub fn configure_home(&self, home: impl Into<PathBuf>) -> CoreResult<()> {
         let home = home.into();
+        remove_obsolete_cross_process_files(&home)?;
         let store = ProfileStore::open(&home)?;
         // Production starts empty. Demo/test profiles must be created by test
         // fixtures instead of leaking into the real application.
@@ -493,11 +600,13 @@ impl SessionEngine {
                 inner.last_vpn_options.apply_force_global();
             }
             let handoff = SessionHandoff {
+                attempt_id: inner.platform_start_attempt_id.clone(),
                 options: inner.last_vpn_options.clone(),
                 network: inner.snapshot.network.clone(),
                 updated_at: PlatformVpnState::now_nanos(),
             };
-            let _ = handoff.save(&inner.home);
+            inner.platform_session_handoff = Some(handoff);
+            let _ = self.persist_platform_locked(&mut inner);
             let first_route = inner.last_vpn_options.routes.first().cloned();
             self.push_diag_locked(
                 &mut inner,
@@ -620,6 +729,10 @@ impl SessionEngine {
         inner.platform_start_attempt_id = attempt_id.clone();
         inner.platform_start_outcome = PlatformStartOutcome::Pending;
         inner.platform_extension_attached = false;
+        if let Some(handoff) = inner.platform_session_handoff.as_mut() {
+            handoff.attempt_id = attempt_id.clone();
+            handoff.updated_at = PlatformVpnState::now_nanos();
+        }
         inner.platform_vpn_starting = true;
         inner.platform_vpn_running = false;
         self.set_lifecycle_locked(&mut inner, ConnectionLifecycle::Establishing, None);
@@ -741,19 +854,22 @@ impl SessionEngine {
             }
             match event.outcome {
                 PlatformStartOutcome::Connected => {
+                    self.clear_platform_session_handoff(attempt_id)?;
                     return Ok(PlatformStartOutcome::Connected);
                 }
                 PlatformStartOutcome::Failed => {
-                    return Err(CoreError::msg(
-                        event
-                            .error
-                            .unwrap_or_else(|| "VPN extension failed to start".to_owned()),
-                    ));
+                    let error = event
+                        .error
+                        .unwrap_or_else(|| "VPN extension failed to start".to_owned());
+                    self.clear_platform_session_handoff(attempt_id)?;
+                    return Err(CoreError::msg(error));
                 }
                 PlatformStartOutcome::Cancelled => {
+                    self.clear_platform_session_handoff(attempt_id)?;
                     return Err(CoreError::msg("VPN extension start was cancelled"));
                 }
                 PlatformStartOutcome::Idle => {
+                    self.clear_platform_session_handoff(attempt_id)?;
                     return Err(CoreError::msg(format!(
                         "platform VPN start attempt {attempt_id} is not active"
                     )));
@@ -776,6 +892,19 @@ impl SessionEngine {
                 }
             }
         }
+    }
+
+    fn clear_platform_session_handoff(&self, attempt_id: &str) -> CoreResult<()> {
+        let mut inner = self.lock()?;
+        let matches_attempt = inner
+            .platform_session_handoff
+            .as_ref()
+            .is_some_and(|handoff| handoff.attempt_id == attempt_id);
+        if matches_attempt {
+            inner.platform_session_handoff = None;
+            self.persist_platform_locked(&mut inner)?;
+        }
+        Ok(())
     }
 
     /// Fail a matching request only when the VPN Extension has not accepted it.
@@ -848,6 +977,8 @@ impl SessionEngine {
         inner.platform_vpn_starting = false;
         inner.platform_vpn_running = false;
         inner.platform_start_outcome = PlatformStartOutcome::Cancelled;
+        inner.platform_session_handoff = None;
+        inner.platform_browser_request = None;
         #[cfg(feature = "native-anyconnect")]
         {
             inner.pending_native = None;
@@ -935,6 +1066,7 @@ impl SessionEngine {
     ) -> CoreResult<Option<RunningNativeSession>> {
         inner.platform_vpn_running = running;
         inner.platform_vpn_starting = false;
+        inner.platform_browser_request = None;
         if running {
             if inner.platform_start_outcome == PlatformStartOutcome::Pending {
                 inner.platform_start_outcome = PlatformStartOutcome::Connected;
@@ -975,6 +1107,7 @@ impl SessionEngine {
     ) -> CoreResult<()> {
         inner.platform_vpn_running = running;
         inner.platform_vpn_starting = false;
+        inner.platform_browser_request = None;
         if running {
             if inner.platform_start_outcome == PlatformStartOutcome::Pending {
                 inner.platform_start_outcome = PlatformStartOutcome::Connected;
@@ -1012,6 +1145,8 @@ impl SessionEngine {
     ) -> CoreResult<Option<RunningNativeSession>> {
         inner.platform_vpn_starting = false;
         inner.platform_vpn_running = false;
+        inner.platform_session_handoff = None;
+        inner.platform_browser_request = None;
         if inner.platform_start_outcome == PlatformStartOutcome::Pending {
             inner.platform_start_outcome = PlatformStartOutcome::Failed;
         }
@@ -1026,6 +1161,8 @@ impl SessionEngine {
     fn apply_platform_vpn_failed_locked(&self, inner: &mut Inner, error: String) -> CoreResult<()> {
         inner.platform_vpn_starting = false;
         inner.platform_vpn_running = false;
+        inner.platform_session_handoff = None;
+        inner.platform_browser_request = None;
         if inner.platform_start_outcome == PlatformStartOutcome::Pending {
             inner.platform_start_outcome = PlatformStartOutcome::Failed;
         }
@@ -1048,6 +1185,8 @@ impl SessionEngine {
             }
         }
         inner.platform_vpn_starting = false;
+        inner.platform_session_handoff = None;
+        inner.platform_browser_request = None;
         if inner.platform_start_outcome == PlatformStartOutcome::Pending {
             inner.platform_start_outcome = PlatformStartOutcome::Failed;
         }
@@ -1087,7 +1226,7 @@ impl SessionEngine {
             inner.platform_start_attempt_id.clear();
             inner.platform_start_outcome = PlatformStartOutcome::Idle;
             inner.platform_extension_attached = false;
-            SessionHandoff::clear(&inner.home);
+            inner.platform_session_handoff = None;
             inner.generation += 1;
             let generation = inner.generation;
             self.set_lifecycle_locked(&mut inner, ConnectionLifecycle::Connecting, None);
@@ -1148,17 +1287,18 @@ impl SessionEngine {
                         prepared.network.address, prepared.options.mtu
                     ),
                 );
-                // Write full options (incl. cookie) for the VPN-extension process.
-                // Want parameters are size-limited and may drop large cookies.
-                let handoff = SessionHandoff {
+                // Publish the full cookie and credentials only through ashmem.
+                // begin_platform_vpn_start binds this payload to its attempt id.
+                inner.platform_session_handoff = Some(SessionHandoff {
+                    attempt_id: String::new(),
                     options: prepared.options.clone(),
                     network: prepared.network.clone(),
                     updated_at: PlatformVpnState::now_nanos(),
-                };
-                handoff.save(&inner.home)?;
+                });
                 self.persist_platform_locked(&mut inner)?;
-                // Prefer compact options for Want (network only is enough for TUN create).
-                Ok(prepared.options)
+                // The Want is only a platform configuration fallback. Never
+                // duplicate the authenticated cookie or credentials into it.
+                Ok(sanitized_want_options(&prepared.options))
             }
             Err(err) => {
                 let message = err.to_string();
@@ -1188,21 +1328,35 @@ impl SessionEngine {
     /// VPN-extension process: resume the UI-authenticated cookie, establish
     /// CSTP, keep the Client as `pending_native`, and return the live network
     /// configuration used to create the system TUN.
-    pub async fn prepare_in_extension(&self, options_json: &str) -> CoreResult<String> {
+    fn session_handoff_from_ashmem(&self) -> CoreResult<SessionHandoff> {
+        let attempt_id = self.lock()?.platform_start_attempt_id.clone();
+        let platform = self
+            .platform_ipc()?
+            .ok_or_else(|| CoreError::msg("authenticated session ashmem is not attached"))?;
+        if platform.is_ui() {
+            return Err(CoreError::msg(
+                "authenticated session handoff is only readable by the VPN Extension",
+            ));
+        }
+        let envelope = platform
+            .read_remote()
+            .map_err(platform_ipc_error)?
+            .ok_or_else(|| CoreError::msg("authenticated session ashmem has no UI frame"))?;
+        let handoff = envelope
+            .session_handoff
+            .filter(|handoff| handoff.is_valid_for(&attempt_id))
+            .ok_or_else(|| {
+                CoreError::msg(format!(
+                    "authenticated session ashmem handoff is missing or stale for attempt {attempt_id}"
+                ))
+            })?;
+        Ok(handoff)
+    }
+
+    pub async fn prepare_in_extension(&self, _options_json: &str) -> CoreResult<String> {
         #[cfg(feature = "native-anyconnect")]
         {
-            let home = self.lock()?.home.clone();
-            let mut options = SessionHandoff::load(&home).map(|h| h.options);
-            if options.is_none() {
-                if let Ok(parsed) = serde_json::from_str::<VpnOptions>(options_json) {
-                    if parsed.server.is_some() || parsed.cookie.is_some() {
-                        options = Some(parsed);
-                    }
-                }
-            }
-            let options = options.ok_or_else(|| {
-                CoreError::msg("extension prepare: no session handoff (connect from UI first)")
-            })?;
+            let options = self.session_handoff_from_ashmem()?.options;
             let pending = tokio::task::spawn_blocking(move || resume_from_options(&options))
                 .await
                 .map_err(|err| CoreError::msg(format!("extension prepare join: {err}")))??;
@@ -1231,7 +1385,6 @@ impl SessionEngine {
         }
         #[cfg(not(feature = "native-anyconnect"))]
         {
-            let _ = options_json;
             Err(CoreError::msg(
                 "prepare_in_extension requires native-anyconnect",
             ))
@@ -1243,10 +1396,9 @@ impl SessionEngine {
     /// On HarmonyOS the VPN extension runs in a **separate process**.
     /// [`SessionEngine::prepare_in_extension`] resumes the authenticated cookie
     /// in that process before this method attaches the platform TUN.
-    pub async fn attach_tun(&self, fd: i32, options_json: &str) -> CoreResult<()> {
+    pub async fn attach_tun(&self, fd: i32, _options_json: &str) -> CoreResult<()> {
         #[cfg(feature = "native-anyconnect")]
         {
-            let options_json = options_json.to_owned();
             let pending = {
                 let mut inner = self.lock()?;
                 inner.pending_native.take()
@@ -1255,20 +1407,7 @@ impl SessionEngine {
             let pending = if let Some(pending) = pending {
                 pending
             } else {
-                // Prefer on-disk handoff (full cookie) over Want JSON (may truncate).
-                let home = self.lock()?.home.clone();
-                let from_file = SessionHandoff::load(&home);
-                let mut options = from_file.as_ref().map(|h| h.options.clone());
-                if options.is_none() {
-                    if let Ok(parsed) = serde_json::from_str::<VpnOptions>(&options_json) {
-                        if parsed.server.is_some() || parsed.cookie.is_some() {
-                            options = Some(parsed);
-                        }
-                    }
-                }
-                let options = options.ok_or_else(|| {
-                    CoreError::msg("attach TUN refused: authenticated session handoff is missing")
-                })?;
+                let options = self.session_handoff_from_ashmem()?.options;
                 tokio::task::spawn_blocking(move || resume_from_options(&options))
                     .await
                     .map_err(|err| CoreError::msg(format!("resume worker join failed: {err}")))??
@@ -1314,13 +1453,11 @@ impl SessionEngine {
             // Critical: the UI consumes this ashmem frame to leave
             // "establishing".
             self.persist_platform_locked(&mut inner)?;
-            SessionHandoff::clear(&inner.home);
             return Ok(());
         }
 
         #[cfg(not(feature = "native-anyconnect"))]
         {
-            let _ = options_json;
             let mut inner = self.lock()?;
             inner.platform_vpn_running = true;
             inner.platform_vpn_starting = false;
@@ -1387,7 +1524,8 @@ impl SessionEngine {
                 inner.connected_at = None;
                 inner.snapshot.stats = SessionStats::default();
                 inner.snapshot.network = NetworkSnapshot::default();
-                SessionHandoff::clear(&inner.home);
+                inner.platform_session_handoff = None;
+                inner.platform_browser_request = None;
                 let _ = self.persist_platform_locked(&mut inner);
             }
         }
@@ -1602,29 +1740,34 @@ impl SessionEngine {
     }
 
     /// Read the newest sibling-process frame from the opposite ashmem lane.
-    fn sync_platform_locked(&self, inner: &mut Inner) {
+    fn sync_platform_locked(&self, inner: &mut Inner) -> bool {
         let Some(platform) = self.platform_ipc().ok().flatten() else {
-            return;
+            return false;
         };
         let envelope = match platform.read_remote() {
             Ok(Some(envelope)) => envelope,
-            Ok(None) => return,
+            Ok(None) => return false,
             Err(error) => {
                 self.push_diag_locked(
                     inner,
                     "warn",
                     format!("read platform shared memory failed: {error}"),
                 );
-                return;
+                return false;
             }
         };
+        let is_ui = platform.is_ui();
+        let browser_request_acknowledged = !is_ui
+            && acknowledge_platform_browser_request_locked(
+                inner,
+                envelope.browser_request_ack.as_deref(),
+            );
         let Some(remote) = envelope
             .state
             .filter(|state| state.updated_at > inner.platform_vpn_state_updated_at)
         else {
-            return;
+            return browser_request_acknowledged;
         };
-        let is_ui = platform.is_ui();
         let remote_attempt_matches = !remote.start_attempt_id.is_empty()
             && remote.start_attempt_id == inner.platform_start_attempt_id;
 
@@ -1633,7 +1776,7 @@ impl SessionEngine {
         // corresponding Want is attached. Neither side may regress a terminal
         // outcome back to Pending.
         if is_ui && !remote_attempt_matches {
-            return;
+            return browser_request_acknowledged;
         }
         if !is_ui
             && !remote.start_attempt_id.is_empty()
@@ -1746,6 +1889,7 @@ impl SessionEngine {
             inner.connected_at = None;
         }
         self.notify_platform_start_locked(inner);
+        browser_request_acknowledged
     }
 
     fn persist_platform_locked(&self, inner: &mut Inner) -> CoreResult<()> {
@@ -1783,7 +1927,20 @@ impl SessionEngine {
             updated_at: inner.platform_vpn_state_updated_at,
         };
         self.notify_platform_start_locked(inner);
-        platform.publish_state(state).map_err(platform_ipc_error)
+        let browser_request_ack =
+            if platform.is_ui() && !inner.last_platform_browser_request_id.is_empty() {
+                Some(inner.last_platform_browser_request_id.clone())
+            } else {
+                None
+            };
+        platform
+            .publish_snapshot(
+                state,
+                inner.platform_session_handoff.clone(),
+                inner.platform_browser_request.clone(),
+                browser_request_ack,
+            )
+            .map_err(platform_ipc_error)
     }
 
     fn platform_start_is_pending_locked(&self, inner: &Inner, attempt_id: &str) -> bool {
@@ -1865,6 +2022,64 @@ struct PreparedConnect {
     options: VpnOptions,
     #[cfg(feature = "native-anyconnect")]
     pending: Option<PendingNativeSession>,
+}
+
+fn sanitized_want_options(options: &VpnOptions) -> VpnOptions {
+    VpnOptions {
+        addresses: options.addresses.clone(),
+        routes: options.routes.clone(),
+        excluded_routes: options.excluded_routes.clone(),
+        dns_addresses: options.dns_addresses.clone(),
+        search_domains: options.search_domains.clone(),
+        mtu: options.mtu,
+        allow_bypass: options.allow_bypass,
+        force_global: options.force_global,
+        trusted_applications: options.trusted_applications.clone(),
+        blocked_applications: options.blocked_applications.clone(),
+        ..VpnOptions::default()
+    }
+}
+
+fn remove_obsolete_cross_process_files(home: &std::path::Path) -> CoreResult<()> {
+    for file_name in OBSOLETE_CROSS_PROCESS_FILES {
+        let path = home.join(file_name);
+        match std::fs::remove_file(&path) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => {
+                return Err(CoreError::msg(format!(
+                    "remove obsolete cross-process file {}: {error}",
+                    path.display()
+                )));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn consume_platform_browser_request_locked(
+    inner: &mut Inner,
+    request: Option<BrowserOpenRequest>,
+) -> Option<BrowserOpenRequest> {
+    let request = request.filter(|request| {
+        request.is_valid_for(&inner.platform_start_attempt_id)
+            && request.request_id != inner.last_platform_browser_request_id
+    })?;
+    inner.last_platform_browser_request_id = request.request_id.clone();
+    Some(request)
+}
+
+fn acknowledge_platform_browser_request_locked(inner: &mut Inner, ack: Option<&str>) -> bool {
+    let acknowledged = ack.is_some_and(|ack| {
+        inner
+            .platform_browser_request
+            .as_ref()
+            .is_some_and(|request| request.request_id == ack)
+    });
+    if acknowledged {
+        inner.platform_browser_request = None;
+    }
+    acknowledged
 }
 
 fn seed_snapshot() -> SessionSnapshot {
@@ -2208,7 +2423,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         engine.configure_home(dir.path()).unwrap();
         let error = engine.attach_tun(3, "{}").await.unwrap_err();
-        assert!(error.to_string().contains("handoff"));
+        assert!(error.to_string().contains("ashmem"));
     }
 
     #[test]
@@ -2316,53 +2531,104 @@ mod tests {
     }
 
     #[test]
-    fn configure_home_ignores_legacy_platform_state_file() {
-        let dir = tempdir().unwrap();
-        let legacy = PlatformVpnState {
-            start_attempt_id: String::new(),
-            start_outcome: PlatformStartOutcome::Idle,
-            extension_attached: false,
-            starting: true,
-            running: true,
-            lifecycle: ConnectionLifecycle::Connected,
-            last_error: None,
-            assigned_ip: "10.1.2.3".to_owned(),
-            gateway: "vpn.example.com".to_owned(),
-            mtu: 1400,
-            network: NetworkSnapshot::default(),
-            stats: SessionStats::default(),
-            diagnostics: Vec::new(),
-            updated_at: PlatformVpnState::now_nanos(),
-        };
-        std::fs::write(
-            dir.path().join("platform-vpn-state.json"),
-            serde_json::to_vec(&legacy).unwrap(),
-        )
-        .unwrap();
+    fn authenticated_handoff_is_attempt_scoped_in_ashmem() {
+        let ui = SessionEngine::new();
+        {
+            let mut inner = ui.lock().unwrap();
+            inner.platform_session_handoff = Some(SessionHandoff {
+                attempt_id: String::new(),
+                options: VpnOptions {
+                    cookie: Some("session-cookie".to_owned()),
+                    ..VpnOptions::default()
+                },
+                network: NetworkSnapshot::default(),
+                updated_at: PlatformVpnState::now_nanos(),
+            });
+        }
+        let attempt_id = ui.begin_platform_vpn_start().unwrap();
 
-        let restarted = SessionEngine::new();
-        restarted.configure_home(dir.path()).unwrap();
-        assert_eq!(
-            restarted.snapshot().unwrap().lifecycle,
-            ConnectionLifecycle::Disconnected
-        );
+        let handoff = ui.lock().unwrap().platform_session_handoff.clone().unwrap();
+        assert!(handoff.is_valid_for(&attempt_id));
+        assert_eq!(handoff.options.cookie.as_deref(), Some("session-cookie"));
+
+        ui.clear_platform_session_handoff(&attempt_id).unwrap();
+        assert!(ui.lock().unwrap().platform_session_handoff.is_none());
     }
 
     #[test]
-    fn session_handoff_remains_private_file_payload() {
-        let dir = tempdir().unwrap();
-        SessionHandoff {
-            options: crate::model::VpnOptions {
-                cookie: Some("session-cookie".to_owned()),
-                ..crate::model::VpnOptions::default()
-            },
-            network: NetworkSnapshot::default(),
-            updated_at: PlatformVpnState::now_nanos(),
-        }
-        .save(dir.path())
-        .unwrap();
+    fn browser_open_request_is_attempt_scoped_and_consumed_once() {
+        let ui = SessionEngine::new();
+        let attempt_id = ui.begin_platform_vpn_start().unwrap();
+        let request = BrowserOpenRequest {
+            request_id: "browser-1".to_owned(),
+            attempt_id: attempt_id.clone(),
+            uri: "https://idp.example/sso".to_owned(),
+            requested_at_ms: PlatformVpnState::now_millis(),
+        };
+        let mut inner = ui.lock().unwrap();
+        let request = consume_platform_browser_request_locked(&mut inner, Some(request.clone()))
+            .expect("browser request");
+        assert_eq!(request.attempt_id, attempt_id);
+        assert_eq!(request.uri, "https://idp.example/sso");
+        assert!(consume_platform_browser_request_locked(&mut inner, Some(request)).is_none());
+    }
 
-        let loaded = SessionHandoff::load(dir.path()).unwrap();
-        assert_eq!(loaded.options.cookie.as_deref(), Some("session-cookie"));
+    #[test]
+    fn browser_open_request_is_cleared_only_by_its_matching_ui_ack() {
+        let engine = SessionEngine::new();
+        let mut inner = engine.lock().unwrap();
+        inner.platform_browser_request = Some(BrowserOpenRequest {
+            request_id: "browser-1".to_owned(),
+            attempt_id: "attempt-1".to_owned(),
+            uri: "https://idp.example/sso".to_owned(),
+            requested_at_ms: PlatformVpnState::now_millis(),
+        });
+
+        assert!(!acknowledge_platform_browser_request_locked(
+            &mut inner,
+            Some("browser-stale")
+        ));
+        assert!(inner.platform_browser_request.is_some());
+        assert!(acknowledge_platform_browser_request_locked(
+            &mut inner,
+            Some("browser-1")
+        ));
+        assert!(inner.platform_browser_request.is_none());
+    }
+
+    #[test]
+    fn configure_home_removes_obsolete_cross_process_files() {
+        let dir = tempdir().unwrap();
+        for file_name in OBSOLETE_CROSS_PROCESS_FILES {
+            std::fs::write(dir.path().join(file_name), b"obsolete").unwrap();
+        }
+
+        let engine = SessionEngine::new();
+        engine.configure_home(dir.path()).unwrap();
+
+        for file_name in OBSOLETE_CROSS_PROCESS_FILES {
+            assert!(!dir.path().join(file_name).exists());
+        }
+    }
+
+    #[test]
+    fn platform_want_options_exclude_authenticated_secrets() {
+        let options = VpnOptions {
+            addresses: vec!["10.0.0.2/24".to_owned()],
+            username: Some("alice".to_owned()),
+            password: Some("password".to_owned()),
+            cookie: Some("cookie".to_owned()),
+            key_password: "key-password".to_owned(),
+            token_string: "token".to_owned(),
+            ..VpnOptions::default()
+        };
+
+        let sanitized = sanitized_want_options(&options);
+        assert_eq!(sanitized.addresses, options.addresses);
+        assert!(sanitized.username.is_none());
+        assert!(sanitized.password.is_none());
+        assert!(sanitized.cookie.is_none());
+        assert!(sanitized.key_password.is_empty());
+        assert!(sanitized.token_string.is_empty());
     }
 }

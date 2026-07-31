@@ -93,9 +93,8 @@ export declare function completeFilePick(requestId: number, path?: string | unde
 export declare function configureAppHome(homeDir: string): void
 
 /**
-  * VPN-extension process entry. Persistent profiles and the short-lived
-  * authenticated session handoff use the shared app-private directory; live
-  * lifecycle state is exchanged through ashmem.
+  * VPN-extension process entry. Persistent profiles stay in the app-private
+  * directory; authenticated handoff and live lifecycle state use ashmem.
   */
 export declare function configureAppHomeForExtension(homeDir: string): void
 

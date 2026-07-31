@@ -6,26 +6,16 @@
 //! Dual-process HarmonyOS:
 //! - Full auth runs in the VPN **extension** process (no UI Ability).
 //! - Opening the system browser needs the **UI** process (`startAbility`).
-//! - When no in-process handler is registered, we write
-//!   `browser-request.json` under `HOPENCONNECT_HOME` for the UI to poll.
+//! - When no in-process handler is registered, the request is published through
+//!   the Extension-owned ashmem lane for the UI to consume exactly once.
 
-use serde::{Deserialize, Serialize};
-use std::path::{Path, PathBuf};
 use std::sync::Mutex;
-use std::time::{SystemTime, UNIX_EPOCH};
+
+pub use crate::platform_state::BrowserOpenRequest;
 
 type OpenBrowserFn = Box<dyn FnMut(&str) -> bool + Send>;
 
 static OPEN_BROWSER: Mutex<Option<OpenBrowserFn>> = Mutex::new(None);
-
-const REQUEST_FILE: &str = "browser-request.json";
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct BrowserOpenRequest {
-    pub uri: String,
-    pub requested_at_ms: u64,
-}
 
 /// Install (or clear) the in-process platform external-browser callback (UI).
 pub fn set_handler(handler: Option<OpenBrowserFn>) {
@@ -58,49 +48,21 @@ pub fn open(uri: &str) -> bool {
         return true;
     }
 
-    // 2) Cross-process: extension → UI via filesDir.
-    queue_for_ui(uri)
-}
-
-fn home_dir() -> Option<PathBuf> {
-    std::env::var_os("HOPENCONNECT_HOME").map(PathBuf::from)
-}
-
-fn request_path(home: &Path) -> PathBuf {
-    home.join(REQUEST_FILE)
-}
-
-fn queue_for_ui(uri: &str) -> bool {
-    let Some(home) = home_dir() else {
-        return false;
-    };
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_millis() as u64)
-        .unwrap_or(0);
-    let req = BrowserOpenRequest {
-        uri: uri.to_owned(),
-        requested_at_ms: now,
-    };
-    let Ok(json) = serde_json::to_string_pretty(&req) else {
-        return false;
-    };
-    let path = request_path(&home);
-    crate::private_fs::write_atomic_private(&path, json.as_bytes()).is_ok()
+    // 2) Cross-process: extension → UI via ashmem.
+    crate::shared_engine()
+        .queue_platform_browser_open_request(uri.to_owned())
+        .is_ok()
 }
 
 /// UI poll: take a pending browser-open request, if any.
 pub fn take_pending() -> Option<BrowserOpenRequest> {
-    let home = home_dir()?;
-    let path = request_path(&home);
-    let text = std::fs::read_to_string(&path).ok()?;
-    let _ = std::fs::remove_file(&path);
-    serde_json::from_str(&text).ok()
+    crate::shared_engine()
+        .take_platform_browser_open_request()
+        .ok()
+        .flatten()
 }
 
 /// Clear any stale request (disconnect / new session).
 pub fn clear_pending() {
-    if let Some(home) = home_dir() {
-        let _ = std::fs::remove_file(request_path(&home));
-    }
+    let _ = crate::shared_engine().clear_platform_browser_open_request();
 }

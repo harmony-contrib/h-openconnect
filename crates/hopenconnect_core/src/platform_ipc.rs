@@ -1,4 +1,4 @@
-use crate::platform_state::PlatformVpnState;
+use crate::platform_state::{BrowserOpenRequest, PlatformVpnState, SessionHandoff};
 use ohos_ashmem_binding::Ashmem;
 use serde::{Deserialize, Serialize};
 use std::io;
@@ -16,7 +16,7 @@ const UI_LANE_SIZE: usize = 1024 * 1024;
 const FRAME_HEADER_SIZE: usize = 32;
 const FRAME_MAGIC: u32 = 0x4841_4E59;
 const REGION_MAGIC: &[u8; 8] = b"HANYIPC\0";
-const PROTOCOL_VERSION: u32 = 1;
+const PROTOCOL_VERSION: u32 = 2;
 const SLOT_COUNT: usize = 2;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -29,6 +29,9 @@ enum PlatformRole {
 #[serde(rename_all = "camelCase", default)]
 pub(crate) struct PlatformEnvelope {
     pub(crate) state: Option<PlatformVpnState>,
+    pub(crate) session_handoff: Option<SessionHandoff>,
+    pub(crate) browser_request: Option<BrowserOpenRequest>,
+    pub(crate) browser_request_ack: Option<String>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -149,16 +152,34 @@ impl PlatformIpc {
         })
     }
 
-    pub(crate) fn publish_state(&self, state: PlatformVpnState) -> Result<()> {
-        let envelope = {
+    pub(crate) fn publish_snapshot(
+        &self,
+        state: PlatformVpnState,
+        session_handoff: Option<SessionHandoff>,
+        browser_request: Option<BrowserOpenRequest>,
+        browser_request_ack: Option<String>,
+    ) -> Result<()> {
+        let (envelope, scrub_previous_payload) = {
             let mut published = self
                 .published
                 .lock()
                 .map_err(|_| PlatformIpcError::LockPoisoned)?;
-            published.state = Some(state);
-            published.clone()
+            let scrub_previous_payload = replace_snapshot(
+                &mut published,
+                state,
+                session_handoff,
+                browser_request,
+                browser_request_ack,
+            );
+            (published.clone(), scrub_previous_payload)
         };
-        self.publish(&envelope)
+        self.publish(&envelope)?;
+        if scrub_previous_payload {
+            // Frames alternate between two slots. Publish the cleared payload
+            // twice so neither slot retains an authenticated cookie or SSO URL.
+            self.publish(&envelope)?;
+        }
+        Ok(())
     }
 
     pub(crate) fn read_remote(&self) -> Result<Option<PlatformEnvelope>> {
@@ -224,7 +245,19 @@ impl PlatformIpc {
             });
         }
         let slot_offset = lane_offset + generation as usize % SLOT_COUNT * slot_size;
+        let previous_length = self
+            .read_memory(slot_offset, FRAME_HEADER_SIZE)
+            .ok()
+            .and_then(|header| FrameHeader::parse(&header, slot_size))
+            .map(|header| header.content_length)
+            .unwrap_or_default();
         self.write_memory(slot_offset + FRAME_HEADER_SIZE, content)?;
+        if previous_length > content.len() {
+            self.write_memory(
+                slot_offset + FRAME_HEADER_SIZE + content.len(),
+                &vec![0; previous_length - content.len()],
+            )?;
+        }
 
         let mut header = [0_u8; FRAME_HEADER_SIZE];
         header[0..4].copy_from_slice(&FRAME_MAGIC.to_le_bytes());
@@ -304,6 +337,22 @@ impl PlatformIpc {
             .write(offset, data)
             .map_err(|error| PlatformIpcError::Memory(error.to_string()))
     }
+}
+
+fn replace_snapshot(
+    published: &mut PlatformEnvelope,
+    state: PlatformVpnState,
+    session_handoff: Option<SessionHandoff>,
+    browser_request: Option<BrowserOpenRequest>,
+    browser_request_ack: Option<String>,
+) -> bool {
+    let scrub_previous_payload = (published.session_handoff.is_some() && session_handoff.is_none())
+        || (published.browser_request.is_some() && browser_request.is_none());
+    published.state = Some(state);
+    published.session_handoff = session_handoff;
+    published.browser_request = browser_request;
+    published.browser_request_ack = browser_request_ack;
+    scrub_previous_payload
 }
 
 impl SocketNotification {
@@ -506,5 +555,55 @@ mod tests {
         );
         header[8] ^= 1;
         assert!(FrameHeader::parse(&header, 1024).is_none());
+    }
+
+    #[test]
+    fn clearing_sensitive_payload_requires_both_local_slots_to_be_overwritten() {
+        let mut published = PlatformEnvelope::default();
+        let attempt_id = "attempt-sensitive".to_owned();
+        let cookie = "cookie-must-not-remain-in-ashmem-slots";
+        let uri = "https://idp.example/private-sso-request";
+        assert!(!replace_snapshot(
+            &mut published,
+            PlatformVpnState::default(),
+            Some(SessionHandoff {
+                attempt_id: attempt_id.clone(),
+                options: crate::model::VpnOptions {
+                    cookie: Some(cookie.to_owned()),
+                    ..crate::model::VpnOptions::default()
+                },
+                network: crate::model::NetworkSnapshot::default(),
+                updated_at: PlatformVpnState::now_nanos(),
+            }),
+            Some(BrowserOpenRequest {
+                request_id: "browser-1".to_owned(),
+                attempt_id,
+                uri: uri.to_owned(),
+                requested_at_ms: PlatformVpnState::now_millis(),
+            }),
+            None,
+        ));
+        assert_eq!(
+            published
+                .session_handoff
+                .clone()
+                .and_then(|handoff| handoff.options.cookie),
+            Some(cookie.to_owned())
+        );
+
+        assert!(replace_snapshot(
+            &mut published,
+            PlatformVpnState::default(),
+            None,
+            None,
+            None,
+        ));
+        let cleared = serde_json::to_vec(&published).unwrap();
+        assert!(!cleared
+            .windows(cookie.len())
+            .any(|window| window == cookie.as_bytes()));
+        assert!(!cleared
+            .windows(uri.len())
+            .any(|window| window == uri.as_bytes()));
     }
 }

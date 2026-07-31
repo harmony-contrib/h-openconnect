@@ -14,7 +14,7 @@
 
 | 页面 | 用户操作 | 实现 |
 | --- | --- | --- |
-| Home | 连接 | `prepare_connect` → 写 `session-handoff.json` → `requestStartVpn` → 扩展 `prepareVpnInExtension` + `startVpn(fd)` |
+| Home | 连接 | `prepare_connect` → 发布 attempt-scoped ashmem handoff → `requestStartVpn` → 扩展 `prepareVpnInExtension` + `startVpn(fd)` |
 | Home | 断开 | `requestStopVpn` → 扩展 destroy + `Command::Cancel` / platform state clear |
 | Connections | 保存 | `ProfileStore`（密码持久化在禁止备份、权限收紧的应用私有目录） |
 | Statistics | 刷新 | `tick` + 共享 platform state 流量 |
