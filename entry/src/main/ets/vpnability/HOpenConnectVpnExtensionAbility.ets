@@ -18,6 +18,7 @@ import {
   buildVpnConfig,
   parseOptions,
   readPlatformSharedMemoryFds,
+  readPlatformStartAttemptId,
   readOptionsJson,
   setHOpenBundleName,
 } from './VpnConfig';
@@ -148,6 +149,22 @@ export default class HOpenConnectVpnExtensionAbility extends VpnExtensionAbility
       this.startPlatformSubscription();
     } catch (err) {
       const message = `attach platform shared memory failed: ${describeError(err)}`;
+      try {
+        hopenconnectUi.setPlatformVpnFailed(message);
+      } catch (_inner) {
+        // ignore
+      }
+      hilog.error(LOG_DOMAIN, LOG_TAG, 'VPN request rejected %{public}s', message);
+      this.starting = false;
+      return;
+    }
+    let attemptId: string;
+    try {
+      attemptId = readPlatformStartAttemptId(want);
+      hopenconnectUi.bindPlatformVpnStart(attemptId);
+      hilog.info(LOG_DOMAIN, LOG_TAG, 'bound VPN start attempt %{public}s', attemptId);
+    } catch (err) {
+      const message = describeError(err) || 'VPN request has no valid start attempt';
       try {
         hopenconnectUi.setPlatformVpnFailed(message);
       } catch (_inner) {

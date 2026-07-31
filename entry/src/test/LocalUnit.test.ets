@@ -1,8 +1,12 @@
 import { describe, it, expect } from '@ohos/hypium';
 import {
   buildVpnConfig,
+  readOptionsJson,
+  readPlatformSharedMemoryFds,
+  readPlatformStartAttemptId,
   parseOptions,
 } from '../main/ets/vpnability/VpnConfig';
+import { Want } from '@kit.AbilityKit';
 
 export default function localUnitTest() {
   describe('VpnConfig', () => {
@@ -44,6 +48,72 @@ export default function localUnitTest() {
         rejected = true;
       }
       expect(rejected).assertEqual(true);
+    });
+
+    it('readsDirectVpnExtensionWant', 0, () => {
+      const want = {
+        parameters: {
+          optionsJson: '{"addresses":["10.0.0.2/24"]}',
+          hopenconnectStartAttemptId: 'attempt-direct',
+        },
+        fds: {
+          hopenconnectPlatformAshmem: 21,
+          hopenconnectPlatformNotification: 22,
+        },
+      } as Want;
+
+      const sharedMemory = readPlatformSharedMemoryFds(want);
+      expect(readOptionsJson(want)).assertEqual('{"addresses":["10.0.0.2/24"]}');
+      expect(readPlatformStartAttemptId(want)).assertEqual('attempt-direct');
+      expect(sharedMemory?.ashmemFd).assertEqual(21);
+      expect(sharedMemory?.notificationFd).assertEqual(22);
+    });
+
+    it('readsFirstAuthorizationVpnExtensionWant', 0, () => {
+      const want = {
+        parameters: {
+          callingUid: 20010048,
+          callingPid: 1234,
+          myParams: {
+            optionsJson: '{"addresses":["10.0.0.2/24"]}',
+            hopenconnectStartAttemptId: 'attempt-first-authorization',
+            hopenconnectPlatformAshmem: {
+              type: 'FD',
+              value: 31,
+            },
+            hopenconnectPlatformNotification: {
+              type: 'FD',
+              value: 32,
+            },
+          },
+        },
+      } as Want;
+
+      const sharedMemory = readPlatformSharedMemoryFds(want);
+      expect(readOptionsJson(want)).assertEqual('{"addresses":["10.0.0.2/24"]}');
+      expect(readPlatformStartAttemptId(want)).assertEqual('attempt-first-authorization');
+      expect(sharedMemory?.ashmemFd).assertEqual(31);
+      expect(sharedMemory?.notificationFd).assertEqual(32);
+    });
+
+    it('rejectsMalformedNestedFileDescriptors', 0, () => {
+      const want = {
+        parameters: {
+          myParams: {
+            optionsJson: '{"addresses":["10.0.0.2/24"]}',
+            hopenconnectPlatformAshmem: {
+              type: 'not-an-fd',
+              value: 31,
+            },
+            hopenconnectPlatformNotification: {
+              type: 'FD',
+              value: -1,
+            },
+          },
+        },
+      } as Want;
+
+      expect(readPlatformSharedMemoryFds(want) === undefined).assertEqual(true);
     });
   });
 }

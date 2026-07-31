@@ -13,6 +13,17 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum PlatformStartOutcome {
+    #[default]
+    Idle,
+    Pending,
+    Connected,
+    Failed,
+    Cancelled,
+}
+
 /// Session handoff for the VPN-extension process (cookie / credentials).
 /// Want parameters can truncate large cookies; the file is the source of truth.
 pub const SESSION_HANDOFF_FILE: &str = "session-handoff.json";
@@ -66,6 +77,15 @@ impl SessionHandoff {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct PlatformVpnState {
+    /// Identity and exactly-once outcome of the current platform start request.
+    /// These fields prevent a late extension response from completing a newer
+    /// request after the system authorization flow has rebound the ability.
+    pub start_attempt_id: String,
+    pub start_outcome: PlatformStartOutcome,
+    /// Set by the VPN Extension process after it has attached the shared-memory
+    /// session and bound the matching Want. This distinguishes a dispatched
+    /// request from one the extension has actually accepted.
+    pub extension_attached: bool,
     pub starting: bool,
     pub running: bool,
     pub lifecycle: ConnectionLifecycle,

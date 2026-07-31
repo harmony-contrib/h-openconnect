@@ -40,6 +40,7 @@ pub use model::{
     ConnectionProfile, DiagnosticEntry, NetworkSnapshot, ProtocolKind, SessionSnapshot,
     SessionStats, SoftwareToken, SplitTunnelMode, VpnOptions,
 };
+pub use platform_state::PlatformStartOutcome;
 pub use store::{Preferences, ProfileStore};
 
 pub fn secure_private_file(path: impl AsRef<std::path::Path>) -> CoreResult<()> {

@@ -181,8 +181,31 @@ export function parseOptions(optionsJson?: string): VpnOptions {
   }
 }
 
-export function readOptionsJson(want?: Want): string {
+const HOPEN_SYSTEM_PARAMETERS_KEY = 'myParams';
+
+/**
+ * The VPN authorization dialog preserves the original WantParams under
+ * `myParams` before it starts the extension for the first time. This shape is
+ * part of the API 24 VPN authorization path. Later starts deliver the original
+ * parameters directly, so accept both forms without retrying the ability.
+ */
+function readVpnParameters(want?: Want): Record<string, Object> | undefined {
   const parameters = want?.parameters as Record<string, Object> | undefined;
+  if (!parameters) {
+    return undefined;
+  }
+  if (typeof parameters['optionsJson'] === 'string') {
+    return parameters;
+  }
+  const nested = parameters[HOPEN_SYSTEM_PARAMETERS_KEY];
+  if (typeof nested === 'object' && nested !== null && !Array.isArray(nested)) {
+    return nested as Record<string, Object>;
+  }
+  return parameters;
+}
+
+export function readOptionsJson(want?: Want): string {
+  const parameters = readVpnParameters(want);
   const value = parameters?.['optionsJson'];
   if (typeof value === 'string' && value.length > 0) {
     return value;
@@ -192,6 +215,7 @@ export function readOptionsJson(want?: Want): string {
 
 const HOPEN_ASHMEM_FD_KEY = 'hopenconnectPlatformAshmem';
 const HOPEN_NOTIFICATION_FD_KEY = 'hopenconnectPlatformNotification';
+const HOPEN_START_ATTEMPT_ID_KEY = 'hopenconnectStartAttemptId';
 
 export interface HOpenPlatformSharedMemoryFds {
   ashmemFd: number;
@@ -214,6 +238,7 @@ interface HOpenVpnWantParameters extends Record<string, Object> {
 export function buildVpnWant(
   optionsJson?: string,
   sharedMemory?: HOpenPlatformSharedMemoryFds,
+  startAttemptId?: string,
 ): Want {
   const parameters: HOpenVpnWantParameters = {
     optionsJson: optionsJson ?? '',
@@ -221,6 +246,9 @@ export function buildVpnWant(
   if (sharedMemory) {
     parameters[HOPEN_ASHMEM_FD_KEY] = new HOpenWantFileDescriptor(sharedMemory.ashmemFd);
     parameters[HOPEN_NOTIFICATION_FD_KEY] = new HOpenWantFileDescriptor(sharedMemory.notificationFd);
+  }
+  if (startAttemptId && startAttemptId.length > 0) {
+    parameters[HOPEN_START_ATTEMPT_ID_KEY] = startAttemptId;
   }
   return {
     deviceId: '',
@@ -231,12 +259,42 @@ export function buildVpnWant(
   };
 }
 
+export function readPlatformStartAttemptId(want?: Want): string {
+  const value = readVpnParameters(want)?.[HOPEN_START_ATTEMPT_ID_KEY];
+  if (typeof value === 'string' && value.length > 0) {
+    return value;
+  }
+  throw new Error('VPN extension request is missing start attempt id');
+}
+
 export function readPlatformSharedMemoryFds(want: Want): HOpenPlatformSharedMemoryFds | undefined {
-  const ashmemFd = want.fds?.[HOPEN_ASHMEM_FD_KEY];
-  const notificationFd = want.fds?.[HOPEN_NOTIFICATION_FD_KEY];
-  if (typeof ashmemFd !== 'number' || ashmemFd < 0 ||
-    typeof notificationFd !== 'number' || notificationFd < 0) {
+  let ashmemFd = want.fds?.[HOPEN_ASHMEM_FD_KEY];
+  let notificationFd = want.fds?.[HOPEN_NOTIFICATION_FD_KEY];
+  if (!isValidFileDescriptor(ashmemFd) || !isValidFileDescriptor(notificationFd)) {
+    const parameters = readVpnParameters(want);
+    ashmemFd = readFileDescriptorParameter(parameters, HOPEN_ASHMEM_FD_KEY);
+    notificationFd = readFileDescriptorParameter(parameters, HOPEN_NOTIFICATION_FD_KEY);
+  }
+  if (!isValidFileDescriptor(ashmemFd) || !isValidFileDescriptor(notificationFd)) {
     return undefined;
   }
-  return { ashmemFd, notificationFd };
+  return {
+    ashmemFd: ashmemFd as number,
+    notificationFd: notificationFd as number,
+  };
+}
+
+function readFileDescriptorParameter(
+  parameters: Record<string, Object> | undefined,
+  key: string,
+): number | undefined {
+  const descriptor = parameters?.[key] as HOpenWantFileDescriptor | undefined;
+  if (!descriptor || descriptor.type !== 'FD' || !isValidFileDescriptor(descriptor.value)) {
+    return undefined;
+  }
+  return descriptor.value;
+}
+
+function isValidFileDescriptor(value?: number): boolean {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 0;
 }

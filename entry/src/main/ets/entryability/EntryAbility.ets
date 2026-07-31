@@ -47,6 +47,7 @@ export default class EntryAbility extends NativeAbility {
   public moduleName: string | string[] = 'hopenconnect_ui';
   public defaultPage: boolean = false;
   private vpnStartRequest: Promise<void> | undefined = undefined;
+  private activeVpnStartAttemptId: string = '';
   private platformSharedMemory?: HOpenPlatformSharedMemoryFds;
 
   private configureNativeHome(): void {
@@ -132,25 +133,64 @@ export default class EntryAbility extends NativeAbility {
   }
 
   private async performStartVpn(optionsJson: string): Promise<void> {
+    let attemptId: string = '';
     try {
       hilog.info(LOG_DOMAIN, LOG_TAG, 'request VPN start received');
-      hopenconnectUi.setPlatformVpnStarting(true);
-      // The first standards-compliant VpnExtension start is intentionally
-      // gated by the system consent dialog. Await the platform result instead
-      // of imposing an application timeout while the user is deciding.
-      await vpnExtension.startVpnExtensionAbility(buildVpnWant(optionsJson, this.platformSharedMemory));
-      hilog.info(LOG_DOMAIN, LOG_TAG, 'requested VPN start');
+      attemptId = hopenconnectUi.beginPlatformVpnStart();
+      this.activeVpnStartAttemptId = attemptId;
+
+      // API 24 may leave this Promise pending after first authorization. Its
+      // resolution is only a dispatch acknowledgement. Rejection is terminal
+      // only before the Extension accepts the Want; after that, Connected or
+      // Failed comes from the extension ashmem lane.
+      vpnExtension.startVpnExtensionAbility(
+        buildVpnWant(optionsJson, this.platformSharedMemory, attemptId),
+      ).then(() => {
+        hilog.info(LOG_DOMAIN, LOG_TAG, 'system acknowledged VPN start attempt %{public}s', attemptId);
+      }).catch((err: Error) => {
+        const message = describeError(err) || 'system rejected VPN start';
+        try {
+          // A rejection is authoritative only until the Extension has accepted
+          // the matching Want. Once attached, its ashmem terminal owns outcome.
+          hopenconnectUi.failUnattachedPlatformVpnStart(attemptId, message);
+        } catch (innerErr) {
+          hilog.error(LOG_DOMAIN, LOG_TAG, 'publish system rejection failed %{public}s',
+            describeError(innerErr));
+        }
+      });
+
+      const outcome = await hopenconnectUi.awaitPlatformVpnStart(attemptId);
+      if (outcome !== 'connected') {
+        throw new Error(`unexpected VPN start outcome: ${outcome}`);
+      }
+      hilog.info(LOG_DOMAIN, LOG_TAG, 'VPN start completed attempt %{public}s', attemptId);
     } catch (err) {
       const message = describeError(err) || 'request VPN start failed';
-      hopenconnectUi.setPlatformVpnFailed(message);
+      if (attemptId.length > 0) {
+        try {
+          // Exactly-once: this is a no-op if ashmem already supplied a
+          // terminal outcome or a newer attempt replaced this one.
+          hopenconnectUi.failPlatformVpnStart(attemptId, message);
+        } catch (innerErr) {
+          hilog.error(LOG_DOMAIN, LOG_TAG, 'publish VPN start failure failed %{public}s',
+            describeError(innerErr));
+        }
+      }
       hilog.error(LOG_DOMAIN, LOG_TAG, 'request VPN start failed %{public}s', message);
       throw new Error(message);
+    } finally {
+      if (this.activeVpnStartAttemptId === attemptId) {
+        this.activeVpnStartAttemptId = '';
+      }
     }
   }
 
   private async requestStopVpn(): Promise<void> {
     try {
       hilog.info(LOG_DOMAIN, LOG_TAG, 'request VPN stop received');
+      if (this.activeVpnStartAttemptId.length > 0) {
+        hopenconnectUi.cancelPlatformVpnStart(this.activeVpnStartAttemptId);
+      }
       await vpnExtension.stopVpnExtensionAbility(buildVpnWant());
       hopenconnectUi.setPlatformVpnRunning(false);
       hilog.info(LOG_DOMAIN, LOG_TAG, 'requested VPN stop');
@@ -401,6 +441,18 @@ export default class EntryAbility extends NativeAbility {
     this.configureNativeLocale(newConfig.language);
     this.configureNativeAppearance(newConfig.colorMode);
     super.onConfigurationUpdate(newConfig);
+  }
+
+  public onDestroy(): void {
+    if (this.activeVpnStartAttemptId.length > 0) {
+      try {
+        hopenconnectUi.cancelPlatformVpnStart(this.activeVpnStartAttemptId);
+      } catch (err) {
+        hilog.warn(LOG_DOMAIN, LOG_TAG, 'cancel active VPN start failed %{public}s', describeError(err));
+      }
+      this.activeVpnStartAttemptId = '';
+    }
+    super.onDestroy();
   }
 
   public async onWindowStageCreate(windowStage: window.WindowStage): Promise<void> {

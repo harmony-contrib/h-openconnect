@@ -1218,7 +1218,10 @@ async fn engine_disconnect(dry_run: bool) -> Result<SessionOutcome, String> {
 }
 
 async fn session_tick_delay(timeout: Duration) {
-    let _ = shared_engine().wait_for_platform_change(timeout).await;
+    // Platform start transactions own the ashmem notification waiter while
+    // pending. Regular UI refreshes only need a bounded timer because tick()
+    // synchronizes the latest frame before producing each snapshot.
+    tokio::time::sleep(timeout).await;
 }
 
 async fn group_discovery_delay() {

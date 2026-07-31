@@ -90,6 +90,57 @@ pub fn sync_platform_changes() -> Result<()> {
 }
 
 #[napi]
+pub fn begin_platform_vpn_start() -> Result<String> {
+    shared_engine()
+        .begin_platform_vpn_start()
+        .map_err(to_napi_error)
+}
+
+#[napi]
+pub fn bind_platform_vpn_start(attempt_id: String) -> Result<()> {
+    shared_engine()
+        .bind_platform_vpn_start(&attempt_id)
+        .map_err(to_napi_error)
+}
+
+#[napi]
+pub async fn await_platform_vpn_start(attempt_id: String) -> Result<String> {
+    let outcome = shared_engine()
+        .await_platform_vpn_start(&attempt_id)
+        .await
+        .map_err(to_napi_error)?;
+    Ok(match outcome {
+        hopenconnect_core::PlatformStartOutcome::Connected => "connected",
+        hopenconnect_core::PlatformStartOutcome::Failed => "failed",
+        hopenconnect_core::PlatformStartOutcome::Cancelled => "cancelled",
+        hopenconnect_core::PlatformStartOutcome::Idle => "idle",
+        hopenconnect_core::PlatformStartOutcome::Pending => "pending",
+    }
+    .to_owned())
+}
+
+#[napi]
+pub fn fail_platform_vpn_start(attempt_id: String, error: String) -> Result<bool> {
+    shared_engine()
+        .fail_platform_vpn_start(&attempt_id, error)
+        .map_err(to_napi_error)
+}
+
+#[napi]
+pub fn fail_unattached_platform_vpn_start(attempt_id: String, error: String) -> Result<bool> {
+    shared_engine()
+        .fail_unattached_platform_vpn_start(&attempt_id, error)
+        .map_err(to_napi_error)
+}
+
+#[napi]
+pub fn cancel_platform_vpn_start(attempt_id: String) -> Result<bool> {
+    shared_engine()
+        .cancel_platform_vpn_start(&attempt_id)
+        .map_err(to_napi_error)
+}
+
+#[napi]
 pub fn configure_ui_locale(locale: String) -> Result<()> {
     std::env::set_var("HOPENCONNECT_UI_LOCALE", locale);
     Ok(())
