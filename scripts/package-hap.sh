@@ -129,8 +129,16 @@ if [ -n "$OHPM_BIN" ]; then
   "$OHPM_BIN" install --all
 fi
 
-"$HVIGORW_BIN" default@PackageHap --mode module -p module=entry@default \
-  -p buildMode="$HAP_BUILD_MODE" $HVIGOR_ARGS
+SIGN_ARGS=""
+HVIGOR_TASK="default@PackageHap"
+if [ "$SIGN_HAP" = "1" ]; then
+  HVIGOR_TASK="default@SignHap"
+  SIGN_ARGS="-p enableSignTask=true"
+fi
+
+# shellcheck disable=SC2086
+"$HVIGORW_BIN" "$HVIGOR_TASK" --mode module -p module=entry@default \
+  -p buildMode="$HAP_BUILD_MODE" $HVIGOR_ARGS $SIGN_ARGS
 
 if [ ! -f "$HAP_PATH" ]; then
   echo "Expected unsigned HAP was not generated: $HAP_PATH" >&2
@@ -140,6 +148,10 @@ fi
 if [ "$SIGN_HAP" = "1" ]; then
   if [ ! -f "$SIGNED_HAP_PATH" ]; then
     echo "Expected signed HAP was not generated: $SIGNED_HAP_PATH" >&2
+    exit 1
+  fi
+  if [ ! "$SIGNED_HAP_PATH" -nt "$HAP_PATH" ]; then
+    echo "Signed HAP is stale relative to the unsigned build: $SIGNED_HAP_PATH" >&2
     exit 1
   fi
   echo "$SIGNED_HAP_PATH"
