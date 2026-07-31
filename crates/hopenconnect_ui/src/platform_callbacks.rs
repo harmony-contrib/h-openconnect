@@ -199,10 +199,10 @@ pub(crate) fn protect_socket_fd(fd: i32) -> Result<()> {
         move |promise_result, _env| {
             match promise_result {
                 Ok(promise) => {
-                    let _ = spawn_napi_future(async move {
+                    std::mem::drop(spawn_napi_future(async move {
                         let result = promise.await.map_err(|err| err.to_string());
                         let _ = completion_tx.send(result);
-                    });
+                    }));
                 }
                 Err(err) => {
                     let _ = completion_tx.send(Err(err.to_string()));
@@ -379,6 +379,8 @@ async fn invoke_string_void_callback(
                 Ok(value) => {
                     let tx_cell = Rc::new(Cell::new(Some(tx)));
                     let tx_in_catch = tx_cell.clone();
+                    // SAFETY: this callback is registered for the ArkTS export
+                    // function, whose contract returns `Promise<void>`.
                     let promise = unsafe { value.cast::<PromiseRaw<'static, ()>>() }?;
                     promise
                         .then(move |_ctx| {

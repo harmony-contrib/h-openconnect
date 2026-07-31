@@ -359,6 +359,8 @@ impl SocketNotification {
     fn notify(&self) -> Result<()> {
         let value = [1_u8];
         loop {
+            // SAFETY: `local` owns a valid datagram socket descriptor, and
+            // `value` remains alive and readable for the duration of `send`.
             let written = unsafe {
                 libc::send(
                     self.local.as_raw_fd(),
@@ -394,6 +396,8 @@ impl SocketNotification {
             revents: 0,
         };
         loop {
+            // SAFETY: `descriptor` is a valid initialized `pollfd`, and the
+            // slice contains exactly one element for the supplied count.
             let ready = unsafe { libc::poll(&mut descriptor, 1, timeout_ms) };
             if ready == 0 {
                 return Ok(false);
@@ -449,13 +453,18 @@ const fn lane_layout(role: PlatformRole) -> (usize, usize) {
 
 fn create_notification_pair() -> Result<(OwnedFd, OwnedFd)> {
     let mut fds = [-1; 2];
+    // SAFETY: `fds` provides writable storage for exactly two descriptors as
+    // required by `socketpair`.
     let result = unsafe { libc::socketpair(libc::AF_UNIX, libc::SOCK_DGRAM, 0, fds.as_mut_ptr()) };
     if result < 0 {
         return Err(PlatformIpcError::Notification(
             io::Error::last_os_error().to_string(),
         ));
     }
+    // SAFETY: a successful `socketpair` call initialized both descriptors and
+    // transfers their sole ownership to these `OwnedFd` values.
     let first = unsafe { OwnedFd::from_raw_fd(fds[0]) };
+    // SAFETY: same ownership guarantee as `first`, for the second descriptor.
     let second = unsafe { OwnedFd::from_raw_fd(fds[1]) };
     configure_nonblocking(first.as_raw_fd())?;
     configure_nonblocking(second.as_raw_fd())?;
@@ -463,16 +472,32 @@ fn create_notification_pair() -> Result<(OwnedFd, OwnedFd)> {
 }
 
 fn configure_nonblocking(fd: RawFd) -> Result<()> {
+    // SAFETY: callers provide a live descriptor owned by this module.
     let status = unsafe { libc::fcntl(fd, libc::F_GETFL) };
-    if status < 0 || unsafe { libc::fcntl(fd, libc::F_SETFL, status | libc::O_NONBLOCK) } < 0 {
+    if status < 0 {
         return Err(PlatformIpcError::Notification(
             io::Error::last_os_error().to_string(),
         ));
     }
+    // SAFETY: the same live descriptor and flags returned by `F_GETFL` are
+    // passed back to `fcntl`, with only `O_NONBLOCK` added.
+    let set_status = unsafe { libc::fcntl(fd, libc::F_SETFL, status | libc::O_NONBLOCK) };
+    if set_status < 0 {
+        return Err(PlatformIpcError::Notification(
+            io::Error::last_os_error().to_string(),
+        ));
+    }
+    // SAFETY: callers provide a live descriptor owned by this module.
     let descriptor = unsafe { libc::fcntl(fd, libc::F_GETFD) };
-    if descriptor < 0
-        || unsafe { libc::fcntl(fd, libc::F_SETFD, descriptor | libc::FD_CLOEXEC) } < 0
-    {
+    if descriptor < 0 {
+        return Err(PlatformIpcError::Notification(
+            io::Error::last_os_error().to_string(),
+        ));
+    }
+    // SAFETY: the same live descriptor and flags returned by `F_GETFD` are
+    // passed back to `fcntl`, with only `FD_CLOEXEC` added.
+    let set_descriptor = unsafe { libc::fcntl(fd, libc::F_SETFD, descriptor | libc::FD_CLOEXEC) };
+    if set_descriptor < 0 {
         return Err(PlatformIpcError::Notification(
             io::Error::last_os_error().to_string(),
         ));
@@ -481,12 +506,15 @@ fn configure_nonblocking(fd: RawFd) -> Result<()> {
 }
 
 fn duplicate_fd(fd: RawFd) -> Result<OwnedFd> {
+    // SAFETY: callers provide a live descriptor; `dup` creates an independent
+    // descriptor whose ownership is transferred below on success.
     let duplicate = unsafe { libc::dup(fd) };
     if duplicate < 0 {
         return Err(PlatformIpcError::Notification(
             io::Error::last_os_error().to_string(),
         ));
     }
+    // SAFETY: a non-negative result from `dup` is a new owned descriptor.
     Ok(unsafe { OwnedFd::from_raw_fd(duplicate) })
 }
 
@@ -494,6 +522,8 @@ fn drain_notifications(fd: RawFd) -> Result<bool> {
     let mut changed = false;
     let mut buffer = [0_u8; 64];
     loop {
+        // SAFETY: `fd` is a live nonblocking datagram descriptor and `buffer`
+        // is valid writable storage for the supplied length.
         let read = unsafe { libc::recv(fd, buffer.as_mut_ptr().cast(), buffer.len(), 0) };
         if read > 0 {
             changed = true;
@@ -536,74 +566,4 @@ fn session_id() -> u64 {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn frame_header_rejects_corruption() {
-        let mut header = [0_u8; FRAME_HEADER_SIZE];
-        header[0..4].copy_from_slice(&FRAME_MAGIC.to_le_bytes());
-        header[4..8].copy_from_slice(&PROTOCOL_VERSION.to_le_bytes());
-        header[8..16].copy_from_slice(&7_u64.to_le_bytes());
-        header[16..20].copy_from_slice(&12_u32.to_le_bytes());
-        header[20..24].copy_from_slice(&34_u32.to_le_bytes());
-        let header_checksum = checksum(&header[..24]);
-        header[24..28].copy_from_slice(&header_checksum.to_le_bytes());
-        assert_eq!(
-            FrameHeader::parse(&header, 1024).map(|frame| frame.generation),
-            Some(7)
-        );
-        header[8] ^= 1;
-        assert!(FrameHeader::parse(&header, 1024).is_none());
-    }
-
-    #[test]
-    fn clearing_sensitive_payload_requires_both_local_slots_to_be_overwritten() {
-        let mut published = PlatformEnvelope::default();
-        let attempt_id = "attempt-sensitive".to_owned();
-        let cookie = "cookie-must-not-remain-in-ashmem-slots";
-        let uri = "https://idp.example/private-sso-request";
-        assert!(!replace_snapshot(
-            &mut published,
-            PlatformVpnState::default(),
-            Some(SessionHandoff {
-                attempt_id: attempt_id.clone(),
-                options: crate::model::VpnOptions {
-                    cookie: Some(cookie.to_owned()),
-                    ..crate::model::VpnOptions::default()
-                },
-                network: crate::model::NetworkSnapshot::default(),
-                updated_at: PlatformVpnState::now_nanos(),
-            }),
-            Some(BrowserOpenRequest {
-                request_id: "browser-1".to_owned(),
-                attempt_id,
-                uri: uri.to_owned(),
-                requested_at_ms: PlatformVpnState::now_millis(),
-            }),
-            None,
-        ));
-        assert_eq!(
-            published
-                .session_handoff
-                .clone()
-                .and_then(|handoff| handoff.options.cookie),
-            Some(cookie.to_owned())
-        );
-
-        assert!(replace_snapshot(
-            &mut published,
-            PlatformVpnState::default(),
-            None,
-            None,
-            None,
-        ));
-        let cleared = serde_json::to_vec(&published).unwrap();
-        assert!(!cleared
-            .windows(cookie.len())
-            .any(|window| window == cookie.as_bytes()));
-        assert!(!cleared
-            .windows(uri.len())
-            .any(|window| window == uri.as_bytes()));
-    }
-}
+mod tests;

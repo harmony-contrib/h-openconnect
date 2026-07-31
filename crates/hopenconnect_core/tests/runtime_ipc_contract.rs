@@ -1,4 +1,6 @@
 const ENGINE: &str = include_str!("../src/engine.rs");
+const ENGINE_CONNECTION: &str = include_str!("../src/engine/connection.rs");
+const ENGINE_PLATFORM: &str = include_str!("../src/engine/platform.rs");
 const PLATFORM_BROWSER: &str = include_str!("../src/platform_browser.rs");
 const PLATFORM_IPC: &str = include_str!("../src/platform_ipc.rs");
 const PLATFORM_STATE: &str = include_str!("../src/platform_state.rs");
@@ -12,13 +14,21 @@ fn section<'a>(source: &'a str, start: &str, end: &str) -> &'a str {
 
 #[test]
 fn runtime_cross_process_payloads_never_use_json_files() {
-    let transport_sources = [PLATFORM_BROWSER, PLATFORM_IPC, PLATFORM_STATE].join("\n");
+    let engine_sources = [ENGINE, ENGINE_CONNECTION, ENGINE_PLATFORM].join("\n");
+    let transport_sources = [
+        ENGINE_CONNECTION,
+        ENGINE_PLATFORM,
+        PLATFORM_BROWSER,
+        PLATFORM_IPC,
+        PLATFORM_STATE,
+    ]
+    .join("\n");
     assert!(!transport_sources.contains("session-handoff.json"));
     assert!(!transport_sources.contains("browser-request.json"));
     assert!(!transport_sources.contains("platform-vpn-state.json"));
-    assert!(!ENGINE.contains("read_to_string"));
-    assert!(!ENGINE.contains("SessionHandoff::load"));
-    assert!(!ENGINE.contains("SessionHandoff::save"));
+    assert!(!engine_sources.contains("read_to_string"));
+    assert!(!engine_sources.contains("SessionHandoff::load"));
+    assert!(!engine_sources.contains("SessionHandoff::save"));
     assert!(!PLATFORM_STATE.contains("write_atomic_private"));
     assert!(!PLATFORM_BROWSER.contains("std::fs"));
 }
@@ -38,7 +48,7 @@ fn ashmem_protocol_carries_attempt_scoped_handoff_and_browser_requests() {
 #[test]
 fn extension_resume_has_no_want_or_disk_credential_fallback() {
     let prepare = section(
-        ENGINE,
+        ENGINE_CONNECTION,
         "pub async fn prepare_in_extension",
         "pub async fn attach_tun",
     );
