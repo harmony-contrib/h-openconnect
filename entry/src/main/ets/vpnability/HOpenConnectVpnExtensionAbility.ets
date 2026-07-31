@@ -134,13 +134,15 @@ export default class HOpenConnectVpnExtensionAbility extends VpnExtensionAbility
     }
     const sharedMemory = readPlatformSharedMemoryFds(want);
     if (!sharedMemory) {
-      const message = 'VPN start is missing platform shared memory descriptors';
-      hilog.error(LOG_DOMAIN, LOG_TAG, message);
-      try {
-        hopenconnectUi.setPlatformVpnFailed(message);
-      } catch (_inner) {
-        // No ashmem session is available to publish this failure.
-      }
+      // The first-authorization system dialog may bootstrap the Extension with
+      // a replacement Want that contains no application parameters. Keep the
+      // Extension idle until EntryAbility redispatches the original Want via
+      // onRequest; it owns the bounded failure if that rebound never arrives.
+      hilog.warn(
+        LOG_DOMAIN,
+        LOG_TAG,
+        'VPN authorization bootstrap has no shared-memory descriptors; waiting for rebound request',
+      );
       return;
     }
     try {

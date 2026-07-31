@@ -104,6 +104,20 @@ pub fn bind_platform_vpn_start(attempt_id: String) -> Result<()> {
 }
 
 #[napi]
+pub async fn await_platform_vpn_start_attachment(
+    attempt_id: String,
+    timeout_ms: u32,
+) -> Result<bool> {
+    shared_engine()
+        .await_platform_vpn_start_attachment(
+            &attempt_id,
+            std::time::Duration::from_millis(u64::from(timeout_ms)),
+        )
+        .await
+        .map_err(to_napi_error)
+}
+
+#[napi]
 pub async fn await_platform_vpn_start(attempt_id: String) -> Result<String> {
     let outcome = shared_engine()
         .await_platform_vpn_start(&attempt_id)

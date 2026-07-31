@@ -115,5 +115,16 @@ export default function localUnitTest() {
 
       expect(readPlatformSharedMemoryFds(want) === undefined).assertEqual(true);
     });
+
+    it('acceptsDescriptorFreeAuthorizationBootstrapAsPending', 0, () => {
+      const want = {
+        parameters: {
+          callingUid: 20010048,
+          callingPid: 1234,
+        },
+      } as Want;
+
+      expect(readPlatformSharedMemoryFds(want) === undefined).assertEqual(true);
+    });
   });
 }
