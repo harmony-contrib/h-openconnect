@@ -162,3 +162,4 @@ export declare function submitAuthChallenge(replyJson: string): void
 export declare function syncPlatformChanges(): void
 
 export declare function waitForPlatformChange(timeoutMs: number): Promise<boolean>
+
