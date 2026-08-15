@@ -6,7 +6,8 @@ use napi_derive_ohos::napi;
 use napi_ohos::{bindgen_prelude::Object, Error, Result, Status};
 
 mod bridge;
-mod l10n;
+mod i18n;
+mod locale;
 mod log_filter;
 mod model;
 mod socket_protect;

@@ -1,4 +1,5 @@
-use crate::l10n::{strings, UiLocale};
+use crate::i18n::{tr, translate_ui};
+use crate::locale::UiLocale;
 use crate::model::{
     AuthChallengeReply, AuthFieldChoice, AuthFieldKey, AuthFieldValue, AuthMethod,
     ConnectionLifecycle, NetworkSnapshot, ProtocolKind, SessionSnapshot, SessionStats,
@@ -395,7 +396,6 @@ impl State {
 }
 
 pub(crate) fn reduce(state: &mut State, action: Action) -> Command<Action> {
-    let s = strings(state.locale);
     match action {
         Action::Bootstrap => {
             state.sync_engine();
@@ -441,13 +441,13 @@ pub(crate) fn reduce(state: &mut State, action: Action) -> Command<Action> {
                 return Command::perform(engine_disconnect(dry_run), Action::ConnectionFinished);
             }
             state.user_disconnect = false;
-            start_connect(state, &s)
+            start_connect(state)
         }
         Action::ConnectionFinished(result) => match result {
             Ok(SessionOutcome::Connected(stats)) => {
                 state.sync_engine();
                 state.snapshot.stats = stats;
-                state.push_toast(s.feedback_connected);
+                state.push_toast(translate_ui(state.locale, tr::feedback_connected()));
                 Command::none()
             }
             Ok(SessionOutcome::PlatformStartRequested) => {
@@ -457,7 +457,7 @@ pub(crate) fn reduce(state: &mut State, action: Action) -> Command<Action> {
             }
             Ok(SessionOutcome::Disconnected) => {
                 state.sync_engine();
-                state.push_toast(s.feedback_disconnected);
+                state.push_toast(translate_ui(state.locale, tr::feedback_disconnected()));
                 Command::none()
             }
             Err(message) => {
@@ -468,7 +468,7 @@ pub(crate) fn reduce(state: &mut State, action: Action) -> Command<Action> {
                 let toast = if message.contains("取消") || message.contains("cancel") {
                     message.clone()
                 } else {
-                    s.feedback_failed.to_owned()
+                    translate_ui(state.locale, tr::feedback_failed())
                 };
                 state.push_toast(toast);
                 Command::none()
@@ -486,7 +486,7 @@ pub(crate) fn reduce(state: &mut State, action: Action) -> Command<Action> {
                 if let Err(err) = bridge::open_external_browser(req.uri.clone()) {
                     state.push_toast(format!(
                         "{}: {err}",
-                        tr_msg(state.locale, "无法打开浏览器", "Could not open browser")
+                        translate_ui(state.locale, tr::toast_open_browser_failed())
                     ));
                 }
             }
@@ -508,7 +508,7 @@ pub(crate) fn reduce(state: &mut State, action: Action) -> Command<Action> {
             state.last_lifecycle = now;
             if want_reconnect {
                 // Silent reconnect; home status already updates via lifecycle.
-                return start_connect(state, &s).and(Command::perform(
+                return start_connect(state).and(Command::perform(
                     async {
                         tokio::time::sleep(Duration::from_millis(250)).await;
                     },
@@ -538,11 +538,7 @@ pub(crate) fn reduce(state: &mut State, action: Action) -> Command<Action> {
         }
         Action::SubmitChallenge => {
             let Some(challenge) = state.snapshot.pending_auth.clone() else {
-                state.push_toast(tr_msg(
-                    state.locale,
-                    "当前没有待处理的认证表单",
-                    "No authentication form is waiting",
-                ));
+                state.push_toast(translate_ui(state.locale, tr::toast_no_auth_form()));
                 return Command::none();
             };
             // Require non-empty values for required interactive fields (including Unknown OTP).
@@ -559,11 +555,7 @@ pub(crate) fn reduce(state: &mut State, action: Action) -> Command<Action> {
                     .map(|s| s.trim())
                     .unwrap_or("");
                 if value.is_empty() {
-                    state.push_toast(tr_msg(
-                        state.locale,
-                        "请填写动态口令/验证码后再点继续",
-                        "Enter the OTP / SMS code, then tap Continue",
-                    ));
+                    state.push_toast(translate_ui(state.locale, tr::toast_enter_otp()));
                     return Command::none();
                 }
             }
@@ -586,11 +578,7 @@ pub(crate) fn reduce(state: &mut State, action: Action) -> Command<Action> {
                 cancelled: false,
             };
             if reply.values.is_empty() {
-                state.push_toast(tr_msg(
-                    state.locale,
-                    "请填写动态口令/验证码后再点继续",
-                    "Enter the OTP / SMS code, then tap Continue",
-                ));
+                state.push_toast(translate_ui(state.locale, tr::toast_enter_otp()));
                 return Command::none();
             }
             match shared_engine().submit_auth_challenge(reply) {
@@ -716,11 +704,7 @@ pub(crate) fn reduce(state: &mut State, action: Action) -> Command<Action> {
                         if let Some(group) = fallback {
                             state.draft.group = group.name.clone();
                             if !requested.is_empty() {
-                                warning = Some(tr_msg(
-                                    state.locale,
-                                    "原分组不在服务器列表中，已切换到服务器默认分组",
-                                    "The configured group is unavailable; using the server default",
-                                ));
+                                warning = Some(translate_ui(state.locale, tr::toast_group_fallback()));
                             }
                         }
                     }
@@ -731,11 +715,7 @@ pub(crate) fn reduce(state: &mut State, action: Action) -> Command<Action> {
                     state.group_choices.clear();
                     state.group_discovery_error = Some(format!(
                         "{}: {err}",
-                        tr_msg(
-                            state.locale,
-                            "未能自动获取分组，可手动填写",
-                            "Could not fetch groups; manual entry is available",
-                        )
+                        translate_ui(state.locale, tr::toast_group_fetch_failed())
                     ));
                 }
             }
@@ -944,7 +924,7 @@ pub(crate) fn reduce(state: &mut State, action: Action) -> Command<Action> {
             let name = state.draft.name.trim().to_owned();
             let server = state.draft.server.trim().to_owned();
             if name.is_empty() || server.is_empty() {
-                state.push_toast(s.form_required);
+                state.push_toast(translate_ui(state.locale, tr::form_required()));
                 return Command::none();
             }
             state.draft.name = name;
@@ -971,7 +951,7 @@ pub(crate) fn reduce(state: &mut State, action: Action) -> Command<Action> {
         Action::DeleteConnection(id) => {
             match shared_engine().delete_profile(&id) {
                 Ok(()) => {
-                    state.push_toast(s.feedback_deleted);
+                    state.push_toast(translate_ui(state.locale, tr::feedback_deleted()));
                     state.sync_engine();
                 }
                 Err(err) => state.push_toast(err.to_string()),
@@ -1000,7 +980,7 @@ pub(crate) fn reduce(state: &mut State, action: Action) -> Command<Action> {
             if let Err(error) = result {
                 state.push_toast(format!(
                     "{}{error}",
-                    tr_msg(state.locale, "无法打开链接：", "Could not open link: ")
+                    translate_ui(state.locale, tr::toast_open_link_failed_prefix())
                 ));
             }
             Command::none()
@@ -1022,18 +1002,14 @@ pub(crate) fn reduce(state: &mut State, action: Action) -> Command<Action> {
                     state.snapshot = result.snapshot;
                     state.log_recording = result.status;
                     state.push_toast(if state.log_recording.enabled {
-                        tr_msg(state.locale, "已开始记录日志", "Log recording started")
+                        translate_ui(state.locale, tr::toast_log_started())
                     } else {
-                        tr_msg(state.locale, "已停止记录日志", "Log recording stopped")
+                        translate_ui(state.locale, tr::toast_log_stopped())
                     });
                 }
                 Err(error) => state.push_toast(format!(
                     "{}{error}",
-                    tr_msg(
-                        state.locale,
-                        "切换日志记录失败：",
-                        "Failed to change log recording: "
-                    )
+                    translate_ui(state.locale, tr::toast_log_toggle_failed_prefix())
                 )),
             }
             Command::none()
@@ -1054,11 +1030,11 @@ pub(crate) fn reduce(state: &mut State, action: Action) -> Command<Action> {
             match result {
                 Ok(file_name) => state.push_toast(format!(
                     "{}{file_name}",
-                    tr_msg(state.locale, "日志已导出：", "Log exported: ")
+                    translate_ui(state.locale, tr::toast_log_exported_prefix())
                 )),
                 Err(error) => state.push_toast(format!(
                     "{}{error}",
-                    tr_msg(state.locale, "日志导出失败：", "Failed to export log: ")
+                    translate_ui(state.locale, tr::toast_log_export_failed_prefix())
                 )),
             }
             Command::none()
@@ -1081,13 +1057,13 @@ pub(crate) fn reduce(state: &mut State, action: Action) -> Command<Action> {
                     state.log_recording = result.status;
                     state.push_toast(format!(
                         "{}{}",
-                        tr_msg(state.locale, "日志已删除：", "Log deleted: "),
+                        translate_ui(state.locale, tr::toast_log_deleted_prefix()),
                         result.file_name
                     ));
                 }
                 Err(error) => state.push_toast(format!(
                     "{}{error}",
-                    tr_msg(state.locale, "日志删除失败：", "Failed to delete log: ")
+                    translate_ui(state.locale, tr::toast_log_delete_failed_prefix())
                 )),
             }
             Command::none()
@@ -1112,11 +1088,4 @@ fn detect_system_dark() -> bool {
         .ok()
         .and_then(|value| value.parse::<i32>().ok())
         == Some(2)
-}
-
-fn tr_msg(locale: UiLocale, zh: &str, en: &str) -> String {
-    match locale {
-        UiLocale::ZhCn => zh.to_owned(),
-        UiLocale::En => en.to_owned(),
-    }
 }

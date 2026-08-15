@@ -2,14 +2,13 @@ use super::super::*;
 
 pub(crate) fn statistics_page(state: Signal<State>) -> Element {
     let current = state.read().clone();
-    let s = strings(current.locale);
     let lifecycle = current.snapshot.lifecycle;
     let stats = current.snapshot.stats.clone();
     let active = lifecycle.is_active();
     let connection_name = current
         .active_connection()
         .map(|item| item.name.clone())
-        .unwrap_or_else(|| s.no_connection.to_owned());
+        .unwrap_or_else(|| translate_ui(current.locale, tr::no_connection()));
 
     let body = rsx! {
         column {
@@ -22,30 +21,26 @@ pub(crate) fn statistics_page(state: Signal<State>) -> Element {
                         width: "100%",
                         if active {
                             text {
-                                content: format!("{}  {}", s.duration, format_duration(stats.connected_seconds)),
+                                content: format!("{}  {}", translate_ui(current.locale, tr::duration()), format_duration(stats.connected_seconds)),
                                 font_size: 28.0,
                                 font_weight: 750,
                                 font_color: text_color(),
                             }
                             text {
-                                content: format!("{} · {}", s.gateway, if stats.gateway.is_empty() { "—" } else { &stats.gateway }),
+                                content: format!("{} · {}", translate_ui(current.locale, tr::gateway()), if stats.gateway.is_empty() { "—" } else { &stats.gateway }),
                                 margin_top: 6.0,
                                 font_size: 13.0,
                                 font_color: subtle(),
                             }
                         } else {
                             text {
-                                content: s.disconnected,
+                                content: translate_ui(current.locale, tr::disconnected()),
                                 font_size: 18.0,
                                 font_weight: 700,
                                 font_color: subtle(),
                             }
                             text {
-                                content: tr(
-                                    current.locale,
-                                    "连接成功后显示真实流量与分配地址",
-                                    "Live traffic and assigned address appear after connect",
-                                ),
+                                content: translate_ui(current.locale, tr::statistics_hint()),
                                 margin_top: 8.0,
                                 font_size: 12.0,
                                 font_color: subtle(),
@@ -57,23 +52,23 @@ pub(crate) fn statistics_page(state: Signal<State>) -> Element {
             row { height: 12.0 }
             row {
                 width: "100%",
-                {metric_tile("arrow-up", s.sent, format_bytes(stats.bytes_sent))}
+                {metric_tile("arrow-up", translate_ui(current.locale, tr::sent()), format_bytes(stats.bytes_sent))}
                 row { width: 10.0 }
-                {metric_tile("arrow-down", s.received, format_bytes(stats.bytes_received))}
+                {metric_tile("arrow-down", translate_ui(current.locale, tr::received()), format_bytes(stats.bytes_received))}
             }
             row { height: 10.0 }
             row {
                 width: "100%",
-                {metric_tile("send", s.packets_sent, stats.packets_sent.to_string())}
+                {metric_tile("send", translate_ui(current.locale, tr::packets_sent()), stats.packets_sent.to_string())}
                 row { width: 10.0 }
-                {metric_tile("inbox", s.packets_received, stats.packets_received.to_string())}
+                {metric_tile("inbox", translate_ui(current.locale, tr::packets_received()), stats.packets_received.to_string())}
             }
             row { height: 10.0 }
             row {
                 width: "100%",
-                {metric_tile("network", s.assigned_ip, if stats.assigned_ip.is_empty() { "—".to_owned() } else { stats.assigned_ip })}
+                {metric_tile("network", translate_ui(current.locale, tr::assigned_ip()), if stats.assigned_ip.is_empty() { "—".to_owned() } else { stats.assigned_ip })}
                 row { width: 10.0 }
-                {metric_tile("gauge", s.mtu, if stats.mtu == 0 { "—".to_owned() } else { stats.mtu.to_string() })}
+                {metric_tile("gauge", translate_ui(current.locale, tr::mtu()), if stats.mtu == 0 { "—".to_owned() } else { stats.mtu.to_string() })}
             }
         }
     };

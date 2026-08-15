@@ -14,8 +14,8 @@ pub(crate) fn diagnostics_page(state: Signal<State>) -> Element {
     let recording_pending = current.log_recording_pending;
     let export_pending = current.log_archive_export_pending.clone();
     let delete_pending = current.log_archive_delete_pending.clone();
-    let current_tab = tr(locale, "当前日志", "Current").to_owned();
-    let history_tab = tr(locale, "历史记录", "History").to_owned();
+    let current_tab = translate_ui(locale, tr::logs_current_tab());
+    let history_tab = translate_ui(locale, tr::logs_history_tab());
     let tab_options = vec![current_tab.clone(), history_tab.clone()];
     let selected_tab = if history_open() {
         history_tab.clone()
@@ -25,7 +25,7 @@ pub(crate) fn diagnostics_page(state: Signal<State>) -> Element {
     let query_value = log_query();
     let normalized_query = normalize_log_query(&query_value);
     let filter_value = log_filter();
-    let all_label = strings(locale).logs_level_all.to_owned();
+    let all_label = translate_ui(locale, tr::logs_level_all());
     let info_label = "Info".to_owned();
     let warn_label = "Warn".to_owned();
     let error_label = "Error".to_owned();
@@ -106,11 +106,7 @@ pub(crate) fn diagnostics_page(state: Signal<State>) -> Element {
                 detail: if archive.active {
                     format!(
                         "{detail} · {}",
-                        tr(
-                            locale,
-                            "正在写入，停止记录后可删除",
-                            "Recording; stop before deleting"
-                        )
+                        translate_ui(locale, tr::logs_recording_active_detail())
                     )
                 } else {
                     detail
@@ -129,9 +125,9 @@ pub(crate) fn diagnostics_page(state: Signal<State>) -> Element {
                 align_items: "center",
                 text {
                     content: if recording_enabled {
-                        tr(locale, "正在记录并按天保存", "Recording and saving daily")
+                        translate_ui(locale, tr::logs_recording_on())
                     } else {
-                        tr(locale, "日志记录已关闭", "Log recording is off")
+                        translate_ui(locale, tr::logs_recording_off())
                     },
                     font_size: 12.0,
                     font_weight: 600,
@@ -142,7 +138,7 @@ pub(crate) fn diagnostics_page(state: Signal<State>) -> Element {
                     content: format!(
                         "{} {}",
                         current.log_recording.archives.len(),
-                        tr(locale, "个日志文件", "log files")
+                        translate_ui(locale, tr::logs_files_suffix())
                     ),
                     font_size: 11.0,
                     font_color: subtle(),
@@ -168,12 +164,8 @@ pub(crate) fn diagnostics_page(state: Signal<State>) -> Element {
                     if archives_empty {
                         {empty_state(
                             "history",
-                            tr(locale, "暂无历史日志", "No log history"),
-                            tr(
-                                locale,
-                                "开启日志记录后会按天生成文件",
-                                "Daily files appear after recording is enabled"
-                            ),
+                            translate_ui(locale, tr::logs_no_history()),
+                            translate_ui(locale, tr::logs_no_history_desc()),
                         )}
                     } else {
                         VirtualLogArchiveList {
@@ -191,7 +183,7 @@ pub(crate) fn diagnostics_page(state: Signal<State>) -> Element {
             } else {
                 Input {
                     value: Some(query_value),
-                    placeholder: Some(strings(locale).logs_search_placeholder.to_owned()),
+                    placeholder: Some(translate_ui(locale, tr::logs_search_placeholder())),
                     width: Some("100%".into()),
                     on_change: move |value| log_query.set(value),
                 }
@@ -227,7 +219,7 @@ pub(crate) fn diagnostics_page(state: Signal<State>) -> Element {
                             "{} / {} {}",
                             shown_log_count,
                             total_log_count,
-                            tr(locale, "条日志", "logs")
+                            translate_ui(locale, tr::logs_count_suffix())
                         ),
                         font_size: 11.0,
                         font_color: subtle(),
@@ -235,11 +227,7 @@ pub(crate) fn diagnostics_page(state: Signal<State>) -> Element {
                     row { layout_weight: 1.0 }
                     if !empty {
                         text {
-                            content: tr(
-                                locale,
-                                "点击日志查看全文",
-                                "Tap a log for details"
-                            ),
+                            content: translate_ui(locale, tr::logs_tap_detail()),
                             font_size: 11.0,
                             font_color: subtle(),
                         }
@@ -251,15 +239,11 @@ pub(crate) fn diagnostics_page(state: Signal<State>) -> Element {
                     if empty {
                         {empty_state(
                             "scroll-text",
-                            strings(locale).logs_empty_title,
+                            translate_ui(locale, tr::logs_empty_title()),
                             if recording_enabled {
-                                strings(locale).logs_empty_subtitle
+                                translate_ui(locale, tr::logs_empty_subtitle())
                             } else {
-                                tr(
-                                    locale,
-                                    "点击右上角开始记录日志",
-                                    "Tap the top-right button to start recording"
-                                )
+                                translate_ui(locale, tr::logs_start_recording_hint())
                             },
                         )}
                     } else {
@@ -312,11 +296,11 @@ fn log_archive_delete_dialog(
             open: true,
             on_close: move |_| selected.set(None),
             DialogHeader {
-                title: tr(locale, "删除历史日志？", "Delete log history?").to_owned(),
+                title: translate_ui(locale, tr::logs_delete_title()),
                 description: Some(format!(
                     "{} · {}",
                     file_name,
-                    tr(locale, "此操作无法撤销", "This cannot be undone")
+                    translate_ui(locale, tr::logs_delete_desc())
                 )),
             }
             row { height: 20.0 }
@@ -327,7 +311,7 @@ fn log_archive_delete_dialog(
                         variant: FlatButtonVariant::Outline,
                         onclick: move |_| selected.set(None),
                         text {
-                            content: tr(locale, "取消", "Cancel"),
+                            content: translate_ui(locale, tr::cancel()),
                             font_size: 13.0,
                             font_weight: 600,
                             font_color: text_color(),
@@ -341,7 +325,7 @@ fn log_archive_delete_dialog(
                             dispatch(state, Action::DeleteLogArchive(delete_file_name.clone()));
                         },
                         text {
-                            content: tr(locale, "删除", "Delete"),
+                            content: translate_ui(locale, tr::logs_delete_action()),
                             font_size: 13.0,
                             font_weight: 600,
                             font_color: destructive_text(),
@@ -638,7 +622,7 @@ fn log_detail_dialog(
             open: true,
             on_close: move |_| selected.set(None),
             DialogHeader {
-                title: tr(locale, "日志详情", "Log details").to_owned(),
+                title: translate_ui(locale, tr::logs_detail_title()),
                 description: Some(log.meta),
             }
             row { height: 14.0 }

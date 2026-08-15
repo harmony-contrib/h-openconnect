@@ -2,7 +2,6 @@ use super::super::*;
 
 pub(crate) fn connections_page(state: Signal<State>) -> Element {
     let current = state.read().clone();
-    let s = strings(current.locale);
     let navigator = use_navigator();
     let active_id = current.snapshot.active_connection_id.clone();
     let lifecycle = current.snapshot.lifecycle;
@@ -35,7 +34,7 @@ pub(crate) fn connections_page(state: Signal<State>) -> Element {
                     border_radius: 12.0,
                     {arkit::icon("server", 28.0, subtle())}
                     text {
-                        content: s.empty_connections,
+                        content: translate_ui(current.locale, tr::empty_connections()),
                         margin_top: 12.0,
                         font_size: 14.0,
                         font_color: subtle(),
@@ -75,7 +74,6 @@ fn ConnectionCard(
     is_live: bool,
     locked: bool,
 ) -> Element {
-    let s = strings(state.read().locale);
     let navigator = use_navigator();
     let id = connection.id.clone();
     let id_for_edit = connection.id.clone();
@@ -144,11 +142,11 @@ fn ConnectionCard(
                         }
                         row { width: 8.0 }
                         if is_live {
-                            Badge { content: s.connected.to_owned(), variant: BadgeVariant::Default }
+                            Badge { content: translate_ui(state.read().locale, tr::connected()), variant: BadgeVariant::Default }
                         } else if selected {
-                            Badge { content: s.current.to_owned(), variant: BadgeVariant::Secondary }
+                            Badge { content: translate_ui(state.read().locale, tr::current()), variant: BadgeVariant::Secondary }
                         } else if favorite {
-                            Badge { content: s.favorite.to_owned(), variant: BadgeVariant::Secondary }
+                            Badge { content: translate_ui(state.read().locale, tr::favorite()), variant: BadgeVariant::Secondary }
                         }
                     }
                     row { height: 8.0 }
@@ -201,7 +199,6 @@ fn ConnectionCard(
 /// Enum-like options use [`Select`] instead of radio groups.
 pub(crate) fn connection_editor_page(state: Signal<State>, id: String) -> Element {
     let current = state.read().clone();
-    let s = strings(current.locale);
     let navigator = use_navigator();
     let seed_id = id.clone();
     use_effect(move || {
@@ -249,10 +246,10 @@ pub(crate) fn connection_editor_page(state: Signal<State>, id: String) -> Elemen
     let token_totp = SoftwareToken::Totp.as_label().to_owned();
     let selected_token = draft.software_token.as_label().to_owned();
 
-    let auth_password = s.auth_password.to_owned();
-    let auth_certificate = s.auth_certificate.to_owned();
-    let auth_password_cert = s.auth_password_cert.to_owned();
-    let auth_saml = s.auth_saml.to_owned();
+    let auth_password = translate_ui(current.locale, tr::auth_password());
+    let auth_certificate = translate_ui(current.locale, tr::auth_certificate());
+    let auth_password_cert = translate_ui(current.locale, tr::auth_password_cert());
+    let auth_saml = translate_ui(current.locale, tr::auth_saml());
     let selected_auth = match draft.auth_method {
         AuthMethod::Password => auth_password.clone(),
         AuthMethod::Certificate => auth_certificate.clone(),
@@ -288,16 +285,16 @@ pub(crate) fn connection_editor_page(state: Signal<State>, id: String) -> Elemen
         column {
             width: "100%",
             align_items: "stretch",
-            {section_label(s.basic)}
+            {section_label(translate_ui(current.locale, tr::basic()))}
             {card(
-                if id.is_empty() { s.add_connection } else { s.edit_connection },
+                if id.is_empty() { translate_ui(current.locale, tr::add_connection()) } else { translate_ui(current.locale, tr::edit_connection()) },
                 None,
                 rsx! {
                     Form {
                         surface: false,
                         submit_label: String::new(),
                         FormItem {
-                            label: s.name.to_owned(),
+                            label: translate_ui(current.locale, tr::name()),
                             Input {
                                 value: Some(draft.name.clone()),
                                 width: Some("100%".to_owned()),
@@ -305,7 +302,7 @@ pub(crate) fn connection_editor_page(state: Signal<State>, id: String) -> Elemen
                             }
                         }
                         FormItem {
-                            label: s.server.to_owned(),
+                            label: translate_ui(current.locale, tr::server()),
                             Input {
                                 value: Some(draft.server.clone()),
                                 width: Some("100%".to_owned()),
@@ -314,7 +311,7 @@ pub(crate) fn connection_editor_page(state: Signal<State>, id: String) -> Elemen
                             }
                         }
                         FormItem {
-                            label: s.group.to_owned(),
+                            label: translate_ui(current.locale, tr::group()),
                             column {
                                 width: "100%",
                                 align_items: "stretch",
@@ -351,11 +348,7 @@ pub(crate) fn connection_editor_page(state: Signal<State>, id: String) -> Elemen
                                         value: Some(draft.group.clone()),
                                         width: Some("100%".to_owned()),
                                         placeholder: Some(if group_discovery_loading {
-                                            tr(
-                                                current.locale,
-                                                "正在获取服务器分组…",
-                                                "Fetching server groups…",
-                                            ).to_owned()
+                                            translate_ui(current.locale, tr::conn_fetching_groups())
                                         } else {
                                             "Employees".to_owned()
                                         }),
@@ -369,11 +362,7 @@ pub(crate) fn connection_editor_page(state: Signal<State>, id: String) -> Elemen
                                         align_items: "center",
                                         Spinner { size: 14.0, color: Some(subtle()) }
                                         text {
-                                            content: tr(
-                                                current.locale,
-                                                "正在读取 AnyConnect 认证分组",
-                                                "Reading AnyConnect authentication groups",
-                                            ),
+                                            content: translate_ui(current.locale, tr::conn_reading_groups()),
                                             margin_left: 6.0,
                                             font_size: 12.0,
                                             font_color: subtle(),
@@ -392,7 +381,7 @@ pub(crate) fn connection_editor_page(state: Signal<State>, id: String) -> Elemen
                             }
                         }
                         FormItem {
-                            label: s.auth_method.to_owned(),
+                            label: translate_ui(current.locale, tr::auth_method()),
                             Select {
                                 options: auth_options.clone(),
                                 selected: Some(selected_auth.clone()),
@@ -416,7 +405,7 @@ pub(crate) fn connection_editor_page(state: Signal<State>, id: String) -> Elemen
                         }
                         if show_username {
                             FormItem {
-                                label: s.username.to_owned(),
+                                label: translate_ui(current.locale, tr::username()),
                                 Input {
                                     value: Some(draft.username.clone()),
                                     width: Some("100%".to_owned()),
@@ -426,7 +415,7 @@ pub(crate) fn connection_editor_page(state: Signal<State>, id: String) -> Elemen
                         }
                         if show_password {
                             FormItem {
-                                label: s.password.to_owned(),
+                                label: translate_ui(current.locale, tr::password()),
                                 Input {
                                     value: Some(draft.password.clone()),
                                     width: Some("100%".to_owned()),
@@ -437,18 +426,14 @@ pub(crate) fn connection_editor_page(state: Signal<State>, id: String) -> Elemen
                         }
                         if show_certificate {
                             FormItem {
-                                label: s.certificate.to_owned(),
+                                label: translate_ui(current.locale, tr::certificate()),
                                 column {
                                     width: "100%",
                                     align_items: "stretch",
                                     Input {
                                         value: Some(draft.certificate.clone()),
                                         width: Some("100%".to_owned()),
-                                        placeholder: Some(tr(
-                                            current.locale,
-                                            "客户端证书路径 PEM/P12",
-                                            "Client certificate path PEM/P12",
-                                        ).to_owned()),
+                                        placeholder: Some(translate_ui(current.locale, tr::conn_cert_path_placeholder())),
                                         on_change: move |value| dispatch(state, Action::SetDraftCertificate(value)),
                                     }
                                     row {
@@ -468,7 +453,7 @@ pub(crate) fn connection_editor_page(state: Signal<State>, id: String) -> Elemen
                                             },
                                             {arkit::icon("folder-open", 14.0, accent())}
                                             text {
-                                                content: tr(current.locale, "选择文件", "Browse").to_owned(),
+                                                content: translate_ui(current.locale, tr::conn_browse()),
                                                 margin_left: 6.0,
                                                 font_size: 13.0,
                                                 font_color: accent(),
@@ -480,12 +465,8 @@ pub(crate) fn connection_editor_page(state: Signal<State>, id: String) -> Elemen
                         }
                         if matches!(draft.auth_method, AuthMethod::Saml) {
                             {switch_row(
-                                s.external_browser,
-                                tr(
-                                    current.locale,
-                                    "系统浏览器完成 SAML 登录",
-                                    "SAML login in system browser",
-                                ),
+                                translate_ui(current.locale, tr::external_browser()),
+                                translate_ui(current.locale, tr::conn_saml_login()),
                                 draft.external_browser_auth,
                                 EventHandler::new(move |value| {
                                     dispatch(state, Action::SetDraftExternalBrowserAuth(value));
@@ -493,16 +474,16 @@ pub(crate) fn connection_editor_page(state: Signal<State>, id: String) -> Elemen
                             )}
                         }
                         {switch_row(
-                            s.favorite,
-                            tr(current.locale, "在列表中优先展示", "Pin near the top of the list"),
+                            translate_ui(current.locale, tr::favorite()),
+                            translate_ui(current.locale, tr::conn_pin_top()),
                             draft.favorite,
                             EventHandler::new(move |value| {
                                 dispatch(state, Action::SetDraftFavorite(value));
                             }),
                         )}
                         {switch_row(
-                            s.force_global,
-                            s.force_global_desc,
+                            translate_ui(current.locale, tr::force_global()),
+                            translate_ui(current.locale, tr::force_global_desc()),
                             draft.force_global,
                             EventHandler::new(move |value| {
                                 dispatch(state, Action::SetDraftForceGlobal(value));
@@ -513,23 +494,15 @@ pub(crate) fn connection_editor_page(state: Signal<State>, id: String) -> Elemen
             )}
             row { height: 14.0 }
             {card(
-                tr(current.locale, "高级配置", "Advanced").to_owned(),
-                Some(tr(
-                    current.locale,
-                    "关闭时使用默认值，不展示非常用选项",
-                    "When off, uncommon options stay hidden and use defaults",
-                ).to_owned()),
+                translate_ui(current.locale, tr::conn_advanced()),
+                Some(translate_ui(current.locale, tr::conn_advanced_desc())),
                 rsx! {
                     column {
                         width: "100%",
                         align_items: "stretch",
                         {switch_row(
-                            tr(current.locale, "显示高级选项", "Show advanced options"),
-                            tr(
-                                current.locale,
-                                "协议、证书细节、代理、分流与令牌等",
-                                "Protocol, cert details, proxy, split tunnel, tokens…",
-                            ),
+                            translate_ui(current.locale, tr::conn_show_advanced()),
+                            translate_ui(current.locale, tr::conn_advanced_detail()),
                             show_advanced,
                             EventHandler::new(move |value| {
                                 dispatch(state, Action::SetEditorShowAdvanced(value));
@@ -541,7 +514,7 @@ pub(crate) fn connection_editor_page(state: Signal<State>, id: String) -> Elemen
                                 surface: false,
                                 submit_label: String::new(),
                                 FormItem {
-                                    label: s.protocol.to_owned(),
+                                    label: translate_ui(current.locale, tr::protocol()),
                                     Select {
                                         options: protocol_options.clone(),
                                         selected: Some(selected_protocol.clone()),
@@ -556,7 +529,7 @@ pub(crate) fn connection_editor_page(state: Signal<State>, id: String) -> Elemen
                                 }
                                 if show_certificate {
                                     FormItem {
-                                        label: tr(current.locale, "私钥路径（可选）", "Private key path (optional)").to_owned(),
+                                        label: translate_ui(current.locale, tr::conn_private_key_path()),
                                         column {
                                             width: "100%",
                                             align_items: "stretch",
@@ -583,7 +556,7 @@ pub(crate) fn connection_editor_page(state: Signal<State>, id: String) -> Elemen
                                                     },
                                                     {arkit::icon("folder-open", 14.0, accent())}
                                                     text {
-                                                        content: tr(current.locale, "选择文件", "Browse").to_owned(),
+                                                        content: translate_ui(current.locale, tr::conn_browse()),
                                                         margin_left: 6.0,
                                                         font_size: 13.0,
                                                         font_color: accent(),
@@ -593,7 +566,7 @@ pub(crate) fn connection_editor_page(state: Signal<State>, id: String) -> Elemen
                                         }
                                     }
                                     FormItem {
-                                        label: tr(current.locale, "证书口令 (PKCS#12/PEM)", "Key password (PKCS#12/PEM)").to_owned(),
+                                        label: translate_ui(current.locale, tr::conn_key_password()),
                                         Input {
                                             value: Some(draft.key_password.clone()),
                                             width: Some("100%".to_owned()),
@@ -602,11 +575,7 @@ pub(crate) fn connection_editor_page(state: Signal<State>, id: String) -> Elemen
                                         }
                                     }
                                     FormItem {
-                                        label: tr(
-                                            current.locale,
-                                            "第二客户端证书（MCA，可选）",
-                                            "Secondary client certificate (MCA, optional)",
-                                        ).to_owned(),
+                                        label: translate_ui(current.locale, tr::conn_secondary_cert()),
                                         Input {
                                             value: Some(draft.secondary_certificate.clone()),
                                             width: Some("100%".to_owned()),
@@ -615,11 +584,7 @@ pub(crate) fn connection_editor_page(state: Signal<State>, id: String) -> Elemen
                                         }
                                     }
                                     FormItem {
-                                        label: tr(
-                                            current.locale,
-                                            "第二证书私钥（可选）",
-                                            "Secondary private key (optional)",
-                                        ).to_owned(),
+                                        label: translate_ui(current.locale, tr::conn_secondary_key()),
                                         Input {
                                             value: Some(draft.secondary_private_key.clone()),
                                             width: Some("100%".to_owned()),
@@ -628,11 +593,7 @@ pub(crate) fn connection_editor_page(state: Signal<State>, id: String) -> Elemen
                                         }
                                     }
                                     FormItem {
-                                        label: tr(
-                                            current.locale,
-                                            "第二证书口令",
-                                            "Secondary key password",
-                                        ).to_owned(),
+                                        label: translate_ui(current.locale, tr::conn_secondary_password()),
                                         Input {
                                             value: Some(draft.secondary_key_password.clone()),
                                             width: Some("100%".to_owned()),
@@ -642,7 +603,7 @@ pub(crate) fn connection_editor_page(state: Signal<State>, id: String) -> Elemen
                                     }
                                 }
                                 FormItem {
-                                    label: tr(current.locale, "软件令牌", "Software token").to_owned(),
+                                    label: translate_ui(current.locale, tr::conn_software_token()),
                                     Select {
                                         options: vec![token_disabled.clone(), token_securid.clone(), token_totp.clone()],
                                         selected: Some(selected_token.clone()),
@@ -656,7 +617,7 @@ pub(crate) fn connection_editor_page(state: Signal<State>, id: String) -> Elemen
                                     }
                                 }
                                 FormItem {
-                                    label: tr(current.locale, "令牌字符串", "Token string").to_owned(),
+                                    label: translate_ui(current.locale, tr::conn_token_string()),
                                     Input {
                                         value: Some(draft.token_string.clone()),
                                         width: Some("100%".to_owned()),
@@ -664,7 +625,7 @@ pub(crate) fn connection_editor_page(state: Signal<State>, id: String) -> Elemen
                                     }
                                 }
                                 FormItem {
-                                    label: s.backup_servers.to_owned(),
+                                    label: translate_ui(current.locale, tr::backup_servers()),
                                     Textarea {
                                         value: Some(draft.backup_servers.clone()),
                                         height: Some(56.0),
@@ -673,7 +634,7 @@ pub(crate) fn connection_editor_page(state: Signal<State>, id: String) -> Elemen
                                     }
                                 }
                                 FormItem {
-                                    label: format!("{} ({})", s.mtu_override, s.mtu_auto),
+                                    label: format!("{} ({})", translate_ui(current.locale, tr::mtu_override()), translate_ui(current.locale, tr::mtu_auto())),
                                     Input {
                                         value: Some(mtu_value.clone()),
                                         width: Some("100%".to_owned()),
@@ -682,7 +643,7 @@ pub(crate) fn connection_editor_page(state: Signal<State>, id: String) -> Elemen
                                     }
                                 }
                                 FormItem {
-                                    label: tr(current.locale, "CA 证书路径", "CA certificate path").to_owned(),
+                                    label: translate_ui(current.locale, tr::conn_ca_cert_path()),
                                     column {
                                         width: "100%",
                                         align_items: "stretch",
@@ -708,7 +669,7 @@ pub(crate) fn connection_editor_page(state: Signal<State>, id: String) -> Elemen
                                                 },
                                                 {arkit::icon("folder-open", 14.0, accent())}
                                                 text {
-                                                    content: tr(current.locale, "选择文件", "Browse").to_owned(),
+                                                    content: translate_ui(current.locale, tr::conn_browse()),
                                                     margin_left: 6.0,
                                                     font_size: 13.0,
                                                     font_color: accent(),
@@ -718,7 +679,7 @@ pub(crate) fn connection_editor_page(state: Signal<State>, id: String) -> Elemen
                                     }
                                 }
                                 FormItem {
-                                    label: tr(current.locale, "分流模式", "Split tunnel mode").to_owned(),
+                                    label: translate_ui(current.locale, tr::conn_split_mode()),
                                     Select {
                                         options: vec![split_auto.clone(), split_vpn.clone(), split_uplink.clone()],
                                         selected: Some(selected_split.clone()),
@@ -732,7 +693,7 @@ pub(crate) fn connection_editor_page(state: Signal<State>, id: String) -> Elemen
                                     }
                                 }
                                 FormItem {
-                                    label: tr(current.locale, "自定义分流网段", "Custom split networks").to_owned(),
+                                    label: translate_ui(current.locale, tr::conn_split_networks()),
                                     Textarea {
                                         value: Some(draft.split_tunnel_networks.clone()),
                                         height: Some(56.0),
@@ -741,7 +702,7 @@ pub(crate) fn connection_editor_page(state: Signal<State>, id: String) -> Elemen
                                     }
                                 }
                                 FormItem {
-                                    label: tr(current.locale, "上报 OS", "Reported OS").to_owned(),
+                                    label: translate_ui(current.locale, tr::conn_reported_os()),
                                     Input {
                                         value: Some(draft.reported_os.clone()),
                                         width: Some("100%".to_owned()),
@@ -767,7 +728,7 @@ pub(crate) fn connection_editor_page(state: Signal<State>, id: String) -> Elemen
                                     }
                                 }
                                 FormItem {
-                                    label: tr(current.locale, "客户端版本", "Client version").to_owned(),
+                                    label: translate_ui(current.locale, tr::conn_client_version()),
                                     Input {
                                         value: Some(draft.client_version.clone()),
                                         width: Some("100%".to_owned()),
@@ -793,7 +754,7 @@ pub(crate) fn connection_editor_page(state: Signal<State>, id: String) -> Elemen
                                     }
                                 }
                                 FormItem {
-                                    label: tr(current.locale, "HTTP 代理", "HTTP proxy").to_owned(),
+                                    label: translate_ui(current.locale, tr::conn_http_proxy()),
                                     Input {
                                         value: Some(draft.http_proxy.clone()),
                                         width: Some("100%".to_owned()),
@@ -802,7 +763,7 @@ pub(crate) fn connection_editor_page(state: Signal<State>, id: String) -> Elemen
                                     }
                                 }
                                 FormItem {
-                                    label: tr(current.locale, "服务器证书钉扎", "Server cert pin").to_owned(),
+                                    label: translate_ui(current.locale, tr::conn_cert_pin()),
                                     Input {
                                         value: Some(draft.server_cert_hash.clone()),
                                         width: Some("100%".to_owned()),
@@ -811,7 +772,7 @@ pub(crate) fn connection_editor_page(state: Signal<State>, id: String) -> Elemen
                                     }
                                 }
                                 FormItem {
-                                    label: tr(current.locale, "信任应用包名", "Trusted app packages").to_owned(),
+                                    label: translate_ui(current.locale, tr::conn_trusted_apps()),
                                     Textarea {
                                         value: Some(draft.trusted_applications.clone()),
                                         height: Some(48.0),
@@ -820,7 +781,7 @@ pub(crate) fn connection_editor_page(state: Signal<State>, id: String) -> Elemen
                                     }
                                 }
                                 FormItem {
-                                    label: tr(current.locale, "排除应用包名", "Blocked app packages").to_owned(),
+                                    label: translate_ui(current.locale, tr::conn_blocked_apps()),
                                     Textarea {
                                         value: Some(draft.blocked_applications.clone()),
                                         height: Some(48.0),
@@ -830,7 +791,7 @@ pub(crate) fn connection_editor_page(state: Signal<State>, id: String) -> Elemen
                                 }
                                 {switch_row(
                                     "DTLS",
-                                    tr(current.locale, "启用 DTLS 数据通道（推荐）", "Enable DTLS data path (recommended)"),
+                                    translate_ui(current.locale, tr::conn_dtls()),
                                     draft.use_dtls,
                                     EventHandler::new(move |value| {
                                         dispatch(state, Action::SetDraftUseDtls(value));
@@ -838,7 +799,7 @@ pub(crate) fn connection_editor_page(state: Signal<State>, id: String) -> Elemen
                                 )}
                                 {switch_row(
                                     "PFS",
-                                    tr(current.locale, "要求完美前向保密", "Require perfect forward secrecy"),
+                                    translate_ui(current.locale, tr::conn_pfs()),
                                     draft.require_pfs,
                                     EventHandler::new(move |value| {
                                         dispatch(state, Action::SetDraftRequirePfs(value));
@@ -846,63 +807,55 @@ pub(crate) fn connection_editor_page(state: Signal<State>, id: String) -> Elemen
                                 )}
                                 {switch_row(
                                     "XML POST",
-                                    tr(current.locale, "禁用 XML POST（少数网关需要）", "Disable XML POST (rare gateways)"),
+                                    translate_ui(current.locale, tr::conn_no_xml_post()),
                                     draft.disable_xml_post,
                                     EventHandler::new(move |value| {
                                         dispatch(state, Action::SetDraftDisableXmlPost(value));
                                     }),
                                 )}
                                 {switch_row(
-                                    s.strict_cert,
-                                    tr(current.locale, "拒绝主机名不匹配或不完整证书链", "Reject hostname mismatch or incomplete chains"),
+                                    translate_ui(current.locale, tr::strict_cert()),
+                                    translate_ui(current.locale, tr::conn_reject_mismatch()),
                                     draft.strict_certificate_trust,
                                     EventHandler::new(move |value| {
                                         dispatch(state, Action::SetDraftStrictCertificateTrust(value));
                                     }),
                                 )}
                                 {switch_row(
-                                    s.block_untrusted,
-                                    tr(current.locale, "服务器不受信任时中止连接", "Abort when the server is untrusted"),
+                                    translate_ui(current.locale, tr::block_untrusted()),
+                                    translate_ui(current.locale, tr::conn_abort_untrusted()),
                                     draft.block_untrusted_servers,
                                     EventHandler::new(move |value| {
                                         dispatch(state, Action::SetDraftBlockUntrustedServers(value));
                                     }),
                                 )}
                                 {switch_row(
-                                    tr(current.locale, "允许不安全加密", "Allow insecure cryptography"),
-                                    tr(
-                                        current.locale,
-                                        "仅用于必须使用 3DES/RC4/SHA1 的旧网关；与证书信任无关",
-                                        "Only for legacy 3DES/RC4/SHA1 gateways; independent of certificate trust",
-                                    ),
+                                    translate_ui(current.locale, tr::conn_allow_insecure()),
+                                    translate_ui(current.locale, tr::conn_allow_insecure_desc()),
                                     draft.allow_insecure_crypto,
                                     EventHandler::new(move |value| {
                                         dispatch(state, Action::SetDraftAllowInsecureCrypto(value));
                                     }),
                                 )}
                                 {switch_row(
-                                    s.local_lan,
-                                    tr(current.locale, "VPN 连接期间仍可访问本地网络", "Keep local network reachable while VPN is up"),
+                                    translate_ui(current.locale, tr::local_lan()),
+                                    translate_ui(current.locale, tr::conn_local_lan()),
                                     draft.allow_local_lan,
                                     EventHandler::new(move |value| {
                                         dispatch(state, Action::SetDraftAllowLocalLan(value));
                                     }),
                                 )}
                                 {switch_row(
-                                    s.connect_on_demand,
-                                    tr(current.locale, "网络可用时自动建立隧道", "Bring the tunnel up when the network is available"),
+                                    translate_ui(current.locale, tr::connect_on_demand()),
+                                    translate_ui(current.locale, tr::conn_auto_connect()),
                                     draft.connect_on_demand,
                                     EventHandler::new(move |value| {
                                         dispatch(state, Action::SetDraftConnectOnDemand(value));
                                     }),
                                 )}
                                 {switch_row(
-                                    s.fips_mode,
-                                    tr(
-                                        current.locale,
-                                        "当前运行时不提供已认证的 FIPS Provider",
-                                        "The current runtime has no validated FIPS provider",
-                                    ),
+                                    translate_ui(current.locale, tr::fips_mode()),
+                                    translate_ui(current.locale, tr::conn_fips_unavailable()),
                                     draft.fips_mode,
                                     EventHandler::new(move |value| {
                                         dispatch(state, Action::SetDraftFipsMode(value));

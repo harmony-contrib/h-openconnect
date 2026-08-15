@@ -3,17 +3,16 @@ use super::super::*;
 pub(crate) fn about_page(state: Signal<State>) -> Element {
     let current = state.read().clone();
     let locale = current.locale;
-    let s = strings(current.locale);
     let sdk_label = if current.snapshot.sdk_ready {
-        s.sdk_ready
+        translate_ui(locale, tr::sdk_ready())
     } else {
-        s.sdk_pending
+        translate_ui(locale, tr::sdk_pending())
     };
     let openconnect_version = current
         .snapshot
         .anyconnect_version
         .clone()
-        .unwrap_or_else(|| tr(locale, "未链接", "Not linked").to_owned());
+        .unwrap_or_else(|| translate_ui(locale, tr::sdk_pending()));
 
     let body = rsx! {
         column {
@@ -43,7 +42,7 @@ pub(crate) fn about_page(state: Signal<State>) -> Element {
                     font_color: text_color(),
                 }
                 text {
-                    content: tr(locale, "HarmonyOS 安全远程接入客户端", "Secure remote access client for HarmonyOS"),
+                    content: translate_ui(locale, tr::about_tagline()),
                     margin_top: 6.0,
                     font_size: 13.0,
                     font_color: subtle(),
@@ -52,10 +51,10 @@ pub(crate) fn about_page(state: Signal<State>) -> Element {
             }
             row { height: 14.0 }
             {settings_section(
-                tr(locale, "应用信息", "Application"),
+                translate_ui(locale, tr::about_application()),
                 vec![
-                    settings_value_row("package", s.version, current.snapshot.app_version.clone()),
-                    settings_value_row("cpu", s.sdk_status, sdk_label),
+                    settings_value_row("package", translate_ui(locale, tr::version()), current.snapshot.app_version.clone()),
+                    settings_value_row("cpu", translate_ui(locale, tr::sdk_status()), sdk_label),
                     settings_value_row(
                         "layers",
                         "Backend",
@@ -70,7 +69,7 @@ pub(crate) fn about_page(state: Signal<State>) -> Element {
             )}
             row { height: 14.0 }
             {settings_section(
-                tr(locale, "开源与许可", "Open source & licenses"),
+                translate_ui(locale, tr::about_open_source()),
                 vec![
                     open_source_row(
                         state,
@@ -111,44 +110,28 @@ pub(crate) fn about_page(state: Signal<State>) -> Element {
             )}
             row { height: 14.0 }
             {card(
-                tr(locale, "隐私", "Privacy"),
+                translate_ui(locale, tr::about_privacy()),
                 None,
                 rsx! {
                     column {
                         width: "100%",
                         {about_note_row(
                             "lock-keyhole",
-                            tr(
-                                locale,
-                                "连接配置与凭据保存在应用私有目录，并排除在系统备份之外。",
-                                "Connection profiles and credentials stay in the app-private directory and are excluded from system backup.",
-                            ),
+                            translate_ui(locale, tr::about_privacy_storage()),
                         )}
                         {about_note_row(
                             "scroll-text",
-                            tr(
-                                locale,
-                                "诊断日志默认关闭，仅在主动开启后写入本地按日归档。",
-                                "Diagnostic recording is off by default and writes local daily archives only after you enable it.",
-                            ),
+                            translate_ui(locale, tr::about_privacy_logs()),
                         )}
                         {about_note_row(
                             "shield-check",
-                            tr(
-                                locale,
-                                "应用不包含分析或遥测上传；网络请求由你配置的 VPN 与认证流程触发。",
-                                "The app contains no analytics or telemetry upload; network requests are initiated by your configured VPN and authentication flow.",
-                            ),
+                            translate_ui(locale, tr::about_privacy_no_telemetry()),
                         )}
                     }
                 },
             )}
             text {
-                content: tr(
-                    locale,
-                    "H-OpenConnect 是独立开源项目，与 Cisco 无隶属或背书关系；相关名称与商标归其各自所有者。",
-                    "H-OpenConnect is an independent open-source project and is not affiliated with or endorsed by Cisco; related names and trademarks belong to their respective owners.",
-                ),
+                content: translate_ui(locale, tr::about_disclaimer()),
                 width: "100%",
                 padding_top: 14.0,
                 padding_right: 8.0,

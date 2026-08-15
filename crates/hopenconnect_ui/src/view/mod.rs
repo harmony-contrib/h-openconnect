@@ -1,7 +1,8 @@
 mod pages;
 mod route;
 
-use crate::l10n::{strings, tr, UiLocale};
+use crate::i18n::{tr, translate_ui};
+use crate::locale::UiLocale;
 use crate::log_filter::{matches_log_filter_normalized, normalize_log_query, LogLevelFilter};
 use crate::model::{
     format_bytes, format_duration, AuthMethod, ConnectionLifecycle, ProtocolKind, SoftwareToken,
@@ -801,16 +802,15 @@ fn settings_value_row(icon: &str, label: impl Into<String>, value: impl Into<Str
     }
 }
 
-fn lifecycle_label(locale: UiLocale, lifecycle: ConnectionLifecycle) -> &'static str {
-    let s = strings(locale);
+fn lifecycle_label(locale: UiLocale, lifecycle: ConnectionLifecycle) -> String {
     match lifecycle {
-        ConnectionLifecycle::Disconnected => s.disconnected,
-        ConnectionLifecycle::Connecting => s.connecting,
-        ConnectionLifecycle::Authenticating => tr(locale, "正在认证…", "Authenticating…"),
-        ConnectionLifecycle::Establishing => tr(locale, "正在建立隧道…", "Establishing tunnel…"),
-        ConnectionLifecycle::Connected => s.connected,
-        ConnectionLifecycle::Disconnecting => s.disconnecting,
-        ConnectionLifecycle::Failed => s.failed,
+        ConnectionLifecycle::Disconnected => translate_ui(locale, tr::disconnected()),
+        ConnectionLifecycle::Connecting => translate_ui(locale, tr::connecting()),
+        ConnectionLifecycle::Authenticating => translate_ui(locale, tr::lifecycle_authenticating()),
+        ConnectionLifecycle::Establishing => translate_ui(locale, tr::lifecycle_establishing()),
+        ConnectionLifecycle::Connected => translate_ui(locale, tr::connected()),
+        ConnectionLifecycle::Disconnecting => translate_ui(locale, tr::disconnecting()),
+        ConnectionLifecycle::Failed => translate_ui(locale, tr::failed()),
     }
 }
 

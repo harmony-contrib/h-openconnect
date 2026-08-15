@@ -7,26 +7,13 @@ use crate::model::{AuthChallenge, AuthFieldKind};
 /// reclassifying names such as `password`, `answer`, or `secondary_password`.
 pub(crate) fn auth_challenge_overlay(state: Signal<State>, challenge: AuthChallenge) -> Element {
     let locale = state.read().locale;
-    let s = strings(locale);
     let title = challenge
         .message
         .clone()
         .filter(|m| !m.trim().is_empty())
         .or_else(|| challenge.banner.clone().filter(|m| !m.trim().is_empty()))
-        .unwrap_or_else(|| {
-            tr(
-                locale,
-                "服务器需要额外认证",
-                "Server requires additional authentication",
-            )
-            .to_owned()
-        });
-    let subtitle = tr(
-        locale,
-        "第 {n} 轮认证表单",
-        "Authentication form · round {n}",
-    )
-    .replace("{n}", &challenge.round.to_string());
+        .unwrap_or_else(|| translate_ui(locale, tr::challenge_required()));
+    let subtitle = translate_ui(locale, tr::challenge_round(challenge.round.to_string()));
     let error = challenge.error.clone().filter(|e| !e.trim().is_empty());
     let values = state.read().challenge_values.clone();
     // Show every non-hidden field, including Unknown (OTP / 动态口令).
@@ -189,11 +176,7 @@ pub(crate) fn auth_challenge_overlay(state: Signal<State>, challenge: AuthChalle
                                             value: Some(current),
                                             width: Some("100%".to_owned()),
                                             mode: input_mode,
-                                            placeholder: Some(tr(
-                                                locale,
-                                                "在此输入",
-                                                "Type here",
-                                            ).to_owned()),
+                                            placeholder: Some(translate_ui(locale, tr::challenge_placeholder())),
                                             on_change: move |value| {
                                                 dispatch(
                                                     state,
@@ -221,7 +204,7 @@ pub(crate) fn auth_challenge_overlay(state: Signal<State>, challenge: AuthChalle
                             width: Some("100%".to_owned()),
                             onclick: move |_| dispatch(state, Action::CancelChallenge),
                             text {
-                                content: s.cancel,
+                                content: translate_ui(locale, tr::cancel()),
                                 font_size: 14.0,
                                 font_weight: 650,
                                 font_color: text_color(),
@@ -236,7 +219,7 @@ pub(crate) fn auth_challenge_overlay(state: Signal<State>, challenge: AuthChalle
                             width: Some("100%".to_owned()),
                             onclick: move |_| dispatch(state, Action::SubmitChallenge),
                             text {
-                                content: s.challenge_submit,
+                                content: translate_ui(locale, tr::challenge_submit()),
                                 font_size: 14.0,
                                 font_weight: 700,
                                 font_color: 0xFFFFFFFFu32,

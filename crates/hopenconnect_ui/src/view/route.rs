@@ -25,23 +25,22 @@ pub(super) enum Route {
 }
 
 impl Route {
-    pub(super) fn title(&self, locale: UiLocale) -> &'static str {
-        let s = strings(locale);
+    pub(super) fn title(&self, locale: UiLocale) -> String {
         match self {
-            Self::Home {} => s.nav_home,
-            Self::Connections {} => s.nav_connections,
+            Self::Home {} => translate_ui(locale, tr::nav_home()),
+            Self::Connections {} => translate_ui(locale, tr::nav_connections()),
             Self::ConnectionEditor { id } => {
                 if id.is_empty() {
-                    s.add_connection
+                    translate_ui(locale, tr::add_connection())
                 } else {
-                    s.edit_connection
+                    translate_ui(locale, tr::edit_connection())
                 }
             }
-            Self::Statistics {} => s.nav_statistics,
-            Self::More {} => s.nav_more,
-            Self::Appearance {} => s.appearance,
-            Self::Diagnostics {} => s.diagnostics,
-            Self::About {} => s.about,
+            Self::Statistics {} => translate_ui(locale, tr::nav_statistics()),
+            Self::More {} => translate_ui(locale, tr::nav_more()),
+            Self::Appearance {} => translate_ui(locale, tr::appearance()),
+            Self::Diagnostics {} => translate_ui(locale, tr::diagnostics()),
+            Self::About {} => translate_ui(locale, tr::about()),
         }
     }
 

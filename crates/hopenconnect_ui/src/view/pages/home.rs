@@ -2,7 +2,6 @@ use super::super::*;
 
 pub(crate) fn home_page(state: Signal<State>) -> Element {
     let current = state.read().clone();
-    let s = strings(current.locale);
     let lifecycle = current.snapshot.lifecycle;
     let busy = lifecycle.is_busy();
     let active = lifecycle.is_active();
@@ -12,7 +11,7 @@ pub(crate) fn home_page(state: Signal<State>) -> Element {
     let connection_name = connection
         .as_ref()
         .map(|item| item.name.clone())
-        .unwrap_or_else(|| s.no_connection.to_owned());
+        .unwrap_or_else(|| translate_ui(current.locale, tr::no_connection()));
     let server = connection
         .as_ref()
         .map(|item| item.server.clone())
@@ -32,18 +31,18 @@ pub(crate) fn home_page(state: Signal<State>) -> Element {
         .map(|item| item.protocol.as_label().to_owned())
         .unwrap_or_else(|| "—".to_owned());
     let action_label = if active {
-        s.disconnect
+        translate_ui(current.locale, tr::disconnect())
     } else if matches!(
         lifecycle,
         ConnectionLifecycle::Connecting
             | ConnectionLifecycle::Authenticating
             | ConnectionLifecycle::Establishing
     ) {
-        s.connecting
+        translate_ui(current.locale, tr::connecting())
     } else if matches!(lifecycle, ConnectionLifecycle::Disconnecting) {
-        s.disconnecting
+        translate_ui(current.locale, tr::disconnecting())
     } else {
-        s.connect
+        translate_ui(current.locale, tr::connect())
     };
     let action_icon = if active { "square" } else { "power" };
     let stats = current.snapshot.stats.clone();
@@ -77,7 +76,7 @@ pub(crate) fn home_page(state: Signal<State>) -> Element {
                     }
                 }
                 text {
-                    content: s.home_title,
+                    content: translate_ui(current.locale, tr::home_title()),
                     margin_top: 16.0,
                     font_size: 13.0,
                     font_weight: 600,
@@ -124,21 +123,11 @@ pub(crate) fn home_page(state: Signal<State>) -> Element {
             }
             row { height: 12.0 }
             {card(
-                s.select_connection,
+                translate_ui(current.locale, tr::select_connection()),
                 Some(if current.snapshot.sdk_ready {
-                    tr(
-                        current.locale,
-                        "真实 AnyConnect / OpenConnect 会话",
-                        "Live AnyConnect / OpenConnect session",
-                    )
-                    .to_owned()
+                    translate_ui(current.locale, tr::home_live_session())
                 } else {
-                    tr(
-                        current.locale,
-                        "当前构建未链接 OpenConnect",
-                        "OpenConnect is not linked in this build",
-                    )
-                    .to_owned()
+                    translate_ui(current.locale, tr::home_not_linked())
                 }),
                 rsx! {
                     column {
@@ -149,7 +138,7 @@ pub(crate) fn home_page(state: Signal<State>) -> Element {
                             column {
                                 layout_weight: 1.0,
                                 align_items: "start",
-                                text { content: s.server, font_size: 12.0, font_color: subtle() }
+                                text { content: translate_ui(current.locale, tr::server()), font_size: 12.0, font_color: subtle() }
                                 text { content: server.clone(), margin_top: 2.0, font_size: 15.0, font_weight: 650, font_color: text_color() }
                             }
                             Badge {
@@ -165,7 +154,7 @@ pub(crate) fn home_page(state: Signal<State>) -> Element {
                             column {
                                 layout_weight: 1.0,
                                 align_items: "start",
-                                text { content: s.group, font_size: 12.0, font_color: subtle() }
+                                text { content: translate_ui(current.locale, tr::group()), font_size: 12.0, font_color: subtle() }
                                 text { content: group, margin_top: 2.0, font_size: 14.0, font_weight: 600, font_color: text_color() }
                             }
                             FlatButton {
@@ -174,7 +163,7 @@ pub(crate) fn home_page(state: Signal<State>) -> Element {
                                 onclick: move |_| {
                                     navigator.push(Route::Connections {});
                                 },
-                                text { content: s.nav_connections, font_size: 13.0, font_weight: 600, font_color: text_color() }
+                                text { content: translate_ui(current.locale, tr::nav_connections()), font_size: 13.0, font_weight: 600, font_color: text_color() }
                             }
                         }
                     }
@@ -184,16 +173,16 @@ pub(crate) fn home_page(state: Signal<State>) -> Element {
                 row { height: 12.0 }
                 row {
                     width: "100%",
-                    {metric_tile("network", s.assigned_ip, if stats.assigned_ip.is_empty() { "—".to_owned() } else { stats.assigned_ip.clone() })}
+                    {metric_tile("network", translate_ui(current.locale, tr::assigned_ip()), if stats.assigned_ip.is_empty() { "—".to_owned() } else { stats.assigned_ip.clone() })}
                     row { width: 10.0 }
-                    {metric_tile("clock", s.duration, format_duration(stats.connected_seconds))}
+                    {metric_tile("clock", translate_ui(current.locale, tr::duration()), format_duration(stats.connected_seconds))}
                 }
                 row { height: 10.0 }
                 row {
                     width: "100%",
-                    {metric_tile("arrow-up", s.sent, format_bytes(stats.bytes_sent))}
+                    {metric_tile("arrow-up", translate_ui(current.locale, tr::sent()), format_bytes(stats.bytes_sent))}
                     row { width: 10.0 }
-                    {metric_tile("arrow-down", s.received, format_bytes(stats.bytes_received))}
+                    {metric_tile("arrow-down", translate_ui(current.locale, tr::received()), format_bytes(stats.bytes_received))}
                 }
             }
         }

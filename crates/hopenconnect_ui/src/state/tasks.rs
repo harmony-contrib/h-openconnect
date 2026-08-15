@@ -29,13 +29,13 @@ pub(super) async fn delete_log_archive(
 }
 
 /// Shared connect path for user toggle and unexpected-drop auto-reconnect.
-pub(super) fn start_connect(state: &mut State, s: &crate::l10n::UiStrings) -> Command<Action> {
+pub(super) fn start_connect(state: &mut State) -> Command<Action> {
     let Some(active) = state.active_connection().cloned() else {
-        state.push_toast(s.no_connection);
+        state.push_toast(translate_ui(state.locale, tr::no_connection()));
         return Command::none();
     };
     if active.server.trim().is_empty() {
-        state.push_toast(s.form_required);
+        state.push_toast(translate_ui(state.locale, tr::form_required()));
         return Command::none();
     }
     // Password / cert required for non-SAML auth (passwords are stored locally in test phase).
@@ -46,11 +46,7 @@ pub(super) fn start_connect(state: &mut State, s: &crate::l10n::UiStrings) -> Co
         )
         && active.password.trim().is_empty()
     {
-        state.push_toast(tr_msg(
-            state.locale,
-            "请先填写密码",
-            "Enter the password first",
-        ));
+        state.push_toast(translate_ui(state.locale, tr::toast_enter_password()));
         return Command::none();
     }
     if !state.dry_run
@@ -60,11 +56,7 @@ pub(super) fn start_connect(state: &mut State, s: &crate::l10n::UiStrings) -> Co
         )
         && active.certificate.trim().is_empty()
     {
-        state.push_toast(tr_msg(
-            state.locale,
-            "请先选择客户端证书文件",
-            "Select a client certificate file first",
-        ));
+        state.push_toast(translate_ui(state.locale, tr::toast_select_cert()));
         return Command::none();
     }
     state.user_disconnect = false;
