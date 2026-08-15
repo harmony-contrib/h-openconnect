@@ -21,14 +21,14 @@ fn logs_use_arkit_rsx_virtual_rows() {
     assert!(LOGS_SOURCE.contains("fn VirtualLogArchiveList("));
     assert_eq!(
         LOGS_SOURCE
-            .matches("use_virtual_node_adapter_items_keyed(VirtualKind::List, item_keys")
+            .matches("use_virtual_source_items_keyed(VirtualKind::List, item_keys")
             .count(),
         2,
     );
-    assert!(!LOGS_SOURCE.contains("use_virtual_node_adapter_rsx_items_keyed"));
+    assert!(!LOGS_SOURCE.contains("use_virtual_node_adapter_items_keyed"));
     assert_eq!(
         LOGS_SOURCE
-            .matches("use_layout_frame_node(move |host_node, _frame|")
+            .matches("virtual_source: source")
             .count(),
         2,
     );

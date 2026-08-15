@@ -27,7 +27,6 @@ use pages::{
     diagnostics_page, home_page, more_page, statistics_page,
 };
 use route::Route;
-use std::cell::Cell;
 use std::rc::Rc;
 
 fn bg() -> u32 {
@@ -170,6 +169,7 @@ struct FlatSegmentedProps {
 #[component]
 fn FlatSegmented(props: FlatSegmentedProps) -> Element {
     let theme = use_theme();
+    let runtime = arkit::use_runtime_handle();
     let options = props
         .options
         .into_iter()
@@ -177,6 +177,7 @@ fn FlatSegmented(props: FlatSegmentedProps) -> Element {
             let active = option == props.selected;
             let next = option.clone();
             let on_change = props.on_change;
+            let runtime = runtime.clone();
             rsx! {
                 row {
                     key: "{option}",
@@ -196,7 +197,7 @@ fn FlatSegmented(props: FlatSegmentedProps) -> Element {
                         border_radius: theme.radii.md,
                         onclick: move |_| {
                             let next = next.clone();
-                            arkit::queue_ui_loop(move || on_change.call(next));
+                            runtime.queue_ui(move || on_change.call(next));
                         },
                         text {
                             content: option,
@@ -233,8 +234,6 @@ fn FlatSegmented(props: FlatSegmentedProps) -> Element {
 #[derive(Props, Clone, PartialEq)]
 struct FlatDialogProps {
     open: bool,
-    #[props(default)]
-    content_key: u64,
     on_close: EventHandler<()>,
     children: Element,
 }
@@ -285,65 +284,32 @@ fn FlatDialog(props: FlatDialogProps) -> Element {
             }
         }
     };
-    use_flat_dialog_overlay(props.open, props.content_key, panel, close);
-    rsx! {}
-}
-
-fn use_flat_dialog_overlay(
-    open: bool,
-    content_key: u64,
-    panel: Element,
-    on_dismiss: EventHandler<()>,
-) {
-    let overlay = arkit::use_overlay();
-    let last_open = use_hook(|| Rc::new(Cell::new(false)));
-    let spec = arkit::hooks::ModalOverlaySpec {
-        open,
-        presentation: arkit::hooks::ModalPresentation::CenteredDialog,
-        dismiss_on_backdrop: true,
-        backdrop_color: 0x80000000,
-        viewport_inset: 8.0,
-    };
-
-    let effect_overlay = overlay.clone();
-    let effect_last_open = last_open.clone();
-    use_effect(use_reactive(
-        (&open, &content_key),
-        move |(open, _content_key)| {
-            if open {
-                let panel = panel.clone();
-                effect_overlay.show_modal_with_dismiss(
-                    spec,
-                    move || panel.clone(),
-                    move || on_dismiss.call(()),
-                );
-                effect_last_open.set(true);
-            } else if effect_last_open.get() {
-                effect_overlay.dismiss();
-                effect_last_open.set(false);
-            }
-        },
-    ));
-
-    let cleanup_overlay = overlay.clone();
-    let cleanup_last_open = last_open.clone();
-    use_drop(move || {
-        if cleanup_last_open.get() {
-            cleanup_overlay.dismiss();
+    rsx! {
+        ModalPortal {
+            open: props.open,
+            presentation: ModalPresentation::CenteredDialog,
+            dismiss_on_backdrop: true,
+            backdrop_color: 0x80000000,
+            viewport_inset: 8.0,
+            on_dismiss: close,
+            {panel}
         }
-    });
+    }
 }
 
 #[component]
 pub(crate) fn App() -> Element {
     let state = use_signal(State::new);
     let _state = use_context_provider(move || state);
+    let runtime = arkit::use_runtime_handle();
     let theme = if state.read().theme_dark() {
         Theme::dark(ThemePreset::Zinc)
     } else {
         Theme::light(ThemePreset::Zinc)
     };
     let mut applied_color_mode = use_signal(|| None::<i32>);
+
+    let _ = APP_TOKIO_HANDLE.set(runtime.tokio());
 
     use_effect(move || {
         dispatch(state, Action::Bootstrap);
@@ -429,6 +395,15 @@ fn AppShell() -> Element {
     }
 }
 
+static APP_TOKIO_HANDLE: std::sync::OnceLock<tokio::runtime::Handle> = std::sync::OnceLock::new();
+
+fn app_tokio_handle() -> tokio::runtime::Handle {
+    APP_TOKIO_HANDLE
+        .get()
+        .expect("App must install the runtime tokio handle before dispatch")
+        .clone()
+}
+
 fn dispatch(mut state: Signal<State>, action: Action) {
     let command = {
         let mut current = state.write();
@@ -438,9 +413,9 @@ fn dispatch(mut state: Signal<State>, action: Action) {
 }
 
 fn run_command(state: Signal<State>, command: Command<Action>) {
-    let runtime = arkit::tokio_handle();
+    let tokio = app_tokio_handle();
     for future in command.into_futures() {
-        let task = runtime.spawn(future);
+        let task = tokio.spawn(future);
         arkit::dioxus_core::spawn_forever(async move {
             if let Ok(action) = task.await {
                 dispatch(state, action);
@@ -571,8 +546,9 @@ fn use_parent_back_handler(parent: Option<Route>) {
     });
     let handler: Rc<dyn Fn() -> bool> = Rc::new(move || scoped_handler.call(()));
     let registered_handler = handler.clone();
-    let _registration =
-        use_hook(|| Rc::new(arkit::register_back_press_handler(registered_handler)));
+    let _registration = use_hook(|| {
+        Rc::new(arkit::use_runtime_handle().register_back_handler(registered_handler))
+    });
 }
 
 fn card(title: impl Into<String>, subtitle: Option<String>, body: Element) -> Element {
