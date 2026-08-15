@@ -1,5 +1,6 @@
 const ENTRY_ABILITY: &str =
     include_str!("../../../entry/src/main/ets/entryability/EntryAbility.ets");
+const VPN_PLUGIN: &str = include_str!("../../../entry/src/main/ets/plugins/VpnPlugin.ets");
 const VPN_ABILITY: &str =
     include_str!("../../../entry/src/main/ets/vpnability/HOpenConnectVpnExtensionAbility.ets");
 const VPN_CONFIG: &str = include_str!("../../../entry/src/main/ets/vpnability/VpnConfig.ets");
@@ -22,9 +23,9 @@ fn first_authorization_start_is_coordinated_by_the_extension_terminal_state() {
     assert!(NAPI_TYPES.contains("failUnattachedPlatformVpnStart("));
 
     let request = section(
-        ENTRY_ABILITY,
-        "private async requestStartVpn",
-        "private async requestStopVpn",
+        VPN_PLUGIN,
+        "private dispatchVpnStart",
+        "private async requestStopVpnWithContext",
     );
     assert!(request.contains("beginPlatformVpnStart()"));
     assert!(request.contains("awaitPlatformVpnStart(attemptId)"));

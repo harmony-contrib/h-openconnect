@@ -7,7 +7,7 @@ use crate::model::{
     format_bytes, format_duration, AuthMethod, ConnectionLifecycle, ProtocolKind, SoftwareToken,
     SplitTunnelMode, VpnConnection,
 };
-use crate::platform_callbacks;
+use crate::bridge;
 use crate::state::{reduce, Action, Command, LanguagePreference, State, ThemePreference};
 use crate::time_format;
 use arkit::dioxus_core::EventHandler;
@@ -289,7 +289,7 @@ fn FlatDialog(props: FlatDialogProps) -> Element {
             open: props.open,
             presentation: ModalPresentation::CenteredDialog,
             dismiss_on_backdrop: true,
-            backdrop_color: 0x80000000,
+            backdrop_color: 0x80000000u32,
             viewport_inset: 8.0,
             on_dismiss: close,
             {panel}
@@ -318,7 +318,7 @@ pub(crate) fn App() -> Element {
     use_effect(move || {
         let color_mode = state.read().theme_preference.platform_color_mode();
         if *applied_color_mode.peek() != Some(color_mode) {
-            let _ = platform_callbacks::set_color_mode(color_mode);
+            let _ = bridge::set_color_mode(color_mode);
             applied_color_mode.set(Some(color_mode));
         }
     });

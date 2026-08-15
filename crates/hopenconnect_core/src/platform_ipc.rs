@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::io;
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
 // Keep the memory layout aligned with Paws PR #7. Each process owns a lane and
@@ -192,6 +192,16 @@ impl PlatformIpc {
 
     pub(crate) fn wait_for_change(&self, timeout: Duration) -> Result<bool> {
         self.notification.wait(timeout)
+    }
+
+    /// Block until the peer publishes a new frame.
+    ///
+    /// Fully event driven: the wait parks on the session notification socket
+    /// together with a process-local cancellation socket. It resolves when a
+    /// frame arrives (`Ok(true)`) or when [`cancel_event_waits`] is invoked
+    /// (`Ok(false)`); it never polls.
+    pub(crate) fn wait_for_change_event_cancellable(&self) -> Result<bool> {
+        self.notification.wait_event_cancellable()
     }
 
     pub(crate) fn is_ui(&self) -> bool {
@@ -411,6 +421,115 @@ impl SocketNotification {
             }
             return drain_notifications(fd);
         }
+    }
+
+    /// Block on the session notification socket until a frame arrives or the
+    /// process-local cancellation socket is signalled. No timeout, no polling.
+    fn wait_event_cancellable(&self) -> Result<bool> {
+        let _subscription = self
+            .subscription
+            .lock()
+            .map_err(|_| PlatformIpcError::LockPoisoned)?;
+        let session_fd = self.local.as_raw_fd();
+        let cancel_fd = cancellation_fd();
+        // Drop stale cancellation bytes so a previous stop cannot make the
+        // next subscription iteration return immediately in a busy loop.
+        drain_cancel_fd(cancel_fd);
+        let mut descriptors = [
+            libc::pollfd {
+                fd: session_fd,
+                events: libc::POLLIN,
+                revents: 0,
+            },
+            libc::pollfd {
+                fd: cancel_fd,
+                events: libc::POLLIN,
+                revents: 0,
+            },
+        ];
+        loop {
+            // SAFETY: both `pollfd` entries are valid initialized descriptors
+            // backed by live sockets for the supplied count of two.
+            let ready = unsafe { libc::poll(descriptors.as_mut_ptr(), 2, -1) };
+            if ready < 0 {
+                let error = io::Error::last_os_error();
+                if error.kind() == io::ErrorKind::Interrupted {
+                    continue;
+                }
+                return Err(PlatformIpcError::Notification(error.to_string()));
+            }
+            if descriptors[1].revents != 0 {
+                drain_cancel_fd(cancel_fd);
+                return Ok(false);
+            }
+            if descriptors[0].revents != 0 {
+                let changed = drain_notifications(session_fd)?;
+                if changed {
+                    return Ok(true);
+                }
+                // Spurious wakeup on the session socket: park again.
+            }
+        }
+    }
+}
+
+/// Process-local cancellation socketpair for waking blocked event waits.
+struct CancelPair {
+    read: OwnedFd,
+    write: OwnedFd,
+}
+
+fn cancel_pair() -> &'static CancelPair {
+    static PAIR: OnceLock<CancelPair> = OnceLock::new();
+    PAIR.get_or_init(|| {
+        let (read, write) = create_notification_pair().expect("create cancellation socketpair");
+        CancelPair { read, write }
+    })
+}
+
+fn cancellation_fd() -> RawFd {
+    cancel_pair().read.as_raw_fd()
+}
+
+/// Wake every in-process waiter parked in
+/// [`PlatformIpc::wait_for_change_event_cancellable`].
+///
+/// The wakeup rides a process-local socketpair that is independent from the
+/// session notification socket, so cancelling never pollutes or shuts down the
+/// cross-process notification fd that later Want rebinds rely on.
+pub(crate) fn cancel_event_waits() {
+    let write = cancel_pair().write.as_raw_fd();
+    let value = [1_u8];
+    // SAFETY: `write` owns a valid datagram descriptor and `value` remains
+    // alive and readable for the duration of `send`.
+    let written = unsafe {
+        libc::send(
+            write,
+            value.as_ptr().cast(),
+            value.len(),
+            libc::MSG_NOSIGNAL,
+        )
+    };
+    let _ = written; // Best effort: a pending cancel byte already covers the wakeup.
+}
+
+fn drain_cancel_fd(fd: RawFd) {
+    let mut buffer = [0_u8; 64];
+    loop {
+        // SAFETY: `fd` is a live nonblocking datagram descriptor and `buffer`
+        // is valid writable storage for the supplied length.
+        let read = unsafe { libc::recv(fd, buffer.as_mut_ptr().cast(), buffer.len(), 0) };
+        if read > 0 {
+            continue;
+        }
+        if read == 0 {
+            return;
+        }
+        let error = io::Error::last_os_error();
+        if error.kind() == io::ErrorKind::Interrupted {
+            continue;
+        }
+        return;
     }
 }
 

@@ -462,7 +462,7 @@ pub(crate) fn connection_editor_page(state: Signal<State>, id: String) -> Elemen
                                                 dispatch(
                                                     state,
                                                     Action::PickCertFile(
-                                                        crate::platform_callbacks::CertFileKind::Certificate,
+                                                        crate::bridge::CertFileKind::Certificate,
                                                     ),
                                                 );
                                             },
@@ -577,7 +577,7 @@ pub(crate) fn connection_editor_page(state: Signal<State>, id: String) -> Elemen
                                                         dispatch(
                                                             state,
                                                             Action::PickCertFile(
-                                                                crate::platform_callbacks::CertFileKind::PrivateKey,
+                                                                crate::bridge::CertFileKind::PrivateKey,
                                                             ),
                                                         );
                                                     },
@@ -702,7 +702,7 @@ pub(crate) fn connection_editor_page(state: Signal<State>, id: String) -> Elemen
                                                     dispatch(
                                                         state,
                                                         Action::PickCertFile(
-                                                            crate::platform_callbacks::CertFileKind::CaCertificate,
+                                                            crate::bridge::CertFileKind::CaCertificate,
                                                         ),
                                                     );
                                                 },

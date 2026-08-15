@@ -4,7 +4,7 @@ use crate::model::{
     ConnectionLifecycle, NetworkSnapshot, ProtocolKind, SessionSnapshot, SessionStats,
     VpnConnection,
 };
-use crate::platform_callbacks;
+use crate::bridge;
 use hopenconnect_core::{shared_engine, ConnectRequest, LogRecordingStatus};
 use std::collections::HashMap;
 use std::future::Future;
@@ -175,10 +175,10 @@ pub(crate) enum Action {
     /// Show/hide uncommon connection editor fields.
     SetEditorShowAdvanced(bool),
     /// Open the system document picker for a certificate-related file.
-    PickCertFile(platform_callbacks::CertFileKind),
+    PickCertFile(bridge::CertFileKind),
     /// Result of [`Action::PickCertFile`] (path empty when cancelled / failed).
     CertFilePicked {
-        kind: platform_callbacks::CertFileKind,
+        kind: bridge::CertFileKind,
         result: Result<String, String>,
     },
     SaveDraft,
@@ -483,7 +483,7 @@ pub(crate) fn reduce(state: &mut State, action: Action) -> Command<Action> {
             state.system_dark = detect_system_dark();
             // SAML/SSO: consume the Extension's one-shot ashmem browser request.
             if let Some(req) = hopenconnect_core::take_browser_open_pending() {
-                if let Err(err) = platform_callbacks::open_external_browser(req.uri.clone()) {
+                if let Err(err) = bridge::open_external_browser(req.uri.clone()) {
                     state.push_toast(format!(
                         "{}: {err}",
                         tr_msg(state.locale, "无法打开浏览器", "Could not open browser")
@@ -890,7 +890,7 @@ pub(crate) fn reduce(state: &mut State, action: Action) -> Command<Action> {
             Command::none()
         }
         Action::PickCertFile(kind) => {
-            Command::perform(platform_callbacks::pick_cert_file(kind), move |result| {
+            Command::perform(bridge::pick_cert_file(kind), move |result| {
                 Action::CertFilePicked { kind, result }
             })
         }
@@ -898,13 +898,13 @@ pub(crate) fn reduce(state: &mut State, action: Action) -> Command<Action> {
             match result {
                 Ok(path) => {
                     match kind {
-                        platform_callbacks::CertFileKind::Certificate => {
+                        bridge::CertFileKind::Certificate => {
                             state.draft.certificate = path;
                         }
-                        platform_callbacks::CertFileKind::PrivateKey => {
+                        bridge::CertFileKind::PrivateKey => {
                             state.draft.private_key = path;
                         }
-                        platform_callbacks::CertFileKind::CaCertificate => {
+                        bridge::CertFileKind::CaCertificate => {
                             state.draft.ca_certificate = path;
                         }
                     }
@@ -993,7 +993,7 @@ pub(crate) fn reduce(state: &mut State, action: Action) -> Command<Action> {
             Command::none()
         }
         Action::OpenExternalUrl(url) => Command::perform(
-            platform_callbacks::open_external_url(url),
+            bridge::open_external_url(url),
             Action::ExternalUrlOpened,
         ),
         Action::ExternalUrlOpened(result) => {

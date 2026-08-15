@@ -234,13 +234,23 @@ export default class HOpenConnectVpnExtensionAbility extends VpnExtensionAbility
 
   private stopPlatformSubscription(): void {
     this.platformSubscriptionActive = false;
+    // Wake the waiter parked in waitForPlatformChangeEvent so the loop can
+    // observe the flag and unwind without waiting for the next peer frame.
+    try {
+      hopenconnectUi.cancelPlatformChangeWait();
+    } catch (err) {
+      hilog.warn(LOG_DOMAIN, LOG_TAG, 'cancel platform change wait failed %{public}s', describeError(err));
+    }
   }
 
   private async runPlatformSubscription(): Promise<void> {
     while (this.platformSubscriptionActive) {
       try {
-        const changed = await hopenconnectUi.waitForPlatformChange(1000);
-        if (changed && this.platformSubscriptionActive) {
+        // Fully event driven: the native wait parks on the shared-memory
+        // notification socket until the UI publishes a control frame (or the
+        // wait is cancelled by stopPlatformSubscription). No polling.
+        await hopenconnectUi.waitForPlatformChangeEvent();
+        if (this.platformSubscriptionActive) {
           hopenconnectUi.syncPlatformChanges();
         }
       } catch (err) {

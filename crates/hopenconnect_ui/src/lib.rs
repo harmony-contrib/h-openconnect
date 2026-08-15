@@ -1,19 +1,27 @@
 use arkit::entry;
+use arkit::openharmony_ability::OpenHarmonyApp;
 use arkit::prelude::Element;
 use hopenconnect_core::{shared_engine, ConnectRequest};
 use napi_derive_ohos::napi;
 use napi_ohos::{bindgen_prelude::Object, Error, Result, Status};
 
+mod bridge;
 mod l10n;
 mod log_filter;
 mod model;
-mod platform_callbacks;
+mod socket_protect;
 mod state;
 mod time_format;
 mod view;
 
-#[entry]
-fn app() -> Element {
+#[entry(plugins = [
+    bridge::HOpenVpnBridgePlugin,
+    bridge::HOpenColorModeBridgePlugin,
+    bridge::HOpenExportBridgePlugin,
+    bridge::HOpenCertFileBridgePlugin,
+])]
+fn app(handle: OpenHarmonyApp) -> Element {
+    bridge::set_app(handle);
     view::App()
 }
 
@@ -73,12 +81,21 @@ pub fn attach_platform_shared_memory(ashmem_fd: i32, notification_fd: i32) -> Re
         .map_err(to_napi_error)
 }
 
+/// Block until the peer process publishes a platform frame (or the wait is
+/// cancelled). Fully event driven: parks on the notification socket, never
+/// polls a timeout.
 #[napi]
-pub async fn wait_for_platform_change(timeout_ms: u32) -> Result<bool> {
+pub async fn wait_for_platform_change_event() -> Result<bool> {
     shared_engine()
-        .wait_for_platform_change(std::time::Duration::from_millis(u64::from(timeout_ms)))
+        .wait_for_platform_change_event()
         .await
         .map_err(to_napi_error)
+}
+
+/// Wake the in-process waiter parked in `wait_for_platform_change_event`.
+#[napi]
+pub fn cancel_platform_change_wait() {
+    shared_engine().cancel_platform_change_wait();
 }
 
 #[napi]
@@ -165,38 +182,24 @@ pub fn configure_system_color_mode(color_mode: i32) -> Result<()> {
     Ok(())
 }
 
-#[napi]
-pub fn register_platform_callbacks(callbacks: Object<'static>) -> Result<()> {
-    platform_callbacks::register_platform_callbacks(callbacks)
-}
-
-/// Complete a document-picker request started by `pickCertFile` (ArkTS → native).
-///
-/// `path` may be empty / omitted when the user cancelled the picker.
-#[napi]
-pub fn complete_file_pick(request_id: u32, path: Option<String>) -> Result<()> {
-    platform_callbacks::complete_file_pick(u64::from(request_id), path);
-    Ok(())
-}
-
-#[napi]
-pub fn secure_private_file(path: String) -> Result<()> {
-    hopenconnect_core::secure_private_file(path).map_err(to_napi_error)
-}
-
 /// Register ics-style per-fd protect: OpenConnect → `vpnConnection.protect(fd)`.
 ///
 /// Pass `{ protectSocket: async (fd: number) => Promise<void> }`. Native waits
 /// for completion before OpenConnect calls connect(2).
 #[napi]
 pub fn register_socket_protect(callbacks: Object<'static>) -> Result<()> {
-    platform_callbacks::register_platform_callbacks(callbacks)
+    socket_protect::register_socket_protect(callbacks)
 }
 
 #[napi]
 pub fn clear_socket_protect() -> Result<()> {
-    hopenconnect_core::set_socket_protect_handler(None);
+    socket_protect::clear_socket_protect();
     Ok(())
+}
+
+#[napi]
+pub fn secure_private_file(path: String) -> Result<()> {
+    hopenconnect_core::secure_private_file(path).map_err(to_napi_error)
 }
 
 #[napi]

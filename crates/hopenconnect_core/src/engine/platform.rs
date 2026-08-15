@@ -82,6 +82,27 @@ impl SessionEngine {
             .map_err(platform_ipc_error)
     }
 
+    /// Block until the peer process publishes a platform frame.
+    ///
+    /// Fully event driven: the wait parks on the session notification socket
+    /// together with a process-local cancellation socket. It resolves when a
+    /// frame arrives (`Ok(true)`) or when [`Self::cancel_platform_change_wait`]
+    /// is invoked (`Ok(false)`); it never polls.
+    pub async fn wait_for_platform_change_event(&self) -> CoreResult<bool> {
+        let Some(platform) = self.platform_ipc()? else {
+            return Ok(false);
+        };
+        tokio::task::spawn_blocking(move || platform.wait_for_change_event_cancellable())
+            .await
+            .map_err(|error| CoreError::msg(format!("platform subscription task failed: {error}")))?
+            .map_err(platform_ipc_error)
+    }
+
+    /// Wake the in-process waiter parked in [`Self::wait_for_platform_change_event`].
+    pub fn cancel_platform_change_wait(&self) {
+        crate::platform_ipc::cancel_event_waits();
+    }
+
     pub fn queue_platform_browser_open_request(&self, uri: String) -> CoreResult<()> {
         let uri = uri.trim().to_owned();
         if uri.is_empty() {
@@ -277,7 +298,9 @@ impl SessionEngine {
                         "platform VPN start coordinator closed"
                     ))?;
                 }
-                _ = tokio::time::sleep(Duration::from_millis(25)) => {}
+                changed = self.wait_for_platform_change(Duration::from_secs(1)) => {
+                    changed?;
+                }
                 _ = tokio::time::sleep_until(deadline) => return Ok(false),
             }
         }

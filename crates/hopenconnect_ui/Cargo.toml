@@ -24,6 +24,7 @@ dioxus.workspace = true
 hopenconnect_core.workspace = true
 napi-derive-ohos.workspace = true
 napi-ohos.workspace = true
+openharmony-ability-plugin-url.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 time.workspace = true

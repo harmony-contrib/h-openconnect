@@ -15,7 +15,7 @@ pub(super) async fn export_log_archive(file_name: String) -> Result<String, Stri
     let content = shared_engine()
         .read_log_archive(&file_name)
         .map_err(|error| error.to_string())?;
-    platform_callbacks::export_log(file_name.clone(), content).await?;
+    bridge::export_log(file_name.clone(), content).await?;
     Ok(file_name)
 }
 
@@ -88,7 +88,7 @@ async fn engine_connect(profile: VpnConnection, dry_run: bool) -> Result<Session
     let options_json = serde_json::to_string(&options).map_err(|err| err.to_string())?;
 
     // Platform VPN extension owns the TUN (paws-style, separate process).
-    match platform_callbacks::request_start_vpn(options_json) {
+    match bridge::request_start_vpn(options_json) {
         Ok(()) => Ok(SessionOutcome::PlatformStartRequested),
         // Host/unit paths without ArkTS callbacks may use dry-run only.
         Err(_err) if dry_run => {
@@ -107,7 +107,7 @@ async fn engine_connect(profile: VpnConnection, dry_run: bool) -> Result<Session
 
 pub(super) async fn engine_disconnect(dry_run: bool) -> Result<SessionOutcome, String> {
     let engine = shared_engine();
-    match platform_callbacks::request_stop_vpn() {
+    match bridge::request_stop_vpn() {
         Ok(()) => {
             engine.disconnect().await.map_err(|err| err.to_string())?;
             Ok(SessionOutcome::Disconnected)

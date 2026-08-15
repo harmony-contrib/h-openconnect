@@ -12,7 +12,10 @@ rust-version = "1.89"
 
 [workspace.dependencies]
 hopenconnect_core = { path = "crates/hopenconnect_core", default-features = false }
-arkit = { git = "https://github.com/richerfu/arkit.git", rev = "f5233b5f97c6f7f24b590470fc562d0002e4ba00", features = ["router", "shadcn"] }
+arkit = { git = "https://github.com/richerfu/arkit.git", rev = "d8eb33ca4b26c1fad1f4ccb332b433cc756e9dfd", features = ["router", "shadcn"] }
+# Pluginized platform capabilities from openharmony-ability. Keep these on the
+# same crates.io release as the openharmony-ability version selected by Arkit.
+openharmony-ability-plugin-url = "1.0.0-beta.1"
 dioxus = { version = "0.7", default-features = false, features = ["signals", "hooks", "macro"] }
 napi-build-ohos = "1.1"
 napi-derive-ohos = "1.1"

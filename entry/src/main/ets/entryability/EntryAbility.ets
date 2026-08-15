@@ -1,56 +1,56 @@
-import { AbilityConstant, common, Configuration, ConfigurationConstant, Want } from '@kit.AbilityKit';
+import { AbilityConstant, Configuration, ConfigurationConstant, Want } from '@kit.AbilityKit';
 import { i18n } from '@kit.LocalizationKit';
-import { vpnExtension } from '@kit.NetworkKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
-import { picker, fileIo as fs } from '@kit.CoreFileKit';
-import { NativeAbility } from '@ohos-rs/ability';
-import hopenconnectUi from 'libhopenconnect_ui.so';
+import { LazyPlugin, NativeAbility } from '@ohos-rs/ability';
+import { UrlPlugin } from '@ohos-rs/ability-plugin-url';
 import window from '@ohos.window';
-import {
-  buildVpnWant,
-  HOpenPlatformSharedMemoryFds,
-  setHOpenBundleName,
-} from '../vpnability/VpnConfig';
+import hopenconnectUi from 'libhopenconnect_ui.so';
+import { describeError } from '../common/Errors';
 import { configureNativePlatformIdentity } from '../common/PlatformIdentity';
+import { setHOpenBundleName } from '../vpnability/VpnConfig';
+import { CertFilePlugin } from '../plugins/CertFilePlugin';
+import { ColorModePlugin } from '../plugins/ColorModePlugin';
+import { ExportPlugin } from '../plugins/ExportPlugin';
+import { VpnPlugin } from '../plugins/VpnPlugin';
 
 const LOG_DOMAIN: number = 0x0000;
 const LOG_TAG: string = 'HOpenConnectEntry';
-const VPN_EXTENSION_ATTACH_GRACE_MS: number = 350;
-const VPN_EXTENSION_REDISPATCH_ATTACH_TIMEOUT_MS: number = 5000;
 
-interface HOpenPickCertRequest {
-  id?: number;
-  kind?: string;
-}
-
-interface HOpenTextExportRequest {
-  suggestedName?: string;
-  content?: string;
-}
-
-function describeError(err: Error | Object | string | number | boolean | null | undefined): string {
-  if (err instanceof Error) {
-    return `${err.name}: ${err.message}`;
-  }
-  if (typeof err === 'string') {
-    return err;
-  }
-  if (typeof err === 'number' || typeof err === 'boolean') {
-    return err.toString();
-  }
-  if (!err) {
-    return '';
-  }
-  const json = JSON.stringify(err);
-  return json && json !== '{}' ? json : err.toString();
-}
-
+/**
+ * Thin assembly point: loads the native module, installs the built-in
+ * capability plugin (`ohos.url`) plus the application-owned `hopenconnect.*`
+ * plugins, and forwards lifecycle events. All platform logic lives in the
+ * plugins.
+ */
 export default class EntryAbility extends NativeAbility {
-  public moduleName: string | string[] = 'hopenconnect_ui';
+  public moduleName: string = 'hopenconnect_ui';
   public defaultPage: boolean = false;
-  private vpnStartRequest: Promise<void> | undefined = undefined;
-  private activeVpnStartAttemptId: string = '';
-  private platformSharedMemory?: HOpenPlatformSharedMemoryFds;
+
+  private vpnPlugin?: VpnPlugin;
+
+  public bridgePlugins = [
+    new LazyPlugin(() => new UrlPlugin()),
+    // The active session instance is retained for debug automation while the
+    // factory still creates a fresh plugin for every Ability session.
+    new LazyPlugin(() => this.createVpnPlugin()),
+    new LazyPlugin(() => new ColorModePlugin()),
+    new LazyPlugin(() => new ExportPlugin()),
+    new LazyPlugin(() => new CertFilePlugin()),
+  ];
+
+  private createVpnPlugin(): VpnPlugin {
+    const plugin = new VpnPlugin();
+    this.vpnPlugin = plugin;
+    return plugin;
+  }
+
+  private requestStartVpn(optionsJson: string): Promise<void> {
+    const plugin = this.vpnPlugin;
+    if (plugin === undefined) {
+      return Promise.reject(new Error('VPN plugin is not attached to the active Ability session'));
+    }
+    return plugin.requestStartVpn(optionsJson);
+  }
 
   private configureNativeHome(): void {
     try {
@@ -60,20 +60,7 @@ export default class EntryAbility extends NativeAbility {
     } catch (err) {
       const message = describeError(err) || 'configure native home failed';
       hilog.error(LOG_DOMAIN, LOG_TAG, 'configure native home failed %{private}s', message);
-      throw new Error(message);
     }
-  }
-
-  private initializePlatformSharedMemory(): void {
-    const fields = hopenconnectUi.initializePlatformSharedMemory().split(',');
-    const ashmemFd = Number(fields[0]);
-    const notificationFd = Number(fields[1]);
-    if (fields.length !== 2 || !Number.isInteger(ashmemFd) || ashmemFd < 0 ||
-      !Number.isInteger(notificationFd) || notificationFd < 0) {
-      throw new Error('native platform shared memory returned invalid file descriptors');
-    }
-    this.platformSharedMemory = { ashmemFd, notificationFd };
-    hilog.info(LOG_DOMAIN, LOG_TAG, 'initialized platform shared memory');
   }
 
   private configureNativeLocale(language?: string): void {
@@ -102,378 +89,20 @@ export default class EntryAbility extends NativeAbility {
     }
   }
 
-  private setAppColorMode(colorMode: number): void {
-    let mode = ConfigurationConstant.ColorMode.COLOR_MODE_NOT_SET;
-    if (colorMode === ConfigurationConstant.ColorMode.COLOR_MODE_DARK) {
-      mode = ConfigurationConstant.ColorMode.COLOR_MODE_DARK;
-    } else if (colorMode === ConfigurationConstant.ColorMode.COLOR_MODE_LIGHT) {
-      mode = ConfigurationConstant.ColorMode.COLOR_MODE_LIGHT;
-    }
-    try {
-      this.context.setColorMode(mode);
-      hilog.info(LOG_DOMAIN, LOG_TAG, 'applied app color mode %{public}d', mode);
-    } catch (err) {
-      const message = describeError(err);
-      hilog.error(LOG_DOMAIN, LOG_TAG, 'apply app color mode failed %{public}s', message);
-      throw new Error(message);
-    }
-  }
-
-  private async requestStartVpn(optionsJson: string): Promise<void> {
-    if (this.vpnStartRequest) {
-      return this.vpnStartRequest;
-    }
-    const request = this.performStartVpn(optionsJson);
-    this.vpnStartRequest = request;
-    try {
-      await request;
-    } finally {
-      if (this.vpnStartRequest === request) {
-        this.vpnStartRequest = undefined;
-      }
-    }
-  }
-
-  private dispatchVpnStart(optionsJson: string, attemptId: string): void {
-    this.runVpnStartDispatch(optionsJson, attemptId).catch((err: Error) => {
-      const message = describeError(err) || 'system rejected VPN start';
-      try {
-        hopenconnectUi.failUnattachedPlatformVpnStart(attemptId, message);
-      } catch (innerErr) {
-        hilog.error(
-          LOG_DOMAIN,
-          LOG_TAG,
-          'publish system VPN rejection failed %{public}s',
-          describeError(innerErr),
-        );
-      }
-    });
-  }
-
-  private async invokeVpnExtensionStart(optionsJson: string, attemptId: string): Promise<void> {
-    try {
-      await vpnExtension.startVpnExtensionAbility(
-        buildVpnWant(optionsJson, this.platformSharedMemory, attemptId),
-      );
-    } catch (err) {
-      throw new Error(describeError(err) || 'system rejected VPN start');
-    }
-  }
-
-  private async runVpnStartDispatch(optionsJson: string, attemptId: string): Promise<void> {
-    await this.invokeVpnExtensionStart(optionsJson, attemptId);
-    hilog.info(LOG_DOMAIN, LOG_TAG, 'system acknowledged VPN start attempt %{public}s', attemptId);
-
-    if (await hopenconnectUi.awaitPlatformVpnStartAttachment(attemptId, VPN_EXTENSION_ATTACH_GRACE_MS)) {
-      return;
-    }
-
-    // The first-authorization dialog on some HarmonyOS builds starts the VPN
-    // Extension with a new Want containing only bundleName/abilityName. Once
-    // authorization succeeds, send the original payload again so the running
-    // Extension receives the ashmem descriptors and attempt id via onRequest.
-    hilog.warn(
-      LOG_DOMAIN,
-      LOG_TAG,
-      'VPN Extension did not receive the authorized Want; redispatching attempt %{public}s',
-      attemptId,
-    );
-    await this.invokeVpnExtensionStart(optionsJson, attemptId);
-    hilog.info(LOG_DOMAIN, LOG_TAG, 'redispatched VPN start attempt %{public}s', attemptId);
-
-    if (!(await hopenconnectUi.awaitPlatformVpnStartAttachment(
-      attemptId,
-      VPN_EXTENSION_REDISPATCH_ATTACH_TIMEOUT_MS,
-    ))) {
-      throw new Error('VPN Extension did not receive the shared-memory descriptors after authorization');
-    }
-  }
-
-  private async performStartVpn(optionsJson: string): Promise<void> {
-    let attemptId: string = '';
-    try {
-      hilog.info(LOG_DOMAIN, LOG_TAG, 'request VPN start received');
-      attemptId = hopenconnectUi.beginPlatformVpnStart();
-      this.activeVpnStartAttemptId = attemptId;
-
-      this.dispatchVpnStart(optionsJson, attemptId);
-
-      const outcome = await hopenconnectUi.awaitPlatformVpnStart(attemptId);
-      if (outcome !== 'connected') {
-        throw new Error(`unexpected VPN start outcome: ${outcome}`);
-      }
-      hilog.info(LOG_DOMAIN, LOG_TAG, 'VPN start completed attempt %{public}s', attemptId);
-    } catch (err) {
-      const message = describeError(err) || 'request VPN start failed';
-      if (attemptId.length > 0) {
-        try {
-          // Exactly-once: this is a no-op if ashmem already supplied a
-          // terminal outcome or a newer attempt replaced this one.
-          hopenconnectUi.failPlatformVpnStart(attemptId, message);
-        } catch (innerErr) {
-          hilog.error(LOG_DOMAIN, LOG_TAG, 'publish VPN start failure failed %{public}s',
-            describeError(innerErr));
-        }
-      }
-      hilog.error(LOG_DOMAIN, LOG_TAG, 'request VPN start failed %{public}s', message);
-      throw new Error(message);
-    } finally {
-      if (this.activeVpnStartAttemptId === attemptId) {
-        this.activeVpnStartAttemptId = '';
-      }
-    }
-  }
-
-  private async requestStopVpn(): Promise<void> {
-    try {
-      hilog.info(LOG_DOMAIN, LOG_TAG, 'request VPN stop received');
-      if (this.activeVpnStartAttemptId.length > 0) {
-        hopenconnectUi.cancelPlatformVpnStart(this.activeVpnStartAttemptId);
-      }
-      await vpnExtension.stopVpnExtensionAbility(buildVpnWant());
-      hopenconnectUi.setPlatformVpnRunning(false);
-      hilog.info(LOG_DOMAIN, LOG_TAG, 'requested VPN stop');
-    } catch (err) {
-      hilog.error(LOG_DOMAIN, LOG_TAG, 'request VPN stop failed %{public}s', describeError(err));
-      throw new Error(describeError(err) || 'request VPN stop failed');
-    }
-  }
-
-  /**
-   * OpenConnect SSO-v2 external browser: launch system browser with IdP URL.
-   * OpenConnect listens on http://[::1]:29786/api/sso/… for the return hop.
-   */
-  private async openExternalBrowser(uri: string): Promise<void> {
-    const target = (uri ?? '').trim();
-    if (target.length === 0) {
-      throw new Error('empty external browser uri');
-    }
-    try {
-      const want: Want = {
-        action: 'ohos.want.action.viewData',
-        entities: ['entity.system.browsable'],
-        uri: target,
-      };
-      await this.context.startAbility(want);
-      hilog.info(LOG_DOMAIN, LOG_TAG, 'opened external browser uri_len=%{public}d', target.length);
-    } catch (err) {
-      const message = describeError(err) || 'open external browser failed';
-      hilog.error(LOG_DOMAIN, LOG_TAG, 'open external browser failed %{public}s', message);
-      throw new Error(message);
-    }
-  }
-
-  private async exportLogToSystem(requestJson: string): Promise<void> {
-    let request: HOpenTextExportRequest;
-    try {
-      request = JSON.parse(requestJson) as HOpenTextExportRequest;
-    } catch (err) {
-      throw new Error(`invalid log export request: ${describeError(err)}`);
-    }
-    const content = request.content ?? '';
-    if (content.length === 0) {
-      throw new Error('log export content is empty');
-    }
-    const baseName = (request.suggestedName ?? 'h-openconnect-log')
-      .replace(/[\\/:*?"<>|]/g, '_')
-      .trim() || 'h-openconnect-log';
-    const fileName = baseName.endsWith('.log') ? baseName : `${baseName}.log`;
-    const documentPicker = new picker.DocumentViewPicker(this.context as common.UIAbilityContext);
-    const options = new picker.DocumentSaveOptions();
-    options.newFileNames = [fileName];
-    options.fileSuffixChoices = ['Log|.log', 'Text|.txt'];
-    const result: Array<string> = await documentPicker.save(options);
-    if (!result || result.length === 0 || result[0].length === 0) {
-      throw new Error('log export cancelled');
-    }
-    let file: fs.File | undefined = undefined;
-    try {
-      file = fs.openSync(
-        result[0],
-        fs.OpenMode.WRITE_ONLY | fs.OpenMode.CREATE | fs.OpenMode.TRUNC,
-      );
-      fs.writeSync(file.fd, content);
-      hilog.info(LOG_DOMAIN, LOG_TAG, 'exported log');
-    } catch (err) {
-      throw new Error(describeError(err) || 'write exported log failed');
-    } finally {
-      if (file) {
-        try {
-          fs.closeSync(file);
-        } catch (err) {
-          hilog.error(LOG_DOMAIN, LOG_TAG, 'close exported log failed %{public}s', describeError(err));
-        }
-      }
-    }
-  }
-
-  /**
-   * System document picker for client/CA cert files. Copies into app sandbox so
-   * OpenConnect (native) can open a real filesystem path.
-   */
-  private async pickCertFile(requestJson: string): Promise<void> {
-    let requestId = 0;
-    try {
-      const req = JSON.parse(requestJson) as HOpenPickCertRequest;
-      requestId = typeof req.id === 'number' ? req.id : 0;
-      const kind = typeof req.kind === 'string' ? req.kind : 'certificate';
-      const path = await this.pickAndStoreCertFile(kind);
-      hopenconnectUi.completeFilePick(requestId, path);
-      hilog.info(
-        LOG_DOMAIN,
-        LOG_TAG,
-        'pick cert file done id=%{public}d kind=%{public}s hasPath=%{public}s',
-        requestId,
-        kind,
-        path && path.length > 0 ? 'yes' : 'no',
-      );
-    } catch (err) {
-      hilog.error(LOG_DOMAIN, LOG_TAG, 'pick cert file failed %{public}s', describeError(err));
-      try {
-        hopenconnectUi.completeFilePick(requestId, '');
-      } catch (_completeErr) {
-        // ignore secondary failure
-      }
-    }
-  }
-
-  private certDir(): string {
-    return `${this.context.filesDir}/h-openconnect/certs`;
-  }
-
-  private ensureCertDir(): void {
-    const dir = this.certDir();
-    try {
-      if (!fs.accessSync(dir)) {
-        fs.mkdirSync(dir, true);
-      }
-    } catch (_err) {
-      try {
-        fs.mkdirSync(dir, true);
-      } catch (mkdirErr) {
-        hilog.error(LOG_DOMAIN, LOG_TAG, 'mkdir certs failed %{public}s', describeError(mkdirErr));
-      }
-    }
-  }
-
-  private async pickAndStoreCertFile(kind: string): Promise<string> {
-    this.ensureCertDir();
-    const options = new picker.DocumentSelectOptions();
-    options.maxSelectNumber = 1;
-    // PEM / DER / PKCS#12 common suffixes (generic, not vendor-specific).
-    options.fileSuffixFilters = ['.pem', '.crt', '.cer', '.key', '.p12', '.pfx', '.der', '.ca'];
-    const documentPicker = new picker.DocumentViewPicker(this.context as common.UIAbilityContext);
-    const uris: Array<string> = await documentPicker.select(options);
-    if (!uris || uris.length === 0) {
-      return '';
-    }
-    const srcUri = uris[0];
-    const baseName = this.fileNameFromUri(srcUri, kind);
-    const destPath = `${this.certDir()}/${Date.now()}_${baseName}`;
-    await this.copyUriToPath(srcUri, destPath);
-    return destPath;
-  }
-
-  private fileNameFromUri(uri: string, kind: string): string {
-    try {
-      const noQuery = uri.split('?')[0];
-      const segments = noQuery.split('/');
-      let last = segments.length > 0 ? segments[segments.length - 1] : '';
-      last = decodeURIComponent(last);
-      if (last && last.indexOf('.') > 0 && last.length < 128) {
-        // Sanitize path separators that should not appear in a leaf name.
-        return last.replace(/[\\/]/g, '_');
-      }
-    } catch (_err) {
-      // fall through
-    }
-    const ext = kind === 'private_key' ? 'key' : kind === 'ca_certificate' ? 'crt' : 'pem';
-    return `${kind}.${ext}`;
-  }
-
-  private async copyUriToPath(srcUri: string, destPath: string): Promise<void> {
-    let srcFile: fs.File | undefined = undefined;
-    let destFile: fs.File | undefined = undefined;
-    let completed = false;
-    try {
-      srcFile = fs.openSync(srcUri, fs.OpenMode.READ_ONLY);
-      destFile = fs.openSync(
-        destPath,
-        fs.OpenMode.READ_WRITE | fs.OpenMode.CREATE | fs.OpenMode.TRUNC,
-      );
-      // Stream copy — certs are small; cap total size to avoid abuse.
-      const chunk = new ArrayBuffer(64 * 1024);
-      let total = 0;
-      const maxBytes = 8 * 1024 * 1024;
-      while (true) {
-        const n: number = fs.readSync(srcFile.fd, chunk);
-        if (n <= 0) {
-          break;
-        }
-        total += n;
-        if (total > maxBytes) {
-          throw new Error(`certificate file too large (>${maxBytes} bytes)`);
-        }
-        // writeSync accepts ArrayBuffer; when partial read, write a sliced view.
-        if (n === chunk.byteLength) {
-          fs.writeSync(destFile.fd, chunk);
-        } else {
-          fs.writeSync(destFile.fd, chunk.slice(0, n));
-        }
-      }
-      if (total === 0) {
-        throw new Error('selected certificate file is empty');
-      }
-      hopenconnectUi.securePrivateFile(destPath);
-      completed = true;
-    } finally {
-      if (srcFile) {
-        try {
-          fs.closeSync(srcFile);
-        } catch (_e) {
-          // ignore
-        }
-      }
-      if (destFile) {
-        try {
-          fs.closeSync(destFile);
-        } catch (_e) {
-          // ignore
-        }
-      }
-      if (!completed) {
-        try {
-          fs.unlinkSync(destPath);
-        } catch (_e) {
-          // The destination may not have been created.
-        }
-      }
-    }
-  }
-
   public async onCreate(want: Want, launchParam: AbilityConstant.LaunchParam): Promise<void> {
     try {
       this.configureNativeHome();
       configureNativePlatformIdentity(hopenconnectUi);
-      this.initializePlatformSharedMemory();
       this.configureNativeLocale();
       this.configureNativeAppearance();
-      hopenconnectUi.registerPlatformCallbacks({
-        setColorMode: async (colorMode: number) => this.setAppColorMode(colorMode),
-        requestStartVpn: async (optionsJson: string) => await this.requestStartVpn(optionsJson),
-        requestStopVpn: async () => await this.requestStopVpn(),
-        openExternalBrowser: async (uri: string) => await this.openExternalBrowser(uri),
-        openExternalUrl: async (url: string) => await this.openExternalBrowser(url),
-        pickCertFile: async (requestJson: string) => await this.pickCertFile(requestJson),
-        exportLog: async (requestJson: string) => await this.exportLogToSystem(requestJson),
-      });
-      hilog.info(LOG_DOMAIN, LOG_TAG, 'registered native platform callbacks');
     } catch (err) {
-      const message = describeError(err) || 'native initialization failed';
-      hilog.error(LOG_DOMAIN, LOG_TAG, 'native initialization failed %{private}s', message);
-      throw new Error(message);
+      hilog.error(LOG_DOMAIN, LOG_TAG, 'native initialization failed %{public}s', describeError(err));
     }
     await super.onCreate(want, launchParam);
+  }
+
+  public onNewWant(want: Want, launchParam: AbilityConstant.LaunchParam): void {
+    super.onNewWant(want, launchParam);
   }
 
   public onConfigurationUpdate(newConfig: Configuration): void {
@@ -482,20 +111,7 @@ export default class EntryAbility extends NativeAbility {
     super.onConfigurationUpdate(newConfig);
   }
 
-  public onDestroy(): void {
-    if (this.activeVpnStartAttemptId.length > 0) {
-      try {
-        hopenconnectUi.cancelPlatformVpnStart(this.activeVpnStartAttemptId);
-      } catch (err) {
-        hilog.warn(LOG_DOMAIN, LOG_TAG, 'cancel active VPN start failed %{public}s', describeError(err));
-      }
-      this.activeVpnStartAttemptId = '';
-    }
-    super.onDestroy();
-  }
-
-  public async onWindowStageCreate(windowStage: window.WindowStage): Promise<void> {
-    await super.onWindowStageCreate(windowStage);
+  protected async loadWindowStageContent(windowStage: window.WindowStage): Promise<void> {
     try {
       const win = await windowStage.getMainWindow();
       await win.setUIContent('pages/Index');
