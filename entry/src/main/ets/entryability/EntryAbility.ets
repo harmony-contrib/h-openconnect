@@ -113,10 +113,10 @@ export default class EntryAbility extends NativeAbility {
 
   protected async loadWindowStageContent(windowStage: window.WindowStage): Promise<void> {
     try {
-      const win = await windowStage.getMainWindow();
-      await win.setUIContent('pages/Index');
+      await windowStage.loadContent('pages/Index');
     } catch (err) {
-      hilog.error(LOG_DOMAIN, LOG_TAG, 'set UI content failed %{public}s', JSON.stringify(err) ?? '');
+      hilog.error(LOG_DOMAIN, LOG_TAG, 'load WindowStage content failed %{public}s',
+        JSON.stringify(err) ?? '');
     }
   }
 }
