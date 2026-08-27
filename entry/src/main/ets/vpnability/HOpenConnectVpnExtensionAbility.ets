@@ -13,7 +13,7 @@ import { Want } from '@kit.AbilityKit';
 import { vpnExtension, VpnExtensionAbility } from '@kit.NetworkKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import hopenconnectUi from 'libhopenconnect_ui.so';
-import { configureNativePlatformIdentity } from '../common/PlatformIdentity';
+import { configureNativePlatformIdentityIfConsented } from '../common/PlatformIdentity';
 import {
   buildVpnConfig,
   parseOptions,
@@ -126,8 +126,10 @@ export default class HOpenConnectVpnExtensionAbility extends VpnExtensionAbility
 
   private startFromWant(want: Want): void {
     try {
+      if (!configureNativePlatformIdentityIfConsented(this.context, hopenconnectUi)) {
+        throw new Error('privacy policy consent is required before starting a VPN');
+      }
       this.configureNativeHome();
-      configureNativePlatformIdentity(hopenconnectUi);
     } catch (err) {
       hilog.error(LOG_DOMAIN, LOG_TAG, 'VPN request rejected %{public}s', describeError(err));
       return;

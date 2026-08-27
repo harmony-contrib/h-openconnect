@@ -1,5 +1,6 @@
-import { bundleManager } from '@kit.AbilityKit';
+import { bundleManager, common } from '@kit.AbilityKit';
 import { deviceInfo } from '@kit.BasicServicesKit';
+import { hasPrivacyConsent } from './PrivacyConsent';
 
 export interface NativePlatformIdentityApi {
   configurePlatformIdentity(
@@ -12,7 +13,18 @@ export interface NativePlatformIdentityApi {
   ): void;
 }
 
-export function configureNativePlatformIdentity(nativeApi: NativePlatformIdentityApi): void {
+/**
+ * Configure the native AnyConnect identity only after the current privacy
+ * policy has been accepted. Keep deviceInfo.ODID inside this guarded function
+ * so future call sites cannot accidentally read it before consent.
+ */
+export function configureNativePlatformIdentityIfConsented(
+  context: common.Context,
+  nativeApi: NativePlatformIdentityApi,
+): boolean {
+  if (!hasPrivacyConsent(context)) {
+    return false;
+  }
   const bundleInfo = bundleManager.getBundleInfoForSelfSync(
     bundleManager.BundleFlag.GET_BUNDLE_INFO_DEFAULT,
   );
@@ -24,4 +36,5 @@ export function configureNativePlatformIdentity(nativeApi: NativePlatformIdentit
     bundleInfo.versionName,
     deviceInfo.ODID,
   );
+  return true;
 }

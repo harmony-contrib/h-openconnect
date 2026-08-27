@@ -6,7 +6,7 @@ import { UrlPlugin } from '@ohos-rs/ability-plugin-url';
 import window from '@ohos.window';
 import hopenconnectUi from 'libhopenconnect_ui.so';
 import { describeError } from '../common/Errors';
-import { configureNativePlatformIdentity } from '../common/PlatformIdentity';
+import { configureNativePlatformIdentityIfConsented } from '../common/PlatformIdentity';
 import { setHOpenBundleName } from '../vpnability/VpnConfig';
 import { CertFilePlugin } from '../plugins/CertFilePlugin';
 import { ColorModePlugin } from '../plugins/ColorModePlugin';
@@ -92,7 +92,7 @@ export default class EntryAbility extends NativeAbility {
   public async onCreate(want: Want, launchParam: AbilityConstant.LaunchParam): Promise<void> {
     try {
       this.configureNativeHome();
-      configureNativePlatformIdentity(hopenconnectUi);
+      configureNativePlatformIdentityIfConsented(this.context, hopenconnectUi);
       this.configureNativeLocale();
       this.configureNativeAppearance();
     } catch (err) {

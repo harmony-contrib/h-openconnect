@@ -127,6 +127,10 @@ pub(crate) fn about_page(state: Signal<State>) -> Element {
                             "shield-check",
                             translate_ui(locale, tr::about_privacy_no_telemetry()),
                         )}
+                        {about_note_row(
+                            "fingerprint",
+                            translate_ui(locale, tr::about_privacy_device_id()),
+                        )}
                     }
                 },
             )}
