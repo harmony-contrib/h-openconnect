@@ -22,6 +22,10 @@ struct Index {
     this.privacyAccepted = hasPrivacyConsent(this.abilityContext);
   }
 
+  private togglePrivacyLanguage(): void {
+    this.useChinese = !this.useChinese;
+  }
+
   private agreeAndContinue(): void {
     try {
       if (!grantPrivacyConsent(this.abilityContext)) {
@@ -82,6 +86,20 @@ struct Index {
             .fontSize(20)
             .fontWeight(FontWeight.Bold)
             .fontColor(this.primaryTextColor())
+            .layoutWeight(1)
+          Button() {
+            Text(this.useChinese ? 'EN' : '中')
+              .fontSize(13)
+              .fontWeight(FontWeight.Medium)
+              .fontColor(this.accentColor())
+          }
+            .type(ButtonType.Normal)
+            .width(56)
+            .height(32)
+            .padding(0)
+            .backgroundColor(this.accentMutedColor())
+            .borderRadius(8)
+            .onClick(() => this.togglePrivacyLanguage())
         }
         .height(56)
         .padding({ left: 16, right: 16 })
@@ -141,46 +159,69 @@ struct Index {
             .border({ width: 1, color: this.lineColor() })
 
             Column() {
-              this.PolicyRow(
-                '01',
-                this.useChinese ? '我们收集的信息' : 'Information we process',
-                this.useChinese ?
-                  '经你同意后，应用读取操作系统版本、设备类型、应用版本和 ODID。应用不收集 OAID，不接入广告、分析或遥测 SDK。' :
+              if (this.useChinese) {
+                this.PolicyRow(
+                  '01',
+                  '我们收集的信息',
+                  '经你同意后，应用读取操作系统版本、设备类型、应用版本和 ODID。应用不收集 OAID，不接入广告、分析或遥测 SDK。',
+                  true,
+                )
+                this.PolicyRow(
+                  '02',
+                  '使用目的与传输范围',
+                  '上述信息用于生成 AnyConnect 客户端身份。仅当你主动连接时，ODID 才会作为终端标识提供给你配置的 VPN 网关；不会上传到 H-OpenConnect 自有服务器。',
+                  true,
+                )
+                this.PolicyRow(
+                  '03',
+                  '本地数据',
+                  '连接配置和凭据保存在应用私有目录，并排除在系统备份之外。诊断日志默认关闭，仅在你主动开启后写入本地。',
+                  true,
+                )
+                this.PolicyRow(
+                  '04',
+                  '你的选择',
+                  '你可以拒绝并退出应用。接受后，可在“更多 > 关于”的隐私章节随时查看数据处理说明；清除应用数据会撤回已保存的同意。',
+                  true,
+                )
+                this.PolicyRow(
+                  '05',
+                  '联系我们',
+                  '如有隐私问题，请通过 github.com/harmony-contrib/h-openconnect 联系项目维护者。政策版本：2026-08-27。',
+                  false,
+                )
+              } else {
+                this.PolicyRow(
+                  '01',
+                  'Information we process',
                   'After you consent, the app reads the operating system version, device type, app version, and ODID. It does not collect OAID or include advertising, analytics, or telemetry SDKs.',
-                true,
-              )
-              this.PolicyRow(
-                '02',
-                this.useChinese ? '使用目的与传输范围' : 'Purpose and transfer scope',
-                this.useChinese ?
-                  '上述信息用于生成 AnyConnect 客户端身份。仅当你主动连接时，ODID 才会作为终端标识提供给你配置的 VPN 网关；不会上传到 H-OpenConnect 自有服务器。' :
+                  true,
+                )
+                this.PolicyRow(
+                  '02',
+                  'Purpose and transfer scope',
                   'This information forms the AnyConnect client identity. Only when you connect is ODID provided as a terminal identifier to the VPN gateway you configured. It is not uploaded to an H-OpenConnect server.',
-                true,
-              )
-              this.PolicyRow(
-                '03',
-                this.useChinese ? '本地数据' : 'Local data',
-                this.useChinese ?
-                  '连接配置和凭据保存在应用私有目录，并排除在系统备份之外。诊断日志默认关闭，仅在你主动开启后写入本地。' :
+                  true,
+                )
+                this.PolicyRow(
+                  '03',
+                  'Local data',
                   'Connection profiles and credentials stay in the app-private directory and are excluded from system backup. Diagnostic logging is off by default and writes locally only after you enable it.',
-                true,
-              )
-              this.PolicyRow(
-                '04',
-                this.useChinese ? '你的选择' : 'Your choice',
-                this.useChinese ?
-                  '你可以拒绝并退出应用。接受后，可在“更多 > 关于”的隐私章节随时查看数据处理说明；清除应用数据会撤回已保存的同意。' :
+                  true,
+                )
+                this.PolicyRow(
+                  '04',
+                  'Your choice',
                   'You may decline and exit. After accepting, you can review data handling under More > About. Clearing the app data withdraws the saved consent.',
-                true,
-              )
-              this.PolicyRow(
-                '05',
-                this.useChinese ? '联系我们' : 'Contact',
-                this.useChinese ?
-                  '如有隐私问题，请通过 github.com/harmony-contrib/h-openconnect 联系项目维护者。政策版本：2026-08-27。' :
+                  true,
+                )
+                this.PolicyRow(
+                  '05',
+                  'Contact',
                   'For privacy questions, contact the maintainers at github.com/harmony-contrib/h-openconnect. Policy version: 2026-08-27.',
-                false,
-              )
+                  false,
+                )
+              }
             }
             .width('100%')
             .margin({ top: 14, bottom: 18 })
@@ -199,22 +240,28 @@ struct Index {
         .backgroundColor(this.privacyBackgroundColor())
 
         Row({ space: 12 }) {
-          Button(this.useChinese ? '不同意并退出' : 'Decline and exit')
+          Button() {
+            Text(this.useChinese ? '不同意并退出' : 'Decline and exit')
+              .fontSize(15)
+              .fontWeight(FontWeight.Medium)
+              .fontColor(this.primaryTextColor())
+          }
             .type(ButtonType.Normal)
-            .fontSize(15)
-            .fontWeight(FontWeight.Medium)
-            .fontColor(this.primaryTextColor())
+            .padding(0)
             .backgroundColor(this.surfaceColor())
             .border({ width: 1, color: this.lineColor() })
             .borderRadius(10)
             .layoutWeight(1)
             .height(48)
             .onClick(() => this.declineAndExit())
-          Button(this.useChinese ? '同意并继续' : 'Agree and continue')
+          Button() {
+            Text(this.useChinese ? '同意并继续' : 'Agree and continue')
+              .fontSize(15)
+              .fontWeight(FontWeight.Bold)
+              .fontColor(Color.White)
+          }
             .type(ButtonType.Normal)
-            .fontSize(15)
-            .fontWeight(FontWeight.Bold)
-            .fontColor(Color.White)
+            .padding(0)
             .backgroundColor(this.accentColor())
             .borderRadius(10)
             .layoutWeight(1)

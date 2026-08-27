@@ -52,3 +52,25 @@ fn startup_and_vpn_extension_share_the_versioned_consent_gate() {
     let accepted_branch = section(build, "if (this.privacyAccepted)", "} else");
     assert!(accepted_branch.contains("DefaultXComponent"));
 }
+
+#[test]
+fn privacy_notice_language_switch_does_not_grant_consent() {
+    let toggle = section(
+        INDEX_PAGE,
+        "private togglePrivacyLanguage",
+        "private agreeAndContinue",
+    );
+    assert!(toggle.contains("this.useChinese = !this.useChinese"));
+    assert!(!toggle.contains("grantPrivacyConsent"));
+    assert!(!toggle.contains("configureNativePlatformIdentityIfConsented"));
+
+    let build = section(INDEX_PAGE, "  build()", "  @Builder");
+    assert!(build.contains("Text(this.useChinese ? 'EN' : '中')"));
+    assert!(build.contains(".padding(0)"));
+    assert!(build.contains(".onClick(() => this.togglePrivacyLanguage())"));
+    assert!(build.contains("if (this.useChinese) {"));
+    assert!(build.contains("'我们收集的信息'"));
+    assert!(build.contains("'Information we process'"));
+    assert!(build.contains("Text(this.useChinese ? '不同意并退出' : 'Decline and exit')"));
+    assert!(build.contains("Text(this.useChinese ? '同意并继续' : 'Agree and continue')"));
+}
