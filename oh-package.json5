@@ -1,6 +1,6 @@
 {
   "modelVersion": "6.1.0",
-  "description": "H-OpenConnect VPN client for HarmonyOS",
+  "description": "H-OpenConnect client for HarmonyOS",
   "dependencies": {
   },
   "devDependencies": {

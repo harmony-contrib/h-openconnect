@@ -1,14 +1,14 @@
 mod pages;
 mod route;
 
+use crate::bridge;
 use crate::i18n::{tr, translate_ui};
 use crate::locale::UiLocale;
 use crate::log_filter::{matches_log_filter_normalized, normalize_log_query, LogLevelFilter};
 use crate::model::{
-    format_bytes, format_duration, AuthMethod, ConnectionLifecycle, ProtocolKind, SoftwareToken,
-    SplitTunnelMode, VpnConnection,
+    format_bytes, format_duration, sanitize_display_text, AuthMethod, ConnectionLifecycle,
+    ProtocolKind, SoftwareToken, SplitTunnelMode, VpnConnection,
 };
-use crate::bridge;
 use crate::state::{reduce, Action, Command, LanguagePreference, State, ThemePreference};
 use crate::time_format;
 use arkit::dioxus_core::EventHandler;

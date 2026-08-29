@@ -58,11 +58,10 @@ Connection profiles and credentials are stored in the application-private
 directory with restricted permissions and are excluded from HarmonyOS backup.
 Diagnostic recording is disabled by default and writes local daily archives
 only after the user enables it. H-OpenConnect does not contain analytics or
-telemetry upload code; network requests are initiated for the VPN gateways and
-authentication services configured by the user. After the current privacy
-policy is accepted, the app reads the HarmonyOS ODID and supplies it as the
-AnyConnect terminal identifier only to a VPN gateway the user actively
-connects to. The app does not collect OAID.
+telemetry upload code; network requests are initiated for the gateways and
+authentication services configured by the user. The app reads the HarmonyOS
+ODID and supplies it as the AnyConnect terminal identifier only to a gateway
+the user actively connects to. The app does not collect OAID.
 
 ## Trademarks
 

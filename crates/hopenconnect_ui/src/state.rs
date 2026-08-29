@@ -1,11 +1,11 @@
+use crate::bridge;
 use crate::i18n::{tr, translate_ui};
 use crate::locale::UiLocale;
 use crate::model::{
-    AuthChallengeReply, AuthFieldChoice, AuthFieldKey, AuthFieldValue, AuthMethod,
-    ConnectionLifecycle, NetworkSnapshot, ProtocolKind, SessionSnapshot, SessionStats,
+    sanitize_display_text, AuthChallengeReply, AuthFieldChoice, AuthFieldKey, AuthFieldValue,
+    AuthMethod, ConnectionLifecycle, NetworkSnapshot, ProtocolKind, SessionSnapshot, SessionStats,
     VpnConnection,
 };
-use crate::bridge;
 use hopenconnect_core::{shared_engine, ConnectRequest, LogRecordingStatus};
 use std::collections::HashMap;
 use std::future::Future;
@@ -378,6 +378,7 @@ impl State {
     /// Key-status toast only (connected / failed / save / validation). Max 2.
     fn push_toast(&mut self, message: impl Into<String>) {
         let message = message.into();
+        let message = sanitize_display_text(&message);
         let trimmed = message.trim();
         if trimmed.is_empty() {
             return;

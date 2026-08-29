@@ -106,7 +106,7 @@ about-privacy = Privacy
 about-privacy-storage = Connection profiles and credentials stay in the app-private directory and are excluded from system backup.
 about-privacy-logs = Diagnostic recording is off by default and writes local daily archives only after you enable it.
 about-privacy-no-telemetry = The app contains no analytics or telemetry upload; network requests are initiated by your configured gateway and authentication flow.
-about-privacy-device-id = After privacy consent, the app reads ODID and provides it as a terminal identifier only to the VPN gateway you actively connect to. The app does not collect OAID.
+about-privacy-device-id = The app reads ODID and provides it as a terminal identifier only to the gateway you actively connect to. The app does not collect OAID.
 about-disclaimer = H-OpenConnect is an independent open-source project and is not affiliated with or endorsed by Cisco; related names and trademarks belong to their respective owners.
 
 # --- Home ---

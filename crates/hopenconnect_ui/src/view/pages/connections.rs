@@ -370,7 +370,7 @@ pub(crate) fn connection_editor_page(state: Signal<State>, id: String) -> Elemen
                                     }
                                 } else if let Some(error) = group_discovery_error.clone() {
                                     text {
-                                        content: error,
+                                        content: sanitize_display_text(&error),
                                         margin_top: 6.0,
                                         font_size: 11.0,
                                         max_lines: 2_i32,

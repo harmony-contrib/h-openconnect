@@ -91,7 +91,7 @@ async fn engine_connect(profile: VpnConnection, dry_run: bool) -> Result<Session
         Err(err) => {
             let _ = engine.set_platform_vpn_failed(err.clone());
             Err(format!(
-                "{err} (VPN extension callback missing — real connect needs platform shell)"
+                "{err} (connection callback missing — real connect needs platform shell)"
             ))
         }
     }

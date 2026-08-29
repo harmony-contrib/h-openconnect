@@ -106,7 +106,7 @@ about-privacy = 隐私
 about-privacy-storage = 连接配置与凭据保存在应用私有目录，并排除在系统备份之外。
 about-privacy-logs = 诊断日志默认关闭，仅在主动开启后写入本地按日归档。
 about-privacy-no-telemetry = 应用不包含分析或遥测上传；网络请求由你配置的网关与认证流程触发。
-about-privacy-device-id = 同意隐私政策后，应用读取 ODID；仅在主动连接时作为终端标识提供给你配置的 VPN 网关。应用不收集 OAID。
+about-privacy-device-id = 应用读取 ODID；仅在主动连接时作为终端标识提供给你配置的网关。应用不收集 OAID。
 about-disclaimer = H-OpenConnect 是独立开源项目，与 Cisco 无隶属或背书关系；相关名称与商标归其各自所有者。
 
 # --- Home ---

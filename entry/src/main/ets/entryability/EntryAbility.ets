@@ -6,7 +6,7 @@ import { UrlPlugin } from '@ohos-rs/ability-plugin-url';
 import window from '@ohos.window';
 import hopenconnectUi from 'libhopenconnect_ui.so';
 import { describeError } from '../common/Errors';
-import { configureNativePlatformIdentityIfConsented } from '../common/PlatformIdentity';
+import { configureNativePlatformIdentity } from '../common/PlatformIdentity';
 import { setHOpenBundleName } from '../vpnability/VpnConfig';
 import { CertFilePlugin } from '../plugins/CertFilePlugin';
 import { ColorModePlugin } from '../plugins/ColorModePlugin';
@@ -47,7 +47,7 @@ export default class EntryAbility extends NativeAbility {
   private requestStartVpn(optionsJson: string): Promise<void> {
     const plugin = this.vpnPlugin;
     if (plugin === undefined) {
-      return Promise.reject(new Error('VPN plugin is not attached to the active Ability session'));
+      return Promise.reject(new Error('Connection plugin is not attached to the active Ability session'));
     }
     return plugin.requestStartVpn(optionsJson);
   }
@@ -92,7 +92,7 @@ export default class EntryAbility extends NativeAbility {
   public async onCreate(want: Want, launchParam: AbilityConstant.LaunchParam): Promise<void> {
     try {
       this.configureNativeHome();
-      configureNativePlatformIdentityIfConsented(this.context, hopenconnectUi);
+      configureNativePlatformIdentity(this.context, hopenconnectUi);
       this.configureNativeLocale();
       this.configureNativeAppearance();
     } catch (err) {

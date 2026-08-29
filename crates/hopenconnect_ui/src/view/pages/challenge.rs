@@ -7,14 +7,20 @@ use crate::model::{AuthChallenge, AuthFieldKind};
 /// reclassifying names such as `password`, `answer`, or `secondary_password`.
 pub(crate) fn auth_challenge_overlay(state: Signal<State>, challenge: AuthChallenge) -> Element {
     let locale = state.read().locale;
-    let title = challenge
-        .message
-        .clone()
-        .filter(|m| !m.trim().is_empty())
-        .or_else(|| challenge.banner.clone().filter(|m| !m.trim().is_empty()))
-        .unwrap_or_else(|| translate_ui(locale, tr::challenge_required()));
+    let title = sanitize_display_text(
+        &challenge
+            .message
+            .clone()
+            .filter(|m| !m.trim().is_empty())
+            .or_else(|| challenge.banner.clone().filter(|m| !m.trim().is_empty()))
+            .unwrap_or_else(|| translate_ui(locale, tr::challenge_required())),
+    );
     let subtitle = translate_ui(locale, tr::challenge_round(challenge.round.to_string()));
-    let error = challenge.error.clone().filter(|e| !e.trim().is_empty());
+    let error = challenge
+        .error
+        .clone()
+        .filter(|e| !e.trim().is_empty())
+        .map(|error| sanitize_display_text(&error));
     let values = state.read().challenge_values.clone();
     // Show every non-hidden field, including Unknown (OTP / 动态口令).
     let fields: Vec<_> = challenge

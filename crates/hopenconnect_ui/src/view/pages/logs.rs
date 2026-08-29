@@ -54,6 +54,7 @@ pub(crate) fn diagnostics_page(state: Signal<State>) -> Element {
         .rev()
         .cloned()
         .map(|log| {
+            let message = sanitize_display_text(&log.message);
             let color = match log.level.to_ascii_lowercase().as_str() {
                 "error" => danger(),
                 "warning" | "warn" => warning(),
@@ -66,8 +67,8 @@ pub(crate) fn diagnostics_page(state: Signal<State>) -> Element {
                     log.level.to_uppercase(),
                     time_format::format_unix_seconds(&log.timestamp).unwrap_or(log.timestamp),
                 ),
-                preview: truncate_text(&log.message.replace(['\n', '\r'], " "), 150),
-                message: log.message,
+                preview: truncate_text(&message.replace(['\n', '\r'], " "), 150),
+                message,
                 color,
             }
         })

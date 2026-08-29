@@ -8,6 +8,25 @@ pub use hopenconnect_core::{
     NetworkSnapshot, ProtocolKind, SessionSnapshot, SessionStats, SoftwareToken, SplitTunnelMode,
 };
 
+/// Keep app-generated and remote diagnostic text aligned with the product UI
+/// vocabulary before it reaches a visible error, toast, challenge, or log row.
+pub fn sanitize_display_text(text: &str) -> String {
+    let normalized = text.to_ascii_lowercase();
+    if !normalized.contains("vpn") {
+        return text.to_owned();
+    }
+
+    let mut sanitized = String::with_capacity(text.len());
+    let mut copied_until = 0;
+    for (start, _) in normalized.match_indices("vpn") {
+        sanitized.push_str(&text[copied_until..start]);
+        sanitized.push_str("connection");
+        copied_until = start + 3;
+    }
+    sanitized.push_str(&text[copied_until..]);
+    sanitized
+}
+
 pub fn format_bytes(bytes: u64) -> String {
     const UNITS: [&str; 5] = ["B", "KB", "MB", "GB", "TB"];
     let mut value = bytes as f64;

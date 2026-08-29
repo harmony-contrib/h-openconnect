@@ -98,7 +98,7 @@ pub(crate) fn home_page(state: Signal<State>) -> Element {
                 }
                 if let Some(error) = current.snapshot.last_error.clone() {
                     text {
-                        content: error,
+                        content: sanitize_display_text(&error),
                         margin_top: 8.0,
                         font_size: 12.0,
                         font_color: danger(),
