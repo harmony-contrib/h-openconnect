@@ -150,14 +150,14 @@ impl SplitTunnelMode {
     pub fn as_label(self) -> &'static str {
         match self {
             Self::Auto => "Auto",
-            Self::OnVpnDns => "Split + VPN DNS",
+            Self::OnVpnDns => "Split + tunnel DNS",
             Self::OnUplinkDns => "Split + uplink DNS",
         }
     }
 
     pub fn from_label(label: &str) -> Self {
         match label.to_ascii_lowercase().as_str() {
-            "on_vpn_dns" | "split + vpn dns" | "onvpndns" => Self::OnVpnDns,
+            "on_vpn_dns" | "split + vpn dns" | "split + tunnel dns" | "onvpndns" => Self::OnVpnDns,
             "on_uplink_dns" | "split + uplink dns" | "onuplinkdns" => Self::OnUplinkDns,
             _ => Self::Auto,
         }

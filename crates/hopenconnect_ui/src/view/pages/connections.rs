@@ -306,7 +306,7 @@ pub(crate) fn connection_editor_page(state: Signal<State>, id: String) -> Elemen
                             Input {
                                 value: Some(draft.server.clone()),
                                 width: Some("100%".to_owned()),
-                                placeholder: Some("vpn.example.com".to_owned()),
+                                placeholder: Some("gateway.example.com".to_owned()),
                                 on_change: move |value| dispatch(state, Action::SetDraftServer(value)),
                             }
                         }

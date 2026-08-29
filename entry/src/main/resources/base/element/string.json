@@ -2,7 +2,7 @@
   "string": [
     {
       "name": "module_desc",
-      "value": "H-OpenConnect secure VPN client"
+      "value": "H-OpenConnect secure remote access client"
     },
     {
       "name": "EntryAbility_desc",
@@ -14,7 +14,7 @@
     },
     {
       "name": "grant_internet",
-      "value": "H-OpenConnect needs network access to establish VPN tunnels."
+      "value": "H-OpenConnect needs network access to establish secure tunnels."
     }
   ]
 }
