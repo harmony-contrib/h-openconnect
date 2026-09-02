@@ -285,156 +285,257 @@ pub(crate) fn connection_editor_page(state: Signal<State>, id: String) -> Elemen
         column {
             width: "100%",
             align_items: "stretch",
-            {section_label(translate_ui(current.locale, tr::basic()))}
-            {card(
-                if id.is_empty() { translate_ui(current.locale, tr::add_connection()) } else { translate_ui(current.locale, tr::edit_connection()) },
-                None,
-                rsx! {
+            Form {
+                surface: false,
+                submit_label: String::new(),
+                FormItem {
+                    label: translate_ui(current.locale, tr::name()),
+                    Input {
+                        value: Some(draft.name.clone()),
+                        width: Some("100%".to_owned()),
+                        click_to_focus: true,
+                        on_change: move |value| dispatch(state, Action::SetDraftName(value)),
+                    }
+                }
+                FormItem {
+                    label: translate_ui(current.locale, tr::server()),
+                    Input {
+                        value: Some(draft.server.clone()),
+                        width: Some("100%".to_owned()),
+                        placeholder: Some("gateway.example.com".to_owned()),
+                        click_to_focus: true,
+                        on_change: move |value| dispatch(state, Action::SetDraftServer(value)),
+                    }
+                }
+                FormItem {
+                    label: translate_ui(current.locale, tr::group()),
+                    column {
+                        width: "100%",
+                        align_items: "stretch",
+                        if !group_choices.is_empty() {
+                            {
+                                let choices_for_handler = group_choices.clone();
+                                let options = group_options.clone();
+                                let current = selected_group.clone();
+                                let default_current = current.clone();
+                                rsx! {
+                                    Select {
+                                        options,
+                                        selected: Some(current),
+                                        default_selected: default_current,
+                                        open: None,
+                                        default_open: false,
+                                        on_open_change: None,
+                                        on_select: Some(EventHandler::new(move |label: String| {
+                                            if let Some(choice) = choices_for_handler
+                                                .iter()
+                                                .find(|choice| choice.label == label)
+                                            {
+                                                dispatch(
+                                                    state,
+                                                    Action::SetDraftGroup(choice.name.clone()),
+                                                );
+                                            }
+                                        })),
+                                    }
+                                }
+                            }
+                        } else {
+                            Input {
+                                value: Some(draft.group.clone()),
+                                width: Some("100%".to_owned()),
+                                placeholder: Some(if group_discovery_loading {
+                                    translate_ui(current.locale, tr::conn_fetching_groups())
+                                } else {
+                                    "Employees".to_owned()
+                                }),
+                                disabled: group_discovery_loading,
+                                click_to_focus: true,
+                                on_change: move |value| dispatch(state, Action::SetDraftGroup(value)),
+                            }
+                        }
+                        if group_discovery_loading {
+                            row {
+                                margin_top: 6.0,
+                                align_items: "center",
+                                Spinner { size: 14.0, color: Some(subtle()) }
+                                text {
+                                    content: translate_ui(current.locale, tr::conn_reading_groups()),
+                                    margin_left: 6.0,
+                                    font_size: 12.0,
+                                    font_color: subtle(),
+                                }
+                            }
+                        } else if let Some(error) = group_discovery_error.clone() {
+                            text {
+                                content: sanitize_display_text(&error),
+                                margin_top: 6.0,
+                                font_size: 11.0,
+                                max_lines: 2_i32,
+                                text_overflow: "ellipsis",
+                                font_color: subtle(),
+                            }
+                        }
+                    }
+                }
+                FormItem {
+                    label: translate_ui(current.locale, tr::auth_method()),
+                    Select {
+                        options: auth_options.clone(),
+                        selected: Some(selected_auth.clone()),
+                        default_selected: selected_auth.clone(),
+                        open: None,
+                        default_open: false,
+                        on_open_change: None,
+                        on_select: Some(EventHandler::new(move |value: String| {
+                            let method = if value == auth_password_opt {
+                                AuthMethod::Password
+                            } else if value == auth_certificate_opt {
+                                AuthMethod::Certificate
+                            } else if value == auth_password_cert_opt {
+                                AuthMethod::PasswordAndCertificate
+                            } else {
+                                AuthMethod::Saml
+                            };
+                            dispatch(state, Action::SetDraftAuthMethod(method));
+                        })),
+                    }
+                }
+                if show_username {
+                    FormItem {
+                        label: translate_ui(current.locale, tr::username()),
+                        Input {
+                            value: Some(draft.username.clone()),
+                            width: Some("100%".to_owned()),
+                            click_to_focus: true,
+                            on_change: move |value| dispatch(state, Action::SetDraftUsername(value)),
+                        }
+                    }
+                }
+                if show_password {
+                    FormItem {
+                        label: translate_ui(current.locale, tr::password()),
+                        Input {
+                            value: Some(draft.password.clone()),
+                            width: Some("100%".to_owned()),
+                            mode: InputMode::Password,
+                            click_to_focus: true,
+                            on_change: move |value| dispatch(state, Action::SetDraftPassword(value)),
+                        }
+                    }
+                }
+                if show_certificate {
+                    FormItem {
+                        label: translate_ui(current.locale, tr::certificate()),
+                        column {
+                            width: "100%",
+                            align_items: "stretch",
+                            Input {
+                                value: Some(draft.certificate.clone()),
+                                width: Some("100%".to_owned()),
+                                placeholder: Some(translate_ui(current.locale, tr::conn_cert_path_placeholder())),
+                                click_to_focus: true,
+                                on_change: move |value| dispatch(state, Action::SetDraftCertificate(value)),
+                            }
+                            row {
+                                width: "100%",
+                                margin_top: 8.0,
+                                justify_content: "end",
+                                FlatButton {
+                                    variant: FlatButtonVariant::Outline,
+                                    size: ButtonSize::Sm,
+                                    onclick: move |_| {
+                                        dispatch(
+                                            state,
+                                            Action::PickCertFile(
+                                                crate::bridge::CertFileKind::Certificate,
+                                            ),
+                                        );
+                                    },
+                                    {arkit::icon("folder-open", 14.0, accent())}
+                                    text {
+                                        content: translate_ui(current.locale, tr::conn_browse()),
+                                        margin_left: 6.0,
+                                        font_size: 13.0,
+                                        font_color: accent(),
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                if matches!(draft.auth_method, AuthMethod::Saml) {
+                    {switch_row(
+                        translate_ui(current.locale, tr::external_browser()),
+                        translate_ui(current.locale, tr::conn_saml_login()),
+                        draft.external_browser_auth,
+                        EventHandler::new(move |value| {
+                            dispatch(state, Action::SetDraftExternalBrowserAuth(value));
+                        }),
+                    )}
+                }
+                {switch_row(
+                    translate_ui(current.locale, tr::favorite()),
+                    translate_ui(current.locale, tr::conn_pin_top()),
+                    draft.favorite,
+                    EventHandler::new(move |value| {
+                        dispatch(state, Action::SetDraftFavorite(value));
+                    }),
+                )}
+                {switch_row(
+                    translate_ui(current.locale, tr::force_global()),
+                    translate_ui(current.locale, tr::force_global_desc()),
+                    draft.force_global,
+                    EventHandler::new(move |value| {
+                        dispatch(state, Action::SetDraftForceGlobal(value));
+                    }),
+                )}
+            }
+            row { height: 16.0 }
+            Separator {}
+            row { height: 16.0 }
+            column {
+                width: "100%",
+                align_items: "stretch",
+                {switch_row(
+                    translate_ui(current.locale, tr::conn_show_advanced()),
+                    translate_ui(current.locale, tr::conn_advanced_detail()),
+                    show_advanced,
+                    EventHandler::new(move |value| {
+                        dispatch(state, Action::SetEditorShowAdvanced(value));
+                    }),
+                )}
+                if show_advanced {
+                    row { height: 12.0 }
                     Form {
                         surface: false,
                         submit_label: String::new(),
                         FormItem {
-                            label: translate_ui(current.locale, tr::name()),
-                            Input {
-                                value: Some(draft.name.clone()),
-                                width: Some("100%".to_owned()),
-                                on_change: move |value| dispatch(state, Action::SetDraftName(value)),
-                            }
-                        }
-                        FormItem {
-                            label: translate_ui(current.locale, tr::server()),
-                            Input {
-                                value: Some(draft.server.clone()),
-                                width: Some("100%".to_owned()),
-                                placeholder: Some("gateway.example.com".to_owned()),
-                                on_change: move |value| dispatch(state, Action::SetDraftServer(value)),
-                            }
-                        }
-                        FormItem {
-                            label: translate_ui(current.locale, tr::group()),
-                            column {
-                                width: "100%",
-                                align_items: "stretch",
-                                if !group_choices.is_empty() {
-                                    {
-                                        let choices_for_handler = group_choices.clone();
-                                        let options = group_options.clone();
-                                        let current = selected_group.clone();
-                                        let default_current = current.clone();
-                                        rsx! {
-                                            Select {
-                                                options,
-                                                selected: Some(current),
-                                                default_selected: default_current,
-                                                open: None,
-                                                default_open: false,
-                                                on_open_change: None,
-                                                on_select: Some(EventHandler::new(move |label: String| {
-                                                    if let Some(choice) = choices_for_handler
-                                                        .iter()
-                                                        .find(|choice| choice.label == label)
-                                                    {
-                                                        dispatch(
-                                                            state,
-                                                            Action::SetDraftGroup(choice.name.clone()),
-                                                        );
-                                                    }
-                                                })),
-                                            }
-                                        }
-                                    }
-                                } else {
-                                    Input {
-                                        value: Some(draft.group.clone()),
-                                        width: Some("100%".to_owned()),
-                                        placeholder: Some(if group_discovery_loading {
-                                            translate_ui(current.locale, tr::conn_fetching_groups())
-                                        } else {
-                                            "Employees".to_owned()
-                                        }),
-                                        disabled: group_discovery_loading,
-                                        on_change: move |value| dispatch(state, Action::SetDraftGroup(value)),
-                                    }
-                                }
-                                if group_discovery_loading {
-                                    row {
-                                        margin_top: 6.0,
-                                        align_items: "center",
-                                        Spinner { size: 14.0, color: Some(subtle()) }
-                                        text {
-                                            content: translate_ui(current.locale, tr::conn_reading_groups()),
-                                            margin_left: 6.0,
-                                            font_size: 12.0,
-                                            font_color: subtle(),
-                                        }
-                                    }
-                                } else if let Some(error) = group_discovery_error.clone() {
-                                    text {
-                                        content: sanitize_display_text(&error),
-                                        margin_top: 6.0,
-                                        font_size: 11.0,
-                                        max_lines: 2_i32,
-                                        text_overflow: "ellipsis",
-                                        font_color: subtle(),
-                                    }
-                                }
-                            }
-                        }
-                        FormItem {
-                            label: translate_ui(current.locale, tr::auth_method()),
+                            label: translate_ui(current.locale, tr::protocol()),
                             Select {
-                                options: auth_options.clone(),
-                                selected: Some(selected_auth.clone()),
-                                default_selected: selected_auth.clone(),
+                                options: protocol_options.clone(),
+                                selected: Some(selected_protocol.clone()),
+                                default_selected: selected_protocol.clone(),
                                 open: None,
                                 default_open: false,
                                 on_open_change: None,
                                 on_select: Some(EventHandler::new(move |value: String| {
-                                    let method = if value == auth_password_opt {
-                                        AuthMethod::Password
-                                    } else if value == auth_certificate_opt {
-                                        AuthMethod::Certificate
-                                    } else if value == auth_password_cert_opt {
-                                        AuthMethod::PasswordAndCertificate
-                                    } else {
-                                        AuthMethod::Saml
-                                    };
-                                    dispatch(state, Action::SetDraftAuthMethod(method));
+                                    dispatch(state, Action::SetDraftProtocol(ProtocolKind::from_label(&value)));
                                 })),
-                            }
-                        }
-                        if show_username {
-                            FormItem {
-                                label: translate_ui(current.locale, tr::username()),
-                                Input {
-                                    value: Some(draft.username.clone()),
-                                    width: Some("100%".to_owned()),
-                                    on_change: move |value| dispatch(state, Action::SetDraftUsername(value)),
-                                }
-                            }
-                        }
-                        if show_password {
-                            FormItem {
-                                label: translate_ui(current.locale, tr::password()),
-                                Input {
-                                    value: Some(draft.password.clone()),
-                                    width: Some("100%".to_owned()),
-                                    mode: InputMode::Password,
-                                    on_change: move |value| dispatch(state, Action::SetDraftPassword(value)),
-                                }
                             }
                         }
                         if show_certificate {
                             FormItem {
-                                label: translate_ui(current.locale, tr::certificate()),
+                                label: translate_ui(current.locale, tr::conn_private_key_path()),
                                 column {
                                     width: "100%",
                                     align_items: "stretch",
                                     Input {
-                                        value: Some(draft.certificate.clone()),
+                                        value: Some(draft.private_key.clone()),
                                         width: Some("100%".to_owned()),
-                                        placeholder: Some(translate_ui(current.locale, tr::conn_cert_path_placeholder())),
-                                        on_change: move |value| dispatch(state, Action::SetDraftCertificate(value)),
+                                        placeholder: Some("key.pem".to_owned()),
+                                        click_to_focus: true,
+                                        on_change: move |value| dispatch(state, Action::SetDraftPrivateKey(value)),
                                     }
                                     row {
                                         width: "100%",
@@ -447,7 +548,7 @@ pub(crate) fn connection_editor_page(state: Signal<State>, id: String) -> Elemen
                                                 dispatch(
                                                     state,
                                                     Action::PickCertFile(
-                                                        crate::bridge::CertFileKind::Certificate,
+                                                        crate::bridge::CertFileKind::PrivateKey,
                                                     ),
                                                 );
                                             },
@@ -462,410 +563,324 @@ pub(crate) fn connection_editor_page(state: Signal<State>, id: String) -> Elemen
                                     }
                                 }
                             }
-                        }
-                        if matches!(draft.auth_method, AuthMethod::Saml) {
-                            {switch_row(
-                                translate_ui(current.locale, tr::external_browser()),
-                                translate_ui(current.locale, tr::conn_saml_login()),
-                                draft.external_browser_auth,
-                                EventHandler::new(move |value| {
-                                    dispatch(state, Action::SetDraftExternalBrowserAuth(value));
-                                }),
-                            )}
-                        }
-                        {switch_row(
-                            translate_ui(current.locale, tr::favorite()),
-                            translate_ui(current.locale, tr::conn_pin_top()),
-                            draft.favorite,
-                            EventHandler::new(move |value| {
-                                dispatch(state, Action::SetDraftFavorite(value));
-                            }),
-                        )}
-                        {switch_row(
-                            translate_ui(current.locale, tr::force_global()),
-                            translate_ui(current.locale, tr::force_global_desc()),
-                            draft.force_global,
-                            EventHandler::new(move |value| {
-                                dispatch(state, Action::SetDraftForceGlobal(value));
-                            }),
-                        )}
-                    }
-                }
-            )}
-            row { height: 14.0 }
-            {card(
-                translate_ui(current.locale, tr::conn_advanced()),
-                Some(translate_ui(current.locale, tr::conn_advanced_desc())),
-                rsx! {
-                    column {
-                        width: "100%",
-                        align_items: "stretch",
-                        {switch_row(
-                            translate_ui(current.locale, tr::conn_show_advanced()),
-                            translate_ui(current.locale, tr::conn_advanced_detail()),
-                            show_advanced,
-                            EventHandler::new(move |value| {
-                                dispatch(state, Action::SetEditorShowAdvanced(value));
-                            }),
-                        )}
-                        if show_advanced {
-                            row { height: 12.0 }
-                            Form {
-                                surface: false,
-                                submit_label: String::new(),
-                                FormItem {
-                                    label: translate_ui(current.locale, tr::protocol()),
-                                    Select {
-                                        options: protocol_options.clone(),
-                                        selected: Some(selected_protocol.clone()),
-                                        default_selected: selected_protocol.clone(),
-                                        open: None,
-                                        default_open: false,
-                                        on_open_change: None,
-                                        on_select: Some(EventHandler::new(move |value: String| {
-                                            dispatch(state, Action::SetDraftProtocol(ProtocolKind::from_label(&value)));
-                                        })),
-                                    }
+                            FormItem {
+                                label: translate_ui(current.locale, tr::conn_key_password()),
+                                Input {
+                                    value: Some(draft.key_password.clone()),
+                                    width: Some("100%".to_owned()),
+                                    mode: InputMode::Password,
+                                    click_to_focus: true,
+                                    on_change: move |value| dispatch(state, Action::SetDraftKeyPassword(value)),
                                 }
-                                if show_certificate {
-                                    FormItem {
-                                        label: translate_ui(current.locale, tr::conn_private_key_path()),
-                                        column {
-                                            width: "100%",
-                                            align_items: "stretch",
-                                            Input {
-                                                value: Some(draft.private_key.clone()),
-                                                width: Some("100%".to_owned()),
-                                                placeholder: Some("key.pem".to_owned()),
-                                                on_change: move |value| dispatch(state, Action::SetDraftPrivateKey(value)),
-                                            }
-                                            row {
-                                                width: "100%",
-                                                margin_top: 8.0,
-                                                justify_content: "end",
-                                                FlatButton {
-                                                    variant: FlatButtonVariant::Outline,
-                                                    size: ButtonSize::Sm,
-                                                    onclick: move |_| {
-                                                        dispatch(
-                                                            state,
-                                                            Action::PickCertFile(
-                                                                crate::bridge::CertFileKind::PrivateKey,
-                                                            ),
-                                                        );
-                                                    },
-                                                    {arkit::icon("folder-open", 14.0, accent())}
-                                                    text {
-                                                        content: translate_ui(current.locale, tr::conn_browse()),
-                                                        margin_left: 6.0,
-                                                        font_size: 13.0,
-                                                        font_color: accent(),
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                    FormItem {
-                                        label: translate_ui(current.locale, tr::conn_key_password()),
-                                        Input {
-                                            value: Some(draft.key_password.clone()),
-                                            width: Some("100%".to_owned()),
-                                            mode: InputMode::Password,
-                                            on_change: move |value| dispatch(state, Action::SetDraftKeyPassword(value)),
-                                        }
-                                    }
-                                    FormItem {
-                                        label: translate_ui(current.locale, tr::conn_secondary_cert()),
-                                        Input {
-                                            value: Some(draft.secondary_certificate.clone()),
-                                            width: Some("100%".to_owned()),
-                                            placeholder: Some("user-cert.pem / user.p12".to_owned()),
-                                            on_change: move |value| dispatch(state, Action::SetDraftSecondaryCertificate(value)),
-                                        }
-                                    }
-                                    FormItem {
-                                        label: translate_ui(current.locale, tr::conn_secondary_key()),
-                                        Input {
-                                            value: Some(draft.secondary_private_key.clone()),
-                                            width: Some("100%".to_owned()),
-                                            placeholder: Some("user-key.pem".to_owned()),
-                                            on_change: move |value| dispatch(state, Action::SetDraftSecondaryPrivateKey(value)),
-                                        }
-                                    }
-                                    FormItem {
-                                        label: translate_ui(current.locale, tr::conn_secondary_password()),
-                                        Input {
-                                            value: Some(draft.secondary_key_password.clone()),
-                                            width: Some("100%".to_owned()),
-                                            mode: InputMode::Password,
-                                            on_change: move |value| dispatch(state, Action::SetDraftSecondaryKeyPassword(value)),
-                                        }
-                                    }
+                            }
+                            FormItem {
+                                label: translate_ui(current.locale, tr::conn_secondary_cert()),
+                                Input {
+                                    value: Some(draft.secondary_certificate.clone()),
+                                    width: Some("100%".to_owned()),
+                                    placeholder: Some("user-cert.pem / user.p12".to_owned()),
+                                    click_to_focus: true,
+                                    on_change: move |value| dispatch(state, Action::SetDraftSecondaryCertificate(value)),
                                 }
-                                FormItem {
-                                    label: translate_ui(current.locale, tr::conn_software_token()),
-                                    Select {
-                                        options: vec![token_disabled.clone(), token_securid.clone(), token_totp.clone()],
-                                        selected: Some(selected_token.clone()),
-                                        default_selected: selected_token.clone(),
-                                        open: None,
-                                        default_open: false,
-                                        on_open_change: None,
-                                        on_select: Some(EventHandler::new(move |value: String| {
-                                            dispatch(state, Action::SetDraftSoftwareToken(SoftwareToken::from_label(&value)));
-                                        })),
-                                    }
+                            }
+                            FormItem {
+                                label: translate_ui(current.locale, tr::conn_secondary_key()),
+                                Input {
+                                    value: Some(draft.secondary_private_key.clone()),
+                                    width: Some("100%".to_owned()),
+                                    placeholder: Some("user-key.pem".to_owned()),
+                                    click_to_focus: true,
+                                    on_change: move |value| dispatch(state, Action::SetDraftSecondaryPrivateKey(value)),
                                 }
-                                FormItem {
-                                    label: translate_ui(current.locale, tr::conn_token_string()),
-                                    Input {
-                                        value: Some(draft.token_string.clone()),
-                                        width: Some("100%".to_owned()),
-                                        on_change: move |value| dispatch(state, Action::SetDraftTokenString(value)),
-                                    }
+                            }
+                            FormItem {
+                                label: translate_ui(current.locale, tr::conn_secondary_password()),
+                                Input {
+                                    value: Some(draft.secondary_key_password.clone()),
+                                    width: Some("100%".to_owned()),
+                                    mode: InputMode::Password,
+                                    click_to_focus: true,
+                                    on_change: move |value| dispatch(state, Action::SetDraftSecondaryKeyPassword(value)),
                                 }
-                                FormItem {
-                                    label: translate_ui(current.locale, tr::backup_servers()),
-                                    Textarea {
-                                        value: Some(draft.backup_servers.clone()),
-                                        height: Some(56.0),
-                                        width: Some("100%".to_owned()),
-                                        on_change: move |value| dispatch(state, Action::SetDraftBackupServers(value)),
-                                    }
-                                }
-                                FormItem {
-                                    label: format!("{} ({})", translate_ui(current.locale, tr::mtu_override()), translate_ui(current.locale, tr::mtu_auto())),
-                                    Input {
-                                        value: Some(mtu_value.clone()),
-                                        width: Some("100%".to_owned()),
-                                        placeholder: Some("1400".to_owned()),
-                                        on_change: move |value| dispatch(state, Action::SetDraftMtu(value)),
-                                    }
-                                }
-                                FormItem {
-                                    label: translate_ui(current.locale, tr::conn_ca_cert_path()),
-                                    column {
-                                        width: "100%",
-                                        align_items: "stretch",
-                                        Input {
-                                            value: Some(draft.ca_certificate.clone()),
-                                            width: Some("100%".to_owned()),
-                                            on_change: move |value| dispatch(state, Action::SetDraftCaCertificate(value)),
-                                        }
-                                        row {
-                                            width: "100%",
-                                            margin_top: 8.0,
-                                            justify_content: "end",
-                                            FlatButton {
-                                                variant: FlatButtonVariant::Outline,
-                                                size: ButtonSize::Sm,
-                                                onclick: move |_| {
-                                                    dispatch(
-                                                        state,
-                                                        Action::PickCertFile(
-                                                            crate::bridge::CertFileKind::CaCertificate,
-                                                        ),
-                                                    );
-                                                },
-                                                {arkit::icon("folder-open", 14.0, accent())}
-                                                text {
-                                                    content: translate_ui(current.locale, tr::conn_browse()),
-                                                    margin_left: 6.0,
-                                                    font_size: 13.0,
-                                                    font_color: accent(),
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                                FormItem {
-                                    label: translate_ui(current.locale, tr::conn_split_mode()),
-                                    Select {
-                                        options: vec![split_auto.clone(), split_vpn.clone(), split_uplink.clone()],
-                                        selected: Some(selected_split.clone()),
-                                        default_selected: selected_split.clone(),
-                                        open: None,
-                                        default_open: false,
-                                        on_open_change: None,
-                                        on_select: Some(EventHandler::new(move |value: String| {
-                                            dispatch(state, Action::SetDraftSplitTunnelMode(SplitTunnelMode::from_label(&value)));
-                                        })),
-                                    }
-                                }
-                                FormItem {
-                                    label: translate_ui(current.locale, tr::conn_split_networks()),
-                                    Textarea {
-                                        value: Some(draft.split_tunnel_networks.clone()),
-                                        height: Some(56.0),
-                                        width: Some("100%".to_owned()),
-                                        on_change: move |value| dispatch(state, Action::SetDraftSplitTunnelNetworks(value)),
-                                    }
-                                }
-                                FormItem {
-                                    label: translate_ui(current.locale, tr::conn_reported_os()),
-                                    Input {
-                                        value: Some(draft.reported_os.clone()),
-                                        width: Some("100%".to_owned()),
-                                        placeholder: Some("OpenHarmony".to_owned()),
-                                        on_change: move |value| dispatch(state, Action::SetDraftReportedOs(value)),
-                                    }
-                                }
-                                FormItem {
-                                    label: "SNI".to_owned(),
-                                    Input {
-                                        value: Some(draft.sni.clone()),
-                                        width: Some("100%".to_owned()),
-                                        on_change: move |value| dispatch(state, Action::SetDraftSni(value)),
-                                    }
-                                }
-                                FormItem {
-                                    label: "User-Agent".to_owned(),
-                                    Input {
-                                        value: Some(draft.user_agent.clone()),
-                                        width: Some("100%".to_owned()),
-                                        placeholder: Some(hopenconnect_core::default_user_agent()),
-                                        on_change: move |value| dispatch(state, Action::SetDraftUserAgent(value)),
-                                    }
-                                }
-                                FormItem {
-                                    label: translate_ui(current.locale, tr::conn_client_version()),
-                                    Input {
-                                        value: Some(draft.client_version.clone()),
-                                        width: Some("100%".to_owned()),
-                                        placeholder: Some(hopenconnect_core::default_client_version()),
-                                        on_change: move |value| dispatch(state, Action::SetDraftClientVersion(value)),
-                                    }
-                                }
-                                FormItem {
-                                    label: "DPD (s)".to_owned(),
-                                    Input {
-                                        value: Some(if draft.dpd_seconds == 0 { String::new() } else { draft.dpd_seconds.to_string() }),
-                                        width: Some("100%".to_owned()),
-                                        placeholder: Some("0".to_owned()),
-                                        on_change: move |value| dispatch(state, Action::SetDraftDpdSeconds(value)),
-                                    }
-                                }
-                                FormItem {
-                                    label: "CSD wrapper".to_owned(),
-                                    Input {
-                                        value: Some(draft.csd_wrapper.clone()),
-                                        width: Some("100%".to_owned()),
-                                        on_change: move |value| dispatch(state, Action::SetDraftCsdWrapper(value)),
-                                    }
-                                }
-                                FormItem {
-                                    label: translate_ui(current.locale, tr::conn_http_proxy()),
-                                    Input {
-                                        value: Some(draft.http_proxy.clone()),
-                                        width: Some("100%".to_owned()),
-                                        placeholder: Some("http://proxy.example.com:8080".to_owned()),
-                                        on_change: move |value| dispatch(state, Action::SetDraftHttpProxy(value)),
-                                    }
-                                }
-                                FormItem {
-                                    label: translate_ui(current.locale, tr::conn_cert_pin()),
-                                    Input {
-                                        value: Some(draft.server_cert_hash.clone()),
-                                        width: Some("100%".to_owned()),
-                                        placeholder: Some("pin-sha256:… / sha256:…".to_owned()),
-                                        on_change: move |value| dispatch(state, Action::SetDraftServerCertHash(value)),
-                                    }
-                                }
-                                FormItem {
-                                    label: translate_ui(current.locale, tr::conn_trusted_apps()),
-                                    Textarea {
-                                        value: Some(draft.trusted_applications.clone()),
-                                        height: Some(48.0),
-                                        width: Some("100%".to_owned()),
-                                        on_change: move |value| dispatch(state, Action::SetDraftTrustedApplications(value)),
-                                    }
-                                }
-                                FormItem {
-                                    label: translate_ui(current.locale, tr::conn_blocked_apps()),
-                                    Textarea {
-                                        value: Some(draft.blocked_applications.clone()),
-                                        height: Some(48.0),
-                                        width: Some("100%".to_owned()),
-                                        on_change: move |value| dispatch(state, Action::SetDraftBlockedApplications(value)),
-                                    }
-                                }
-                                {switch_row(
-                                    "DTLS",
-                                    translate_ui(current.locale, tr::conn_dtls()),
-                                    draft.use_dtls,
-                                    EventHandler::new(move |value| {
-                                        dispatch(state, Action::SetDraftUseDtls(value));
-                                    }),
-                                )}
-                                {switch_row(
-                                    "PFS",
-                                    translate_ui(current.locale, tr::conn_pfs()),
-                                    draft.require_pfs,
-                                    EventHandler::new(move |value| {
-                                        dispatch(state, Action::SetDraftRequirePfs(value));
-                                    }),
-                                )}
-                                {switch_row(
-                                    "XML POST",
-                                    translate_ui(current.locale, tr::conn_no_xml_post()),
-                                    draft.disable_xml_post,
-                                    EventHandler::new(move |value| {
-                                        dispatch(state, Action::SetDraftDisableXmlPost(value));
-                                    }),
-                                )}
-                                {switch_row(
-                                    translate_ui(current.locale, tr::strict_cert()),
-                                    translate_ui(current.locale, tr::conn_reject_mismatch()),
-                                    draft.strict_certificate_trust,
-                                    EventHandler::new(move |value| {
-                                        dispatch(state, Action::SetDraftStrictCertificateTrust(value));
-                                    }),
-                                )}
-                                {switch_row(
-                                    translate_ui(current.locale, tr::block_untrusted()),
-                                    translate_ui(current.locale, tr::conn_abort_untrusted()),
-                                    draft.block_untrusted_servers,
-                                    EventHandler::new(move |value| {
-                                        dispatch(state, Action::SetDraftBlockUntrustedServers(value));
-                                    }),
-                                )}
-                                {switch_row(
-                                    translate_ui(current.locale, tr::conn_allow_insecure()),
-                                    translate_ui(current.locale, tr::conn_allow_insecure_desc()),
-                                    draft.allow_insecure_crypto,
-                                    EventHandler::new(move |value| {
-                                        dispatch(state, Action::SetDraftAllowInsecureCrypto(value));
-                                    }),
-                                )}
-                                {switch_row(
-                                    translate_ui(current.locale, tr::local_lan()),
-                                    translate_ui(current.locale, tr::conn_local_lan()),
-                                    draft.allow_local_lan,
-                                    EventHandler::new(move |value| {
-                                        dispatch(state, Action::SetDraftAllowLocalLan(value));
-                                    }),
-                                )}
-                                {switch_row(
-                                    translate_ui(current.locale, tr::connect_on_demand()),
-                                    translate_ui(current.locale, tr::conn_auto_connect()),
-                                    draft.connect_on_demand,
-                                    EventHandler::new(move |value| {
-                                        dispatch(state, Action::SetDraftConnectOnDemand(value));
-                                    }),
-                                )}
-                                {switch_row(
-                                    translate_ui(current.locale, tr::fips_mode()),
-                                    translate_ui(current.locale, tr::conn_fips_unavailable()),
-                                    draft.fips_mode,
-                                    EventHandler::new(move |value| {
-                                        dispatch(state, Action::SetDraftFipsMode(value));
-                                    }),
-                                )}
                             }
                         }
+                        FormItem {
+                            label: translate_ui(current.locale, tr::conn_software_token()),
+                            Select {
+                                options: vec![token_disabled.clone(), token_securid.clone(), token_totp.clone()],
+                                selected: Some(selected_token.clone()),
+                                default_selected: selected_token.clone(),
+                                open: None,
+                                default_open: false,
+                                on_open_change: None,
+                                on_select: Some(EventHandler::new(move |value: String| {
+                                    dispatch(state, Action::SetDraftSoftwareToken(SoftwareToken::from_label(&value)));
+                                })),
+                            }
+                        }
+                        FormItem {
+                            label: translate_ui(current.locale, tr::conn_token_string()),
+                            Input {
+                                value: Some(draft.token_string.clone()),
+                                width: Some("100%".to_owned()),
+                                click_to_focus: true,
+                                on_change: move |value| dispatch(state, Action::SetDraftTokenString(value)),
+                            }
+                        }
+                        FormItem {
+                            label: translate_ui(current.locale, tr::backup_servers()),
+                            Textarea {
+                                value: Some(draft.backup_servers.clone()),
+                                height: Some(56.0),
+                                width: Some("100%".to_owned()),
+                                click_to_focus: true,
+                                on_change: move |value| dispatch(state, Action::SetDraftBackupServers(value)),
+                            }
+                        }
+                        FormItem {
+                            label: format!("{} ({})", translate_ui(current.locale, tr::mtu_override()), translate_ui(current.locale, tr::mtu_auto())),
+                            Input {
+                                value: Some(mtu_value.clone()),
+                                width: Some("100%".to_owned()),
+                                placeholder: Some("1400".to_owned()),
+                                click_to_focus: true,
+                                on_change: move |value| dispatch(state, Action::SetDraftMtu(value)),
+                            }
+                        }
+                        FormItem {
+                            label: translate_ui(current.locale, tr::conn_ca_cert_path()),
+                            column {
+                                width: "100%",
+                                align_items: "stretch",
+                                Input {
+                                    value: Some(draft.ca_certificate.clone()),
+                                    width: Some("100%".to_owned()),
+                                    click_to_focus: true,
+                                    on_change: move |value| dispatch(state, Action::SetDraftCaCertificate(value)),
+                                }
+                                row {
+                                    width: "100%",
+                                    margin_top: 8.0,
+                                    justify_content: "end",
+                                    FlatButton {
+                                        variant: FlatButtonVariant::Outline,
+                                        size: ButtonSize::Sm,
+                                        onclick: move |_| {
+                                            dispatch(
+                                                state,
+                                                Action::PickCertFile(
+                                                    crate::bridge::CertFileKind::CaCertificate,
+                                                ),
+                                            );
+                                        },
+                                        {arkit::icon("folder-open", 14.0, accent())}
+                                        text {
+                                            content: translate_ui(current.locale, tr::conn_browse()),
+                                            margin_left: 6.0,
+                                            font_size: 13.0,
+                                            font_color: accent(),
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        FormItem {
+                            label: translate_ui(current.locale, tr::conn_split_mode()),
+                            Select {
+                                options: vec![split_auto.clone(), split_vpn.clone(), split_uplink.clone()],
+                                selected: Some(selected_split.clone()),
+                                default_selected: selected_split.clone(),
+                                open: None,
+                                default_open: false,
+                                on_open_change: None,
+                                on_select: Some(EventHandler::new(move |value: String| {
+                                    dispatch(state, Action::SetDraftSplitTunnelMode(SplitTunnelMode::from_label(&value)));
+                                })),
+                            }
+                        }
+                        FormItem {
+                            label: translate_ui(current.locale, tr::conn_split_networks()),
+                            Textarea {
+                                value: Some(draft.split_tunnel_networks.clone()),
+                                height: Some(56.0),
+                                width: Some("100%".to_owned()),
+                                click_to_focus: true,
+                                on_change: move |value| dispatch(state, Action::SetDraftSplitTunnelNetworks(value)),
+                            }
+                        }
+                        FormItem {
+                            label: translate_ui(current.locale, tr::conn_reported_os()),
+                            Input {
+                                value: Some(draft.reported_os.clone()),
+                                width: Some("100%".to_owned()),
+                                placeholder: Some("OpenHarmony".to_owned()),
+                                click_to_focus: true,
+                                on_change: move |value| dispatch(state, Action::SetDraftReportedOs(value)),
+                            }
+                        }
+                        FormItem {
+                            label: "SNI".to_owned(),
+                            Input {
+                                value: Some(draft.sni.clone()),
+                                width: Some("100%".to_owned()),
+                                click_to_focus: true,
+                                on_change: move |value| dispatch(state, Action::SetDraftSni(value)),
+                            }
+                        }
+                        FormItem {
+                            label: "User-Agent".to_owned(),
+                            Input {
+                                value: Some(draft.user_agent.clone()),
+                                width: Some("100%".to_owned()),
+                                placeholder: Some(hopenconnect_core::default_user_agent()),
+                                click_to_focus: true,
+                                on_change: move |value| dispatch(state, Action::SetDraftUserAgent(value)),
+                            }
+                        }
+                        FormItem {
+                            label: translate_ui(current.locale, tr::conn_client_version()),
+                            Input {
+                                value: Some(draft.client_version.clone()),
+                                width: Some("100%".to_owned()),
+                                placeholder: Some(hopenconnect_core::default_client_version()),
+                                click_to_focus: true,
+                                on_change: move |value| dispatch(state, Action::SetDraftClientVersion(value)),
+                            }
+                        }
+                        FormItem {
+                            label: "DPD (s)".to_owned(),
+                            Input {
+                                value: Some(if draft.dpd_seconds == 0 { String::new() } else { draft.dpd_seconds.to_string() }),
+                                width: Some("100%".to_owned()),
+                                placeholder: Some("0".to_owned()),
+                                click_to_focus: true,
+                                on_change: move |value| dispatch(state, Action::SetDraftDpdSeconds(value)),
+                            }
+                        }
+                        FormItem {
+                            label: "CSD wrapper".to_owned(),
+                            Input {
+                                value: Some(draft.csd_wrapper.clone()),
+                                width: Some("100%".to_owned()),
+                                click_to_focus: true,
+                                on_change: move |value| dispatch(state, Action::SetDraftCsdWrapper(value)),
+                            }
+                        }
+                        FormItem {
+                            label: translate_ui(current.locale, tr::conn_http_proxy()),
+                            Input {
+                                value: Some(draft.http_proxy.clone()),
+                                width: Some("100%".to_owned()),
+                                placeholder: Some("http://proxy.example.com:8080".to_owned()),
+                                click_to_focus: true,
+                                on_change: move |value| dispatch(state, Action::SetDraftHttpProxy(value)),
+                            }
+                        }
+                        FormItem {
+                            label: translate_ui(current.locale, tr::conn_cert_pin()),
+                            Input {
+                                value: Some(draft.server_cert_hash.clone()),
+                                width: Some("100%".to_owned()),
+                                placeholder: Some("pin-sha256:… / sha256:…".to_owned()),
+                                click_to_focus: true,
+                                on_change: move |value| dispatch(state, Action::SetDraftServerCertHash(value)),
+                            }
+                        }
+                        FormItem {
+                            label: translate_ui(current.locale, tr::conn_trusted_apps()),
+                            Textarea {
+                                value: Some(draft.trusted_applications.clone()),
+                                height: Some(48.0),
+                                width: Some("100%".to_owned()),
+                                click_to_focus: true,
+                                on_change: move |value| dispatch(state, Action::SetDraftTrustedApplications(value)),
+                            }
+                        }
+                        FormItem {
+                            label: translate_ui(current.locale, tr::conn_blocked_apps()),
+                            Textarea {
+                                value: Some(draft.blocked_applications.clone()),
+                                height: Some(48.0),
+                                width: Some("100%".to_owned()),
+                                click_to_focus: true,
+                                on_change: move |value| dispatch(state, Action::SetDraftBlockedApplications(value)),
+                            }
+                        }
+                        {switch_row(
+                            "DTLS",
+                            translate_ui(current.locale, tr::conn_dtls()),
+                            draft.use_dtls,
+                            EventHandler::new(move |value| {
+                                dispatch(state, Action::SetDraftUseDtls(value));
+                            }),
+                        )}
+                        {switch_row(
+                            "PFS",
+                            translate_ui(current.locale, tr::conn_pfs()),
+                            draft.require_pfs,
+                            EventHandler::new(move |value| {
+                                dispatch(state, Action::SetDraftRequirePfs(value));
+                            }),
+                        )}
+                        {switch_row(
+                            "XML POST",
+                            translate_ui(current.locale, tr::conn_no_xml_post()),
+                            draft.disable_xml_post,
+                            EventHandler::new(move |value| {
+                                dispatch(state, Action::SetDraftDisableXmlPost(value));
+                            }),
+                        )}
+                        {switch_row(
+                            translate_ui(current.locale, tr::strict_cert()),
+                            translate_ui(current.locale, tr::conn_reject_mismatch()),
+                            draft.strict_certificate_trust,
+                            EventHandler::new(move |value| {
+                                dispatch(state, Action::SetDraftStrictCertificateTrust(value));
+                            }),
+                        )}
+                        {switch_row(
+                            translate_ui(current.locale, tr::block_untrusted()),
+                            translate_ui(current.locale, tr::conn_abort_untrusted()),
+                            draft.block_untrusted_servers,
+                            EventHandler::new(move |value| {
+                                dispatch(state, Action::SetDraftBlockUntrustedServers(value));
+                            }),
+                        )}
+                        {switch_row(
+                            translate_ui(current.locale, tr::conn_allow_insecure()),
+                            translate_ui(current.locale, tr::conn_allow_insecure_desc()),
+                            draft.allow_insecure_crypto,
+                            EventHandler::new(move |value| {
+                                dispatch(state, Action::SetDraftAllowInsecureCrypto(value));
+                            }),
+                        )}
+                        {switch_row(
+                            translate_ui(current.locale, tr::local_lan()),
+                            translate_ui(current.locale, tr::conn_local_lan()),
+                            draft.allow_local_lan,
+                            EventHandler::new(move |value| {
+                                dispatch(state, Action::SetDraftAllowLocalLan(value));
+                            }),
+                        )}
+                        {switch_row(
+                            translate_ui(current.locale, tr::connect_on_demand()),
+                            translate_ui(current.locale, tr::conn_auto_connect()),
+                            draft.connect_on_demand,
+                            EventHandler::new(move |value| {
+                                dispatch(state, Action::SetDraftConnectOnDemand(value));
+                            }),
+                        )}
+                        {switch_row(
+                            translate_ui(current.locale, tr::fips_mode()),
+                            translate_ui(current.locale, tr::conn_fips_unavailable()),
+                            draft.fips_mode,
+                            EventHandler::new(move |value| {
+                                dispatch(state, Action::SetDraftFipsMode(value));
+                            }),
+                        )}
                     }
                 }
-            )}
+            }
             row { height: 8.0 }
         }
     };
