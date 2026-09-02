@@ -150,7 +150,7 @@ if [ "$SIGN_HAP" = "1" ]; then
     echo "Expected signed HAP was not generated: $SIGNED_HAP_PATH" >&2
     exit 1
   fi
-  if [ ! "$SIGNED_HAP_PATH" -nt "$HAP_PATH" ]; then
+  if [ -z "$(find "$SIGNED_HAP_PATH" -newer "$HAP_PATH" -print)" ]; then
     echo "Signed HAP is stale relative to the unsigned build: $SIGNED_HAP_PATH" >&2
     exit 1
   fi
