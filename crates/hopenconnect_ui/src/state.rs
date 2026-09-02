@@ -61,9 +61,9 @@ pub enum ThemePreference {
 impl ThemePreference {
     pub fn platform_color_mode(self) -> i32 {
         match self {
-            Self::System => 0,
+            Self::System => -1,
+            Self::Dark => 0,
             Self::Light => 1,
-            Self::Dark => 2,
         }
     }
 
@@ -1088,5 +1088,5 @@ fn detect_system_dark() -> bool {
         .or_else(|_| std::env::var("HMETA_SYSTEM_COLOR_MODE"))
         .ok()
         .and_then(|value| value.parse::<i32>().ok())
-        == Some(2)
+        == Some(0)
 }
