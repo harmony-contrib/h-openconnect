@@ -11,6 +11,7 @@
 mod cert_file;
 mod color_mode;
 mod export;
+mod safe_area;
 mod vpn;
 
 use std::sync::{LazyLock, RwLock};
@@ -21,6 +22,7 @@ use openharmony_ability_plugin_url::UrlExt;
 pub(crate) use self::cert_file::{CertFileRequest, CertFileResponse, HOpenCertFileBridgePlugin};
 pub(crate) use self::color_mode::{ColorModeRequest, ColorModeResponse, HOpenColorModeBridgePlugin};
 pub(crate) use self::export::{ExportTextRequest, ExportTextResponse, HOpenExportBridgePlugin};
+pub(crate) use self::safe_area::{initial_safe_area, InitialSafeArea, HOpenSafeAreaBridgePlugin};
 pub(crate) use self::vpn::{VpnStartRequest, VpnStartResponse, VpnStopRequest, VpnStopResponse, HOpenVpnBridgePlugin};
 
 /// Rust-side handle of the current Ability session, installed by `init`.

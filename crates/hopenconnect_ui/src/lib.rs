@@ -20,10 +20,12 @@ mod view;
     bridge::HOpenColorModeBridgePlugin,
     bridge::HOpenExportBridgePlugin,
     bridge::HOpenCertFileBridgePlugin,
+    bridge::HOpenSafeAreaBridgePlugin,
 ])]
 fn app(handle: OpenHarmonyApp) -> Element {
+    let initial_safe_area = bridge::initial_safe_area(&handle);
     bridge::set_app(handle);
-    view::App()
+    view::App(initial_safe_area)
 }
 
 fn to_napi_error(err: impl std::fmt::Display) -> Error {

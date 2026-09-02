@@ -298,8 +298,9 @@ fn FlatDialog(props: FlatDialogProps) -> Element {
     }
 }
 
-#[component]
-pub(crate) fn App() -> Element {
+#[allow(non_snake_case)]
+pub(crate) fn App(initial_safe_area: bridge::InitialSafeArea) -> Element {
+    use_context_provider(move || initial_safe_area);
     let state = use_signal(State::new);
     let _state = use_context_provider(move || state);
     let runtime = arkit::use_runtime_handle();
@@ -334,6 +335,13 @@ pub(crate) fn App() -> Element {
 
 #[component]
 fn AppShell() -> Element {
+    let initial_safe_area = use_context::<bridge::InitialSafeArea>().0;
+    let window_metrics = arkit::use_window_metrics();
+    let safe_area = if window_metrics.content_rect.is_empty() {
+        initial_safe_area
+    } else {
+        window_metrics.safe_area
+    };
     let state = use_context::<Signal<State>>();
     let current = state.read().clone();
     let route = use_route::<Route>();
@@ -362,6 +370,10 @@ fn AppShell() -> Element {
             height: "100%",
             background_color: bg(),
             alignment: "top_start",
+            padding_top: safe_area.top,
+            padding_right: safe_area.right,
+            padding_bottom: safe_area.bottom,
+            padding_left: safe_area.left,
             column {
                 width: "100%",
                 height: "100%",

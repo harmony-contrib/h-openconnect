@@ -11,6 +11,7 @@ import { setHOpenBundleName } from '../vpnability/VpnConfig';
 import { CertFilePlugin } from '../plugins/CertFilePlugin';
 import { ColorModePlugin } from '../plugins/ColorModePlugin';
 import { ExportPlugin } from '../plugins/ExportPlugin';
+import { SafeAreaPlugin } from '../plugins/SafeAreaPlugin';
 import { VpnPlugin } from '../plugins/VpnPlugin';
 
 const LOG_DOMAIN: number = 0x0000;
@@ -27,6 +28,7 @@ export default class EntryAbility extends NativeAbility {
   public defaultPage: boolean = false;
 
   private vpnPlugin?: VpnPlugin;
+  private safeAreaPlugin?: SafeAreaPlugin;
 
   public bridgePlugins = [
     new LazyPlugin(() => new UrlPlugin()),
@@ -36,11 +38,22 @@ export default class EntryAbility extends NativeAbility {
     new LazyPlugin(() => new ColorModePlugin()),
     new LazyPlugin(() => new ExportPlugin()),
     new LazyPlugin(() => new CertFilePlugin()),
+    new LazyPlugin(() => this.createSafeAreaPlugin()),
   ];
 
   private createVpnPlugin(): VpnPlugin {
     const plugin = new VpnPlugin();
     this.vpnPlugin = plugin;
+    return plugin;
+  }
+
+  private createSafeAreaPlugin(): SafeAreaPlugin {
+    const plugin = new SafeAreaPlugin((options: window.AvoidAreaOptions): void => {
+      this.forEachLifecycle((lifecycle) =>
+        lifecycle.windowStageEventCallback.onAvoidAreaChange(options),
+      );
+    });
+    this.safeAreaPlugin = plugin;
     return plugin;
   }
 
@@ -50,6 +63,14 @@ export default class EntryAbility extends NativeAbility {
       return Promise.reject(new Error('Connection plugin is not attached to the active Ability session'));
     }
     return plugin.requestStartVpn(optionsJson);
+  }
+
+  private async captureInitialSafeArea(): Promise<void> {
+    const plugin = this.safeAreaPlugin;
+    if (plugin === undefined) {
+      throw new Error('safe-area plugin is not attached to the active Ability session');
+    }
+    await plugin.captureInitialSafeArea();
   }
 
   private configureNativeHome(): void {
@@ -113,9 +134,16 @@ export default class EntryAbility extends NativeAbility {
 
   protected async loadWindowStageContent(windowStage: window.WindowStage): Promise<void> {
     try {
-      await windowStage.loadContent('pages/Index');
+      const win = await windowStage.getMainWindow();
+      await win.setWindowLayoutFullScreen(true);
+      try {
+        await this.captureInitialSafeArea();
+      } catch (err) {
+        hilog.info(LOG_DOMAIN, LOG_TAG, 'initial safe area skipped %{public}s', describeError(err));
+      }
+      await win.setUIContent('pages/Index');
     } catch (err) {
-      hilog.error(LOG_DOMAIN, LOG_TAG, 'load WindowStage content failed %{public}s',
+      hilog.error(LOG_DOMAIN, LOG_TAG, 'set UI content failed %{public}s',
         JSON.stringify(err) ?? '');
     }
   }
