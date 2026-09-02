@@ -12,17 +12,18 @@ mod cert_file;
 mod color_mode;
 mod export;
 mod safe_area;
+mod url;
 mod vpn;
 
 use std::sync::{LazyLock, RwLock};
 
 use arkit::openharmony_ability::{AsyncBridge, BridgeCallOptions, BridgePlugin, OpenHarmonyApp};
-use openharmony_ability_plugin_url::UrlExt;
 
 pub(crate) use self::cert_file::{CertFileRequest, CertFileResponse, HOpenCertFileBridgePlugin};
 pub(crate) use self::color_mode::{ColorModeRequest, ColorModeResponse, HOpenColorModeBridgePlugin};
 pub(crate) use self::export::{ExportTextRequest, ExportTextResponse, HOpenExportBridgePlugin};
 pub(crate) use self::safe_area::{initial_safe_area, InitialSafeArea, HOpenSafeAreaBridgePlugin};
+pub(crate) use self::url::{HOpenUrlBridgePlugin, UrlOpenRequest, UrlOpenResponse};
 pub(crate) use self::vpn::{VpnStartRequest, VpnStartResponse, VpnStopRequest, VpnStopResponse, HOpenVpnBridgePlugin};
 
 /// Rust-side handle of the current Ability session, installed by `init`.
@@ -152,11 +153,10 @@ pub(crate) fn open_external_browser(uri: String) -> std::result::Result<(), Stri
     if uri.trim().is_empty() {
         return Err("empty browser uri".to_owned());
     }
-    let app = current_app()?;
-    let task = async move {
-        let _ = app.open_url(uri).await;
-    };
-    arkit::napi_ohos::bindgen_prelude::spawn(task);
+    spawn_call::<HOpenUrlBridgePlugin, UrlOpenRequest, UrlOpenResponse>(
+        "open-url",
+        UrlOpenRequest { url: uri },
+    );
     Ok(())
 }
 
@@ -166,8 +166,16 @@ pub(crate) async fn open_external_url(url: String) -> std::result::Result<(), St
     if url.trim().is_empty() {
         return Err("empty external URL".to_owned());
     }
-    let app = current_app()?;
-    app.open_url(url).await.map_err(|err| err.to_string())
+    let response = call_async::<HOpenUrlBridgePlugin, UrlOpenRequest, UrlOpenResponse>(
+        "open-url",
+        UrlOpenRequest { url },
+    )
+    .await?;
+    if response.accepted {
+        Ok(())
+    } else {
+        Err("URL plugin rejected the open request".to_owned())
+    }
 }
 
 /// Export the log archive through the system document picker with a pre-filled

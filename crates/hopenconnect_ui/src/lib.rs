@@ -16,6 +16,7 @@ mod time_format;
 mod view;
 
 #[entry(plugins = [
+    bridge::HOpenUrlBridgePlugin,
     bridge::HOpenVpnBridgePlugin,
     bridge::HOpenColorModeBridgePlugin,
     bridge::HOpenExportBridgePlugin,
