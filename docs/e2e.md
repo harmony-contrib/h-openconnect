@@ -59,9 +59,12 @@ OHOS 交叉编译需要 NDK；libxml2 与 OpenSSL 分别走 `vendored-libxml2` �
 
 ## 设备 HAP（默认完整接入）
 
+先将 `DEVECO_STUDIO_HOME` 设置为本机 DevEco Studio 安装的 `Contents` 目录。
+
 ```bash
-export OHOS_NDK_HOME=/Applications/DevEco-Studio.app/Contents/sdk/default/openharmony
-export DEVECO_SDK_HOME=/Applications/DevEco-Studio.app/Contents/sdk
+: "${DEVECO_STUDIO_HOME:?请先设置 DevEco Studio 的 Contents 目录}"
+export DEVECO_SDK_HOME="$DEVECO_STUDIO_HOME/sdk"
+export OHOS_NDK_HOME="$DEVECO_SDK_HOME/default/openharmony"
 
 # 默认 FEATURES=native-anyconnect，会 source env-ohos-anyconnect.sh
 ./scripts/package-hap.sh
@@ -107,8 +110,9 @@ HOPEN_E2E_PASSWORD='***' \
 前置：`hdc list targets` 能看到设备；DevEco SDK / `ohrs` 可用。
 
 ```bash
-export OHOS_NDK_HOME=/Applications/DevEco-Studio.app/Contents/sdk/default/openharmony
-export DEVECO_SDK_HOME=/Applications/DevEco-Studio.app/Contents/sdk
+: "${DEVECO_STUDIO_HOME:?请先设置 DevEco Studio 的 Contents 目录}"
+export DEVECO_SDK_HOME="$DEVECO_STUDIO_HOME/sdk"
+export OHOS_NDK_HOME="$DEVECO_SDK_HOME/default/openharmony"
 
 # 构建、安装、启动正式 Ability
 ./scripts/e2e-device.sh
@@ -165,15 +169,20 @@ runner；PR 只运行宿主协议与生命周期测试，避免不受信任代�
 HDC 的 root shell 不受应用 UID 的 VPN 策略约束，不能用 root `ping` 判断应用是否走隧道。
 使用仓库内探针降权到目标应用 UID 后再解析或连接：
 
+沿用前文的 SDK 环境，将 `DEVICE_PROBE_PATH` 设置为设备上可写且可执行的探针目标路径。
+
 ```bash
-OHOS_CLANG=/Applications/DevEco-Studio.app/Contents/sdk/default/openharmony/native/llvm/bin/aarch64-unknown-linux-ohos-clang
+: "${OHOS_NDK_HOME:?请先配置 SDK 环境}"
+: "${DEVICE_PROBE_PATH:?请先设置设备侧探针目标路径}"
+OHOS_CLANG="$OHOS_NDK_HOME/native/llvm/bin/aarch64-unknown-linux-ohos-clang"
+mkdir -p smoke-logs
 "$OHOS_CLANG" scripts/device-net-probe.c -o smoke-logs/device-net-probe
-hdc file send smoke-logs/device-net-probe /data/local/tmp/device-net-probe
-hdc shell chmod 755 /data/local/tmp/device-net-probe
+hdc file send smoke-logs/device-net-probe "$DEVICE_PROBE_PATH"
+hdc shell "chmod 755 '$DEVICE_PROBE_PATH'"
 
 # 20010042 替换为 bm dump / ps 查到的应用 UID
-hdc shell /data/local/tmp/device-net-probe 20010042 internal.corp.example
-hdc shell /data/local/tmp/device-net-probe 20010042 10.10.10.1 443
+hdc shell "'$DEVICE_PROBE_PATH' 20010042 internal.corp.example"
+hdc shell "'$DEVICE_PROBE_PATH' 20010042 10.10.10.1 443"
 ```
 
 同时在 headend 抓取 `vpns*` 流量，确认 `VpnConfig.dnsAddresses` 使用服务端下发的

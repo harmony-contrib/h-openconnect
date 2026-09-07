@@ -93,8 +93,8 @@ SSO 的首次请求读取服务器分组；成功后使用服务器协议值填�
 | 备份网关 | 主网关仅在网络/TLS/连接失败时按配置顺序故障转移，不重试密码或用户取消 |
 | 服务端 XML profile | 原子写入应用沙箱中的 `anyconnect-server-profile.xml` |
 | 主页密码 | 连接前可填写并随 profile 持久化，不再使用“仅本次”弹窗 |
-| 允许局域网 | OHOS 无 `allowBypass` → 全隧道时把 RFC1918/link-local 标 `isExcludedRoute` |
+| 允许局域网 | 独立传递 `allowLocalLan`；Rust 将 RFC1918/link-local 排除策略按最长前缀匹配展开为正向 CIDR，再交给 OHOS；更具体的企业 DNS 主机路由保留 |
 | 按应用分流 | `trustedApplications` / `blockedApplications` 写入系统 VpnConfig |
-| 主循环重连 | 使用 OpenConnect 主循环的标准重连机制；App 通过 ashmem 通知与有界等待同步平台状态，不写测试标记 |
+| 主循环重连 | 使用 OpenConnect 标准重连机制；主循环终态自报、扩展 3 秒心跳与 UI 单调时钟看门狗通过 ashmem 对账，按配置触发活动 UI 内自动重连；旧会话不覆盖新尝试，不写测试标记 |
 
 后续可选：通过设备密钥服务加密静态凭据、内嵌 WebView SAML。
