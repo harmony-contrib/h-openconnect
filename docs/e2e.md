@@ -166,6 +166,34 @@ GitHub Actions 中该测试只在 `main` 推送或手动触发时进入带
 `self-hosted`/`macOS`/`ARM64`/`openharmony-qemu` 标签的专用 Apple Silicon
 runner；PR 只运行宿主协议与生命周期测试，避免不受信任代码接触自托管 runner。
 
+### 认证矩阵
+
+`e2e-qemu-arm64.sh` 也可以在同一生产链路上切换认证方式：
+
+```bash
+# 证书认证：PEM 证书和独立私钥
+OCSERV_AUTH_MODE=certificate CLIENT_CERT_FORMAT=pem \
+  ./scripts/e2e-qemu-arm64.sh
+
+# 用户名/密码 + 加密 PKCS#12 客户端证书
+OCSERV_AUTH_MODE=password-and-certificate CLIENT_CERT_FORMAT=p12 \
+  ./scripts/e2e-qemu-arm64.sh
+
+# SSO-v2 协议和数据链路。device 仅替代裸 QEMU 缺失的浏览器导航；
+# HPKE、loopback callback、cookie、CSTP、TUN 和应用 UID 流量均走真实实现。
+OCSERV_AUTH_MODE=saml SSO_BROWSER_DRIVER=device \
+SSO_PYTHON="$SSO_VENV/bin/python" ./scripts/e2e-qemu-arm64.sh
+
+# 裸镜像的系统 openLink 拒绝必须快速取消认证且不得创建 TUN。
+OCSERV_AUTH_MODE=saml SSO_BROWSER_DRIVER=system \
+EXPECT_SSO_BROWSER_FAILURE=1 SSO_PYTHON="$SSO_VENV/bin/python" \
+  ./scripts/e2e-qemu-arm64.sh
+```
+
+SAML 测试服务需要 Python `cryptography`。`SSO_VENV` 指向开发者自行创建的虚拟环境，
+仓库和文档不依赖任何机器专属绝对路径。完整支持边界和实测结论见
+`docs/authentication-validation.md`。
+
 HDC 的 root shell 不受应用 UID 的 VPN 策略约束，不能用 root `ping` 判断应用是否走隧道。
 使用仓库内探针降权到目标应用 UID 后再解析或连接：
 

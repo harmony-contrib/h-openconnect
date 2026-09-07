@@ -71,7 +71,7 @@ default routes.
 - **Enterprise authentication**
   - External-browser SAML/SSO-v2 with the system browser and OpenConnect's local
     callback listener.
-  - RSA SecurID and TOTP software-token modes.
+  - Built-in TOTP software-token mode; server-driven OTP and challenge forms.
   - Password, certificate, password-plus-certificate, and SAML profile modes.
 - **Certificate and TLS policy**
   - System trust, private CA files, server certificate pins, and explicit
