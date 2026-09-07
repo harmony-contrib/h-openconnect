@@ -149,6 +149,13 @@ impl SoftwareToken {
             _ => Self::Disabled,
         }
     }
+
+    pub fn all() -> &'static [Self] {
+        // RSA SecurID needs libstoken, which is not linked into the HarmonyOS
+        // build. Retain the enum only so old profiles deserialize and can be
+        // rejected with an actionable validation error.
+        &[Self::Disabled, Self::Totp]
+    }
 }
 
 /// ics-openconnect `split_tunnel_mode` values.
@@ -216,7 +223,7 @@ pub struct ConnectionProfile {
     #[serde(default)]
     pub protocol: ProtocolKind,
     pub auth_method: AuthMethod,
-    /// Client certificate path (PEM/P12) or alias.
+    /// Client certificate path (PEM/P12).
     pub certificate: String,
     /// Optional separate private key path (ics `private_key`).
     #[serde(default, skip_serializing_if = "String::is_empty")]
@@ -420,6 +427,12 @@ impl ConnectionProfile {
         }
         if self.dpd_seconds > 86_400 {
             return Err("DPD interval must not exceed 86400 seconds".to_owned());
+        }
+        if matches!(self.software_token, SoftwareToken::SecurId) {
+            return Err(
+                "RSA SecurID is unavailable in this build because libstoken is not linked"
+                    .to_owned(),
+            );
         }
         for route in self
             .split_tunnel_networks

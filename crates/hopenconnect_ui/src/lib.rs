@@ -26,6 +26,13 @@ mod view;
 fn app(handle: OpenHarmonyApp) -> Element {
     let initial_safe_area = bridge::initial_safe_area(&handle);
     bridge::set_app(handle);
+    // Interactive authentication runs in the UI process before a platform VPN
+    // attempt or ashmem channel exists. Register the direct system-browser
+    // path here; the extension-to-UI ashmem path remains the fallback for a
+    // later protocol reauthentication initiated by the extension process.
+    hopenconnect_core::set_external_browser_handler(Some(Box::new(|uri| {
+        bridge::open_external_browser_blocking(uri.to_owned()).is_ok()
+    })));
     view::App(initial_safe_area)
 }
 
@@ -36,6 +43,9 @@ fn to_napi_error(err: impl std::fmt::Display) -> Error {
 #[napi]
 pub fn configure_app_home(home_dir: String) -> Result<()> {
     std::env::set_var("HOPENCONNECT_HOME", &home_dir);
+    // anyconnect-sys owns the native OpenConnect progress sink and uses this
+    // compatibility variable for its durable diagnostic log.
+    std::env::set_var("HANYCONNECT_HOME", &home_dir);
     shared_engine()
         .configure_home(home_dir)
         .map_err(to_napi_error)
@@ -46,6 +56,7 @@ pub fn configure_app_home(home_dir: String) -> Result<()> {
 #[napi]
 pub fn configure_app_home_for_extension(home_dir: String) -> Result<()> {
     std::env::set_var("HOPENCONNECT_HOME", &home_dir);
+    std::env::set_var("HANYCONNECT_HOME", &home_dir);
     shared_engine()
         .configure_home(home_dir)
         .map_err(to_napi_error)

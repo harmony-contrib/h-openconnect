@@ -195,13 +195,33 @@ pub fn authenticate(
     }
 
     // SAML / SSO-v2: OpenConnect binds localhost:29786 then calls this to open
-    // the IdP URL in the system browser (ics `external_browser` / openconnect
-    // `openconnect_set_external_browser_callback`).
-    if wants_external_browser(profile) {
-        builder = builder.external_browser_handler(crate::platform_browser::open);
+    // the IdP URL in the system browser. Upstream logs a rejected browser open
+    // but continues waiting on the loopback listener, so feed Cancel into its
+    // command pipe when the platform cannot launch a browser.
+    let browser_cancel: Option<Arc<Mutex<Option<anyconnect::CommandHandle>>>> =
+        wants_external_browser(profile).then(|| Arc::new(Mutex::new(None)));
+    if let Some(cancel) = browser_cancel.as_ref() {
+        let cancel = Arc::clone(cancel);
+        builder = builder.external_browser_handler(move |uri| {
+            let opened = crate::platform_browser::open(uri);
+            if !opened {
+                if let Ok(command) = cancel.lock() {
+                    if let Some(command) = command.as_ref() {
+                        let _ = command.send(anyconnect::Command::Cancel);
+                    }
+                }
+            }
+            opened
+        });
     }
 
     let mut client = builder.build()?;
+    if let Some(cancel) = browser_cancel {
+        let command = client.command_handle()?;
+        *cancel
+            .lock()
+            .map_err(|_| CoreError::msg("SSO browser cancellation lock poisoned"))? = Some(command);
+    }
     client.set_log_level(LogLevel::Info);
     client.set_auth_group(
         (!configured_auth_group.is_empty()).then_some(configured_auth_group.as_str()),
@@ -1208,17 +1228,37 @@ fn resume_from_options_once(options: &VpnOptions) -> CoreResult<PendingNativeSes
                 monitor.invoke(fd);
             }
         });
-    if options.external_auth_allowed {
+    let browser_cancel: Option<Arc<Mutex<Option<anyconnect::CommandHandle>>>> = options
+        .external_auth_allowed
+        .then(|| Arc::new(Mutex::new(None)));
+    if let Some(cancel) = browser_cancel.as_ref() {
         // SAML/SSO-v2: OpenConnect listens on localhost:29786 then asks us to
         // open the IdP URL. Extension has no UI Ability, so open() publishes a
         // one-shot ashmem request for the UI process.
-        builder = builder.external_browser_handler(crate::platform_browser::open);
+        let cancel = Arc::clone(cancel);
+        builder = builder.external_browser_handler(move |uri| {
+            let opened = crate::platform_browser::open(uri);
+            if !opened {
+                if let Ok(command) = cancel.lock() {
+                    if let Some(command) = command.as_ref() {
+                        let _ = command.send(anyconnect::Command::Cancel);
+                    }
+                }
+            }
+            opened
+        });
     }
     for pin in server_certificate_hashes(&server_cert_hash) {
         builder = builder.server_certificate_hash(pin);
     }
 
     let mut client = builder.build()?;
+    if let Some(cancel) = browser_cancel {
+        let command = client.command_handle()?;
+        *cancel
+            .lock()
+            .map_err(|_| CoreError::msg("SSO browser cancellation lock poisoned"))? = Some(command);
+    }
     client.set_log_level(LogLevel::Info);
     // Rebuild a minimal profile from handoff options for shared prefs application.
     let mut resume_profile = ConnectionProfile::new_draft();

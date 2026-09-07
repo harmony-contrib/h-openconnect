@@ -241,9 +241,10 @@ pub(crate) fn connection_editor_page(state: Signal<State>, id: String) -> Elemen
     let split_vpn = SplitTunnelMode::OnVpnDns.as_label().to_owned();
     let split_uplink = SplitTunnelMode::OnUplinkDns.as_label().to_owned();
     let selected_split = draft.split_tunnel_mode.as_label().to_owned();
-    let token_disabled = SoftwareToken::Disabled.as_label().to_owned();
-    let token_securid = SoftwareToken::SecurId.as_label().to_owned();
-    let token_totp = SoftwareToken::Totp.as_label().to_owned();
+    let token_options: Vec<String> = SoftwareToken::all()
+        .iter()
+        .map(|token| token.as_label().to_owned())
+        .collect();
     let selected_token = draft.software_token.as_label().to_owned();
 
     let auth_password = translate_ui(current.locale, tr::auth_password());
@@ -607,7 +608,7 @@ pub(crate) fn connection_editor_page(state: Signal<State>, id: String) -> Elemen
                         FormItem {
                             label: translate_ui(current.locale, tr::conn_software_token()),
                             Select {
-                                options: vec![token_disabled.clone(), token_securid.clone(), token_totp.clone()],
+                                options: token_options.clone(),
                                 selected: Some(selected_token.clone()),
                                 default_selected: selected_token.clone(),
                                 open: None,

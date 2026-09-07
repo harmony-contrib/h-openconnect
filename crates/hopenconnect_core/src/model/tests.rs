@@ -55,6 +55,19 @@ fn profile_validation_rejects_invalid_network_settings() {
 }
 
 #[test]
+fn unsupported_securid_profiles_fail_instead_of_being_advertised() {
+    assert_eq!(
+        SoftwareToken::all(),
+        &[SoftwareToken::Disabled, SoftwareToken::Totp]
+    );
+    let mut profile = ConnectionProfile::new_draft();
+    profile.name = "Migrated profile".to_owned();
+    profile.server = "vpn.example.test".to_owned();
+    profile.software_token = SoftwareToken::SecurId;
+    assert!(profile.validate().unwrap_err().contains("libstoken"));
+}
+
+#[test]
 fn handoff_preserves_normalized_backup_servers_and_client_identity() {
     let mut profile = ConnectionProfile::new_draft();
     profile.id = "privacy-scoped-profile".to_owned();
