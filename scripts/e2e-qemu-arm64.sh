@@ -16,13 +16,21 @@ QEMU_ACCEL="${QEMU_ACCEL:-auto}"
 QEMU_BOOT_TIMEOUT="${QEMU_BOOT_TIMEOUT:-240}"
 VPN_START_TIMEOUT="${VPN_START_TIMEOUT:-100}"
 VPN_DEADLINE_TIMEOUT="${VPN_DEADLINE_TIMEOUT:-150}"
-RUN_DEADLINE_TEST="${RUN_DEADLINE_TEST:-1}"
+RUN_DEADLINE_TEST="${RUN_DEADLINE_TEST:-}"
 RUN_ISSUE3_MATRIX="${RUN_ISSUE3_MATRIX:-0}"
 BUNDLE_NAME="${BUNDLE_NAME:-com.richerfu.h_openconnect}"
 ABILITY_NAME="${ABILITY_NAME:-EntryAbility}"
 OCSERV_PORT="${OCSERV_PORT:-14433}"
 OCSERV_USER="${OCSERV_USER:-demo}"
 OCSERV_PASS="${OCSERV_PASS:-demo}"
+OCSERV_AUTH_MODE="${OCSERV_AUTH_MODE:-password}"
+OCSERV_CLIENT_KEY_PASS="${OCSERV_CLIENT_KEY_PASS:-hopenconnect}"
+CLIENT_CERT_FORMAT="${CLIENT_CERT_FORMAT:-pem}"
+SSO_FRONTEND_PORT="${SSO_FRONTEND_PORT:-15445}"
+SSO_BROWSER_PORT="${SSO_BROWSER_PORT:-18082}"
+SSO_PYTHON="${SSO_PYTHON:-python3}"
+SSO_BROWSER_DRIVER="${SSO_BROWSER_DRIVER:-system}"
+EXPECT_SSO_BROWSER_FAILURE="${EXPECT_SSO_BROWSER_FAILURE:-0}"
 TUN_ENDPOINT_PORT="${TUN_ENDPOINT_PORT:-18443}"
 LAN_ENDPOINT_PORT="${LAN_ENDPOINT_PORT:-18080}"
 LAN_ENDPOINT_HOST="${LAN_ENDPOINT_HOST:-}"
@@ -40,6 +48,42 @@ if [ ! -f "$HAP_PATH" ]; then
   echo "signed HAP not found: $HAP_PATH" >&2
   exit 2
 fi
+case "$OCSERV_AUTH_MODE" in
+  password|certificate|password-and-certificate|saml) ;;
+  *) echo "unsupported OCSERV_AUTH_MODE: $OCSERV_AUTH_MODE" >&2; exit 2 ;;
+esac
+if [ -z "$RUN_DEADLINE_TEST" ]; then
+  if [ "$OCSERV_AUTH_MODE" = "password" ]; then
+    RUN_DEADLINE_TEST=1
+  else
+    RUN_DEADLINE_TEST=0
+  fi
+fi
+case "$RUN_DEADLINE_TEST" in
+  0|1) ;;
+  *) echo "RUN_DEADLINE_TEST must be 0 or 1" >&2; exit 2 ;;
+esac
+if [ "$OCSERV_AUTH_MODE" = "saml" ] && [ "$RUN_DEADLINE_TEST" = "1" ]; then
+  echo "RUN_DEADLINE_TEST=1 is incompatible with browser authentication" >&2
+  exit 2
+fi
+case "$CLIENT_CERT_FORMAT" in
+  pem|p12) ;;
+  *) echo "unsupported CLIENT_CERT_FORMAT: $CLIENT_CERT_FORMAT" >&2; exit 2 ;;
+esac
+case "$SSO_BROWSER_DRIVER" in
+  system|device) ;;
+  *) echo "unsupported SSO_BROWSER_DRIVER: $SSO_BROWSER_DRIVER" >&2; exit 2 ;;
+esac
+case "$EXPECT_SSO_BROWSER_FAILURE" in
+  0|1) ;;
+  *) echo "EXPECT_SSO_BROWSER_FAILURE must be 0 or 1" >&2; exit 2 ;;
+esac
+if [ "$EXPECT_SSO_BROWSER_FAILURE" = "1" ] && \
+   { [ "$OCSERV_AUTH_MODE" != "saml" ] || [ "$SSO_BROWSER_DRIVER" != "system" ]; }; then
+  echo "EXPECT_SSO_BROWSER_FAILURE=1 requires SAML with the system browser driver" >&2
+  exit 2
+fi
 if [ "$(uname -s)" != "Darwin" ] || [ "$(uname -m)" != "arm64" ]; then
   echo "this E2E requires an ARM64 macOS host (got $(uname -s)/$(uname -m))" >&2
   exit 2
@@ -54,7 +98,7 @@ if [ "$RUN_ISSUE3_MATRIX" = "1" ] && [ -z "$LAN_ENDPOINT_HOST" ]; then
   fi
 fi
 
-for command_name in qemu-system-aarch64 "$HDC" docker pgrep python3; do
+for command_name in qemu-system-aarch64 "$HDC" docker pgrep python3 nc; do
   if ! command -v "$command_name" >/dev/null 2>&1; then
     echo "required command not found: $command_name" >&2
     exit 2
@@ -90,6 +134,8 @@ QEMU_CHILD_PID=""
 HDC_READY=0
 OCSERV_STARTED=0
 LAN_SERVER_PID=""
+SSO_SERVER_PID=""
+SSO_DRIVER_PID=""
 
 hdc_cmd() {
   # Establishing a system VPN can reset QEMU's existing host-forwarded HDC
@@ -296,6 +342,8 @@ collect_artifacts() {
     capture_guest_network_policy "$ARTIFACT_DIR/guest-network-policy-final.txt"
     hdc_cmd shell "ls -la $app_home/logs 2>&1; cat $app_home/logs/*.log 2>&1" \
       >"$ARTIFACT_DIR/app-runtime.log" 2>&1 || true
+    hdc_cmd shell "cat $app_home/openconnect-progress.log 2>&1" \
+      >"$ARTIFACT_DIR/openconnect-progress.log" 2>&1 || true
   fi
   if [ "$OCSERV_STARTED" = "1" ]; then
     docker logs "$OCSERV_NAME" >"$ARTIFACT_DIR/ocserv.log" 2>&1 || true
@@ -355,6 +403,14 @@ cleanup() {
     kill -TERM "$LAN_SERVER_PID" >/dev/null 2>&1 || true
     wait "$LAN_SERVER_PID" >/dev/null 2>&1 || true
   fi
+  if [ -n "$SSO_SERVER_PID" ] && kill -0 "$SSO_SERVER_PID" >/dev/null 2>&1; then
+    kill -TERM "$SSO_SERVER_PID" >/dev/null 2>&1 || true
+    wait "$SSO_SERVER_PID" >/dev/null 2>&1 || true
+  fi
+  if [ -n "$SSO_DRIVER_PID" ] && kill -0 "$SSO_DRIVER_PID" >/dev/null 2>&1; then
+    kill -TERM "$SSO_DRIVER_PID" >/dev/null 2>&1 || true
+    wait "$SSO_DRIVER_PID" >/dev/null 2>&1 || true
+  fi
   if [ "$OCSERV_STARTED" = "1" ]; then
     OCSERV_NAME="$OCSERV_NAME" OCSERV_DATA_DIR="$OCSERV_DATA_DIR" \
       OCSERV_PORT="$OCSERV_PORT" "$ROOT_DIR/scripts/dev-ocserv.sh" stop >/dev/null 2>&1
@@ -377,11 +433,42 @@ if ! cp -cR "$QEMU_PACKAGE_DIR" "$QEMU_RUN_DIR" 2>/dev/null; then
 fi
 
 echo "==> start local AnyConnect headend"
+headend_auth_mode="$OCSERV_AUTH_MODE"
+if [ "$OCSERV_AUTH_MODE" = "saml" ]; then
+  headend_auth_mode="password"
+fi
 OCSERV_NAME="$OCSERV_NAME" OCSERV_DATA_DIR="$OCSERV_DATA_DIR" \
   OCSERV_PORT="$OCSERV_PORT" OCSERV_USER="$OCSERV_USER" OCSERV_PASS="$OCSERV_PASS" \
+  OCSERV_AUTH_MODE="$headend_auth_mode" OCSERV_CLIENT_KEY_PASS="$OCSERV_CLIENT_KEY_PASS" \
   OCSERV_HOST_IP="10.0.2.2" OCSERV_DISABLE_NO_ROUTES="$RUN_ISSUE3_MATRIX" \
   "$ROOT_DIR/scripts/dev-ocserv.sh" start
 OCSERV_STARTED=1
+
+if [ "$OCSERV_AUTH_MODE" = "saml" ]; then
+  echo "==> start SSO-v2/HPKE test gateway backed by ocserv"
+  if ! "$SSO_PYTHON" -c 'import cryptography' >/dev/null 2>&1; then
+    echo "SSO_PYTHON must provide the cryptography package" >&2
+    exit 2
+  fi
+  "$SSO_PYTHON" "$ROOT_DIR/scripts/dev-sso-v2-server.py" \
+    --port "$SSO_FRONTEND_PORT" --browser-port "$SSO_BROWSER_PORT" \
+    --backend-port "$OCSERV_PORT" --username "$OCSERV_USER" --password "$OCSERV_PASS" \
+    --cert "$OCSERV_DATA_DIR/server-cert.pem" --key "$OCSERV_DATA_DIR/server-key.pem" \
+    >"$ARTIFACT_DIR/sso-v2-server.log" 2>&1 &
+  SSO_SERVER_PID=$!
+  for _ in $(seq 1 40); do
+    if ! kill -0 "$SSO_SERVER_PID" >/dev/null 2>&1; then
+      cat "$ARTIFACT_DIR/sso-v2-server.log" >&2
+      echo "SSO-v2 test gateway exited during startup" >&2
+      exit 1
+    fi
+    if nc -z 127.0.0.1 "$SSO_FRONTEND_PORT" >/dev/null 2>&1 && \
+       nc -z 127.0.0.1 "$SSO_BROWSER_PORT" >/dev/null 2>&1; then
+      break
+    fi
+    sleep 0.25
+  done
+fi
 
 if [ "$RUN_ISSUE3_MATRIX" = "1" ]; then
   echo "==> start controlled host-LAN endpoint"
@@ -447,6 +534,44 @@ echo "application UID: $app_uid"
 
 echo "==> provision a normal local ocserv profile"
 mkdir -p "$PROFILE_DIR"
+app_home="/data/app/el2/100/base/$BUNDLE_NAME/haps/entry/files/h-openconnect"
+# The module-scoped filesDir path seen inside this Stage-model application.
+# HDC provisioning still writes through app_home above.
+app_visible_home="/data/storage/el2/base/haps/entry/files/h-openconnect"
+profile_auth_method="password"
+profile_username="$OCSERV_USER"
+profile_password="$OCSERV_PASS"
+profile_certificate=""
+profile_private_key=""
+profile_key_password=""
+profile_server_port="$OCSERV_PORT"
+profile_external_browser_auth=false
+case "$OCSERV_AUTH_MODE" in
+  certificate)
+    profile_auth_method="certificate"
+    profile_password=""
+    ;;
+  password-and-certificate)
+    profile_auth_method="passwordAndCertificate"
+    ;;
+  saml)
+    profile_server_port="$SSO_FRONTEND_PORT"
+    profile_auth_method="saml"
+    profile_username=""
+    profile_password=""
+    profile_external_browser_auth=true
+    ;;
+esac
+if [ "$OCSERV_AUTH_MODE" = "certificate" ] || \
+   [ "$OCSERV_AUTH_MODE" = "password-and-certificate" ]; then
+  if [ "$CLIENT_CERT_FORMAT" = "p12" ]; then
+    profile_certificate="$app_visible_home/certs/client.p12"
+    profile_key_password="$OCSERV_CLIENT_KEY_PASS"
+  else
+    profile_certificate="$app_visible_home/certs/client-cert.pem"
+    profile_private_key="$app_visible_home/certs/client-key.pem"
+  fi
+fi
 write_profile() {
   local allow_local_lan="$1"
   local force_global="$2"
@@ -456,18 +581,19 @@ write_profile() {
   cat >"$PROFILE_DIR/connections.json" <<JSON
 [
   {
-    "id": "qemu-ci", "name": "QEMU CI ocserv", "server": "10.0.2.2:${OCSERV_PORT}",
-    "group": "", "username": "${OCSERV_USER}", "password": "${OCSERV_PASS}",
-    "protocol": "anyConnect", "authMethod": "password", "certificate": "",
-    "privateKey": "", "secondaryCertificate": "", "secondaryPrivateKey": "",
-    "caCertificate": "", "keyPassword": "", "secondaryKeyPassword": "",
+    "id": "qemu-ci", "name": "QEMU CI ocserv", "server": "10.0.2.2:${profile_server_port}",
+    "group": "", "username": "${profile_username}", "password": "${profile_password}",
+    "protocol": "anyConnect", "authMethod": "${profile_auth_method}",
+    "certificate": "${profile_certificate}", "privateKey": "${profile_private_key}",
+    "secondaryCertificate": "", "secondaryPrivateKey": "",
+    "caCertificate": "", "keyPassword": "${profile_key_password}", "secondaryKeyPassword": "",
     "httpProxy": "", "serverCertHash": "", "backupServers": "",
     "strictCertificateTrust": false, "blockUntrustedServers": false,
     "allowLocalLan": ${allow_local_lan}, "forceGlobal": ${force_global},
     "splitTunnelMode": "${split_tunnel_mode}",
     "splitTunnelNetworks": "${split_tunnel_networks}",
     "connectOnDemand": ${connect_on_demand},
-    "externalBrowserAuth": false, "fipsMode": false, "allowInsecureCrypto": false,
+    "externalBrowserAuth": ${profile_external_browser_auth}, "fipsMode": false, "allowInsecureCrypto": false,
     "useDtls": false, "reportedOs": "OpenHarmony", "userAgent": "",
     "clientVersion": "", "sni": "", "requirePfs": false,
     "disableXmlPost": false, "dpdSeconds": 0, "softwareToken": "disabled",
@@ -477,7 +603,7 @@ write_profile() {
 ]
 JSON
 }
-if [ "$RUN_ISSUE3_MATRIX" = "1" ]; then
+if [ "$RUN_ISSUE3_MATRIX" = "1" ] || [ "$OCSERV_AUTH_MODE" != "password" ]; then
   write_profile false true auto "" true
 else
   write_profile false false auto "" false
@@ -486,12 +612,25 @@ cat >"$PROFILE_DIR/preferences.json" <<'JSON'
 {"activeConnectionId":"qemu-ci","language":"system","theme":"system"}
 JSON
 
-app_home="/data/app/el2/100/base/$BUNDLE_NAME/haps/entry/files/h-openconnect"
 install_profile() {
   hdc_cmd shell "mkdir -p $app_home"
   hdc_cmd file send "$PROFILE_DIR/connections.json" "$app_home/connections.json" >/dev/null
   hdc_cmd file send "$PROFILE_DIR/preferences.json" "$app_home/preferences.json" >/dev/null
   hdc_cmd shell "chown -R $app_uid:$app_uid $app_home; chmod 700 $app_home; chmod 600 $app_home/*.json"
+}
+install_client_identity() {
+  if [ "$OCSERV_AUTH_MODE" != "certificate" ] && \
+     [ "$OCSERV_AUTH_MODE" != "password-and-certificate" ]; then
+    return
+  fi
+  hdc_cmd shell "mkdir -p $app_home/certs"
+  if [ "$CLIENT_CERT_FORMAT" = "p12" ]; then
+    hdc_cmd file send "$OCSERV_DATA_DIR/client.p12" "$app_home/certs/client.p12" >/dev/null
+  else
+    hdc_cmd file send "$OCSERV_DATA_DIR/client-cert.pem" "$app_home/certs/client-cert.pem" >/dev/null
+    hdc_cmd file send "$OCSERV_DATA_DIR/client-key.pem" "$app_home/certs/client-key.pem" >/dev/null
+  fi
+  hdc_cmd shell "chown -R $app_uid:$app_uid $app_home/certs; chmod 700 $app_home/certs; chmod 600 $app_home/certs/*"
 }
 reload_profile() {
   hdc_cmd shell "aa force-stop $BUNDLE_NAME" >/dev/null 2>&1 || true
@@ -502,10 +641,27 @@ reload_profile() {
     enable_test_log_recording
   fi
 }
+install_client_identity
 install_profile
 
 hdc_cmd shell "hilog -G 8M >/dev/null; hilog -r >/dev/null; aa start -a $ABILITY_NAME -b $BUNDLE_NAME" >/dev/null
 wait_layout_text 'QEMU CI ocserv' 30
+if [ "$OCSERV_AUTH_MODE" = "certificate" ] || \
+   [ "$OCSERV_AUTH_MODE" = "password-and-certificate" ]; then
+  app_pid="$(hdc_cmd shell "pidof $BUNDLE_NAME" 2>/dev/null | tr -d '\r ' | awk '{print $1}')"
+  if ! [[ "$app_pid" =~ ^[0-9]+$ ]]; then
+    echo "failed to find application process for certificate visibility check" >&2
+    exit 1
+  fi
+  hdc_cmd shell "ls -la /proc/$app_pid/root$app_visible_home/certs" \
+    >"$ARTIFACT_DIR/client-identity-files.txt" 2>&1 || true
+  if ! grep -q "$(basename "$profile_certificate")" \
+    "$ARTIFACT_DIR/client-identity-files.txt"; then
+    echo "client certificate is not readable inside the application sandbox" >&2
+    cat "$ARTIFACT_DIR/client-identity-files.txt" >&2
+    exit 1
+  fi
+fi
 if [ "$RUN_ISSUE3_MATRIX" = "1" ]; then
   # This marker uses the app's normal opt-in recorder after startup has reset
   # any stale marker. It keeps late lifecycle evidence available after cleanup.
@@ -531,10 +687,67 @@ if [ "$RUN_DEADLINE_TEST" = "1" ]; then
 fi
 
 echo "==> authorize and establish the real AnyConnect tunnel"
+if [ "$OCSERV_AUTH_MODE" = "saml" ] && [ "$SSO_BROWSER_DRIVER" = "device" ]; then
+  OHOS_CLANG="${OHOS_CLANG:-${OHOS_NDK_HOME:-}/native/llvm/bin/aarch64-unknown-linux-ohos-clang}"
+  if [ ! -x "$OHOS_CLANG" ]; then
+    echo "OpenHarmony aarch64 clang not found: $OHOS_CLANG" >&2
+    exit 2
+  fi
+  "$OHOS_CLANG" "$ROOT_DIR/scripts/device-sso-browser.c" -o "$TEST_TMP/device-sso-browser"
+  hdc_cmd file send "$TEST_TMP/device-sso-browser" /data/local/tmp/device-sso-browser >/dev/null
+  hdc_cmd shell "chmod 755 /data/local/tmp/device-sso-browser"
+  (
+    browser_deadline=$((SECONDS + 30))
+    browser_url=""
+    while [ "$SECONDS" -lt "$browser_deadline" ]; do
+      browser_url="$(sed -n 's/^.*BROWSER_URL //p' "$ARTIFACT_DIR/sso-v2-server.log" | tail -n 1)"
+      [ -n "$browser_url" ] && break
+      sleep 0.1
+    done
+    if [ -z "$browser_url" ]; then
+      echo "timed out waiting for the SSO browser URL" >&2
+      exit 1
+    fi
+    hdc_cmd shell "/data/local/tmp/device-sso-browser '$browser_url'" | \
+      tee "$ARTIFACT_DIR/sso-device-browser.log"
+  ) &
+  SSO_DRIVER_PID=$!
+fi
 click 400 340
+if [ "$EXPECT_SSO_BROWSER_FAILURE" = "1" ]; then
+  wait_layout_text '连接失败|Connection failed' 30
+  if tun_exists; then
+    echo "vpn-tun exists after the system rejected the SSO browser" >&2
+    exit 1
+  fi
+  hdc_cmd shell "cat $app_home/openconnect-progress.log 2>&1" \
+    >"$ARTIFACT_DIR/openconnect-progress-browser-failure.log" 2>&1 || true
+  if ! grep -q 'Failed to spawn external browser' \
+    "$ARTIFACT_DIR/openconnect-progress-browser-failure.log"; then
+    echo "OpenConnect did not record the rejected external browser" >&2
+    exit 1
+  fi
+  if ! grep -q 'Socket accept cancelled' \
+    "$ARTIFACT_DIR/openconnect-progress-browser-failure.log"; then
+    echo "OpenConnect did not cancel the SSO loopback wait" >&2
+    exit 1
+  fi
+  echo "ARM64 QEMU SSO browser rejection E2E OK"
+  echo "artifacts: $ARTIFACT_DIR"
+  exit 0
+fi
 wait_layout_text '是否允许使用 VPN|Allow.*VPN|VPN.*Allow' 30
 click 495 316
+if [ "$OCSERV_AUTH_MODE" = "saml" ]; then
+  # The external browser remains foregrounded after the loopback callback.
+  # Bring the existing EntryAbility task forward without restarting it.
+  hdc_cmd shell "aa start -a $ABILITY_NAME -b $BUNDLE_NAME" >/dev/null
+fi
 wait_layout_text '已连接|Connected' "$VPN_START_TIMEOUT"
+if [ -n "$SSO_DRIVER_PID" ]; then
+  wait "$SSO_DRIVER_PID"
+  SSO_DRIVER_PID=""
+fi
 
 hdc_cmd shell "ifconfig vpn-tun" | tee "$ARTIFACT_DIR/tun-connected.txt"
 hdc_cmd shell "netstat -rn" | tee "$ARTIFACT_DIR/routes-connected.txt"
@@ -570,8 +783,10 @@ start_headend_listener
 if [ "$RUN_ISSUE3_MATRIX" = "1" ]; then
   prepare_headend_counters
 fi
-hdc_cmd shell "/data/local/tmp/device-net-probe $app_uid 10.10.10.1 $TUN_ENDPOINT_PORT" | \
-  tee "$ARTIFACT_DIR/probe-internal.txt"
+if [ "$OCSERV_AUTH_MODE" = "password" ]; then
+  hdc_cmd shell "/data/local/tmp/device-net-probe $app_uid 10.10.10.1 $TUN_ENDPOINT_PORT" | \
+    tee "$ARTIFACT_DIR/probe-internal.txt"
+fi
 capture_guest_network_policy "$ARTIFACT_DIR/guest-network-policy-full-lan-off.txt"
 if [ "$RUN_ISSUE3_MATRIX" = "1" ]; then
   public_before="$(headend_counter 2)"
@@ -583,7 +798,9 @@ if [ "$RUN_ISSUE3_MATRIX" = "1" ]; then
   public_after="$(headend_counter 2)"
   printf 'packets=%s\n' "$public_after" >"$ARTIFACT_DIR/forward-after-public.txt"
 fi
-grep -q "connected 10.10.10.1:${TUN_ENDPOINT_PORT}" "$ARTIFACT_DIR/probe-internal.txt"
+if [ "$OCSERV_AUTH_MODE" = "password" ]; then
+  grep -q "connected 10.10.10.1:${TUN_ENDPOINT_PORT}" "$ARTIFACT_DIR/probe-internal.txt"
+fi
 grep -q 'connected example.com:443' "$ARTIFACT_DIR/probe-dns-tcp.txt"
 if [ "$RUN_ISSUE3_MATRIX" = "1" ] && [ "$public_after" -le "$public_before" ]; then
   echo "public TCP did not traverse the headend (before=$public_before after=$public_after)" >&2
@@ -715,8 +932,33 @@ echo "==> disconnect and reconnect with a new platform start transaction"
 click 400 340
 wait_layout_text '未连接|Disconnected' 30
 wait_tun_absent 30
+if [ "$OCSERV_AUTH_MODE" = "saml" ] && [ "$SSO_BROWSER_DRIVER" = "device" ]; then
+  previous_browser_url="$(sed -n 's/^.*BROWSER_URL //p' \
+    "$ARTIFACT_DIR/sso-v2-server.log" | tail -n 1)"
+  (
+    browser_deadline=$((SECONDS + 30))
+    browser_url=""
+    while [ "$SECONDS" -lt "$browser_deadline" ]; do
+      browser_url="$(sed -n 's/^.*BROWSER_URL //p' \
+        "$ARTIFACT_DIR/sso-v2-server.log" | tail -n 1)"
+      [ -n "$browser_url" ] && [ "$browser_url" != "$previous_browser_url" ] && break
+      sleep 0.1
+    done
+    if [ -z "$browser_url" ] || [ "$browser_url" = "$previous_browser_url" ]; then
+      echo "timed out waiting for the reconnect SSO browser URL" >&2
+      exit 1
+    fi
+    hdc_cmd shell "/data/local/tmp/device-sso-browser '$browser_url'" | \
+      tee "$ARTIFACT_DIR/sso-device-browser-reconnect.log"
+  ) &
+  SSO_DRIVER_PID=$!
+fi
 click 400 340
 wait_layout_text '已连接|Connected' "$VPN_START_TIMEOUT"
+if [ -n "$SSO_DRIVER_PID" ]; then
+  wait "$SSO_DRIVER_PID"
+  SSO_DRIVER_PID=""
+fi
 
 capture_hilog "$ENTRY_HILOG_FILE" HOpenConnect
 attempt_count="$(sed -n 's/.*VPN start completed attempt \([^ ]*\).*/\1/p' "$ENTRY_HILOG_FILE" | \
