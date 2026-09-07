@@ -136,10 +136,18 @@ tunnel-all-dns = true
 
 mtu = 1400
 route = default
+# A real listener is started on this address by the QEMU E2E. Keep the
+# narrower include so longest-prefix policy can be verified even when 10/8 is
+# excluded by the server or the profile's local-LAN switch.
+route = 10.10.10.1/32
+CONF
+  if [ "${OCSERV_DISABLE_NO_ROUTES:-0}" != "1" ]; then
+    cat >>"$DATA_DIR/ocserv.conf" <<'CONF'
 no-route = 192.168.0.0/16
 no-route = 10.0.0.0/8
 no-route = 172.16.0.0/12
 CONF
+  fi
 }
 
 ensure_image() {
@@ -306,6 +314,7 @@ Environment:
   OCSERV_NAME         container name
   OCSERV_DATA_DIR     state dir (default .dev-ocserv/)
   OCSERV_IMAGE_NAME   image tag (default hopenconnect-ocserv:local)
+  OCSERV_DISABLE_NO_ROUTES=1  omit default private-LAN exclusions
 USAGE
 }
 
