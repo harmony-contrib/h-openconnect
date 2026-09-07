@@ -9,6 +9,40 @@ fn new_profiles_use_strict_certificate_defaults() {
 }
 
 #[test]
+fn auto_reconnect_requires_an_unexpected_connected_to_terminal_edge() {
+    assert!(ConnectionLifecycle::Connected.should_auto_reconnect_to(
+        ConnectionLifecycle::Failed,
+        false,
+        false,
+        true,
+    ));
+    assert!(ConnectionLifecycle::Connected.should_auto_reconnect_to(
+        ConnectionLifecycle::Disconnected,
+        false,
+        false,
+        true,
+    ));
+    assert!(!ConnectionLifecycle::Failed.should_auto_reconnect_to(
+        ConnectionLifecycle::Failed,
+        false,
+        false,
+        true,
+    ));
+    assert!(!ConnectionLifecycle::Connected.should_auto_reconnect_to(
+        ConnectionLifecycle::Failed,
+        true,
+        false,
+        true,
+    ));
+    assert!(!ConnectionLifecycle::Connected.should_auto_reconnect_to(
+        ConnectionLifecycle::Failed,
+        false,
+        true,
+        true,
+    ));
+}
+
+#[test]
 fn profile_validation_rejects_invalid_network_settings() {
     let mut profile = ConnectionProfile::new_draft();
     profile.name = "Corp".to_owned();
@@ -163,4 +197,147 @@ fn slash32_netmask_clamped_for_platform() {
     assert_eq!(options.addresses, vec!["10.1.2.3/31".to_owned()]);
     assert!(options.routes.iter().any(|r| r == "0.0.0.0/0"));
     assert!(options.routes.iter().any(|r| r == "10.0.0.53/32"));
+}
+
+#[test]
+fn full_tunnel_handoff_preserves_local_lan_policy() {
+    let mut profile = ConnectionProfile::new_draft();
+    profile.force_global = true;
+    profile.allow_local_lan = true;
+    let options = VpnOptions::from_network(&NetworkSnapshot::default(), &profile);
+
+    assert!(options.allow_local_lan);
+    assert!(
+        !options.allow_bypass,
+        "full tunnel clears only the derived hint"
+    );
+    assert!(options
+        .excluded_routes
+        .iter()
+        .any(|route| route == "10.0.0.0/8"));
+}
+
+#[test]
+fn dns_host_routes_are_stable_and_deduplicated() {
+    let mut options = VpnOptions {
+        routes: vec!["0.0.0.0/0".into(), "10.10.10.1/32".into()],
+        dns_addresses: vec!["10.10.10.1".into(), "2001:db8::53".into()],
+        ..VpnOptions::default()
+    };
+
+    options.push_dns_host_routes();
+    options.push_dns_host_routes();
+
+    assert_eq!(
+        options
+            .routes
+            .iter()
+            .filter(|route| *route == "10.10.10.1/32")
+            .count(),
+        1
+    );
+    assert_eq!(
+        options
+            .routes
+            .iter()
+            .filter(|route| *route == "2001:db8::53/128")
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn excluded_routes_materialize_with_longest_prefix_includes() {
+    let mut options = VpnOptions {
+        routes: vec![
+            "10.10.10.1/32".into(),
+            "0.0.0.0/0".into(),
+            "2001:db8:1::53/128".into(),
+            "::/0".into(),
+        ],
+        excluded_routes: vec!["10.0.0.0/8".into(), "2001:db8::/32".into()],
+        ..VpnOptions::default()
+    };
+
+    options.materialize_excluded_routes().unwrap();
+
+    assert!(options.excluded_routes.is_empty());
+    assert!(route_policy_contains(&options.routes, "8.8.8.8"));
+    assert!(!route_policy_contains(&options.routes, "10.20.30.40"));
+    assert!(route_policy_contains(&options.routes, "10.10.10.1"));
+    assert!(route_policy_contains(
+        &options.routes,
+        "2001:4860:4860::8888"
+    ));
+    assert!(!route_policy_contains(&options.routes, "2001:db8:2::1"));
+    assert!(route_policy_contains(&options.routes, "2001:db8:1::53"));
+}
+
+#[test]
+fn materializing_nested_excludes_is_order_independent() {
+    let mut narrow_then_wide = VpnOptions {
+        routes: vec!["0.0.0.0/0".into()],
+        excluded_routes: vec!["10.1.0.0/16".into(), "10.0.0.0/8".into()],
+        ..VpnOptions::default()
+    };
+    let mut wide_then_narrow = VpnOptions {
+        routes: vec!["0.0.0.0/0".into()],
+        excluded_routes: vec!["10.0.0.0/8".into(), "10.1.0.0/16".into()],
+        ..VpnOptions::default()
+    };
+
+    narrow_then_wide.materialize_excluded_routes().unwrap();
+    wide_then_narrow.materialize_excluded_routes().unwrap();
+
+    assert_eq!(narrow_then_wide.routes, wide_then_narrow.routes);
+    assert!(!route_policy_contains(&narrow_then_wide.routes, "10.2.0.1"));
+}
+
+#[test]
+fn materializing_an_empty_policy_is_rejected_without_mutation() {
+    let mut options = VpnOptions {
+        routes: vec!["0.0.0.0/0".into()],
+        excluded_routes: vec!["0.0.0.0/0".into()],
+        ..VpnOptions::default()
+    };
+    let original = options.clone();
+
+    let error = options.materialize_excluded_routes().unwrap_err();
+
+    assert!(error.contains("remove every include"));
+    assert_eq!(options, original);
+}
+
+#[test]
+fn invalid_and_bare_ipv6_routes_are_handled_explicitly() {
+    assert_eq!(
+        normalize_route_cidr("2001:db8::1").as_deref(),
+        Some("2001:db8::1/128")
+    );
+    let mut options = VpnOptions {
+        routes: vec!["0.0.0.0/0".into()],
+        excluded_routes: vec!["not-a-route".into()],
+        ..VpnOptions::default()
+    };
+    assert!(options
+        .materialize_excluded_routes()
+        .unwrap_err()
+        .contains("invalid VPN excluded"));
+}
+
+fn route_policy_contains(routes: &[String], address: &str) -> bool {
+    let address = address.parse::<std::net::IpAddr>().unwrap();
+    routes.iter().any(|route| {
+        let prefix = IpPrefix::parse(route).unwrap();
+        match address {
+            std::net::IpAddr::V4(address) => prefix.contains(IpPrefix::V4 {
+                network: u32::from(address),
+                bits: 32,
+            }),
+            std::net::IpAddr::V6(address) => prefix.contains(IpPrefix::V6 {
+                network: u128::from(address),
+                bits: 128,
+            }),
+        }
+    })
 }

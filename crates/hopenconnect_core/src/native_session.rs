@@ -34,12 +34,30 @@ pub struct PendingNativeSession {
     /// OpenConnect requires the platform TUN to be attached before the
     /// optional DTLS transport is initialized.
     setup_dtls_after_tun: bool,
+    /// The exact ArkTS protect registration captured when this Client was
+    /// built. It must not follow the mutable global slot across reconnects.
+    protect_monitor: Option<crate::platform_protect::ProtectMonitor>,
+}
+
+#[cfg(test)]
+pub(crate) fn test_pending_native_session() -> PendingNativeSession {
+    PendingNativeSession {
+        client: None,
+        network: NetworkSnapshot::default(),
+        options: VpnOptions::default(),
+        traffic: Arc::new(Mutex::new(SharedTraffic::default())),
+        setup_dtls_after_tun: false,
+        protect_monitor: None,
+    }
 }
 
 pub struct RunningNativeSession {
     command: anyconnect::CommandHandle,
     join: JoinHandle<CoreResult<()>>,
     traffic: Arc<Mutex<SharedTraffic>>,
+    generation: u64,
+    attempt_id: String,
+    protect_monitor: Option<crate::platform_protect::ProtectMonitor>,
 }
 
 impl RunningNativeSession {
@@ -67,9 +85,20 @@ impl RunningNativeSession {
     }
 
     pub fn join(self, timeout: Duration) -> CoreResult<()> {
-        // Best-effort: mainloop should exit after Cancel. We cannot truly timeout
-        // a JoinHandle without killing the thread, so we just join.
-        let _ = timeout;
+        let deadline = std::time::Instant::now() + timeout;
+        while !self.join.is_finished() {
+            let now = std::time::Instant::now();
+            if now >= deadline {
+                // Dropping JoinHandle detaches the worker. OpenConnect owns a
+                // dup of the old TUN fd, so it cannot close or reuse a newer
+                // VpnConnection descriptor if the C mainloop unwinds late.
+                return Err(CoreError::msg(format!(
+                    "anyconnect mainloop did not exit within {} ms",
+                    timeout.as_millis()
+                )));
+            }
+            std::thread::sleep((deadline - now).min(Duration::from_millis(10)));
+        }
         match self.join.join() {
             Ok(result) => result,
             Err(_) => Err(CoreError::msg("anyconnect mainloop thread panicked")),
@@ -78,6 +107,18 @@ impl RunningNativeSession {
 
     pub fn is_finished(&self) -> bool {
         self.join.is_finished()
+    }
+
+    pub fn generation(&self) -> u64 {
+        self.generation
+    }
+
+    pub fn attempt_id(&self) -> &str {
+        &self.attempt_id
+    }
+
+    pub fn take_protect_error(&self) -> CoreResult<()> {
+        crate::platform_protect::finish_operation(self.protect_monitor.as_ref())
     }
 }
 
@@ -255,6 +296,7 @@ pub fn authenticate(
         options,
         traffic,
         setup_dtls_after_tun: false,
+        protect_monitor: None,
     })
 }
 
@@ -1109,6 +1151,8 @@ fn resume_from_options_once(options: &VpnOptions) -> CoreResult<PendingNativeSes
     let has_cookie = cookie.is_some();
     let traffic = Arc::new(Mutex::new(SharedTraffic::default()));
     let traffic_cb = Arc::clone(&traffic);
+    let protect_monitor = crate::platform_protect::begin_operation()?;
+    let client_protect_monitor = protect_monitor.clone();
 
     if !has_cookie {
         return Err(CoreError::msg(
@@ -1159,7 +1203,11 @@ fn resume_from_options_once(options: &VpnOptions) -> CoreResult<PendingNativeSes
                 guard.stats.packets_received = stats.received_packets;
             }
         })
-        .protect_socket_handler(crate::platform_protect::invoke);
+        .protect_socket_handler(move |fd| {
+            if let Some(monitor) = client_protect_monitor.as_ref() {
+                monitor.invoke(fd);
+            }
+        });
     if options.external_auth_allowed {
         // SAML/SSO-v2: OpenConnect listens on localhost:29786 then asks us to
         // open the IdP URL. Extension has no UI Ability, so open() publishes a
@@ -1209,14 +1257,16 @@ fn resume_from_options_once(options: &VpnOptions) -> CoreResult<PendingNativeSes
     client
         .set_cookie(cookie_value)
         .map_err(|err| CoreError::msg(format!("extension set_cookie failed: {err}")))?;
-    client
-        .make_cstp_connection()
-        .map_err(|err| CoreError::msg(format!("extension make_cstp failed: {err}")))?;
+    let cstp_result = client.make_cstp_connection();
+    crate::platform_protect::finish_operation(protect_monitor.as_ref())?;
+    cstp_result.map_err(|err| CoreError::msg(format!("extension make_cstp failed: {err}")))?;
 
     let network = client.network_config()?;
     let mut profile = ConnectionProfile::new_draft();
     profile.mtu = options.mtu;
-    profile.allow_local_lan = options.allow_bypass;
+    // `allow_bypass` was the only hint in older handoffs. New handoffs carry
+    // the user's policy explicitly because full-tunnel derivation clears it.
+    profile.allow_local_lan = options.allow_local_lan || options.allow_bypass;
     profile.force_global = options.force_global;
     profile.split_tunnel_mode = options.split_tunnel_mode;
     profile.split_tunnel_networks = options.split_tunnel_networks.clone();
@@ -1259,27 +1309,17 @@ fn resume_from_options_once(options: &VpnOptions) -> CoreResult<PendingNativeSes
     filled.force_global = options.force_global || filled.force_global;
     // ics: force_global → 0.0.0.0/0; always ensure DNS host routes.
     filled.apply_force_global();
-    filled.normalize_routes();
-    for server in filled.dns_addresses.clone() {
-        let host = server.split('%').next().unwrap_or(&server).trim();
-        if host.is_empty() {
-            continue;
-        }
-        let host_route = if host.contains(':') {
-            format!("{host}/128")
-        } else {
-            format!("{host}/32")
-        };
-        if !filled.routes.iter().any(|r| r == &host_route) {
-            filled.routes.insert(0, host_route);
-        }
-    }
+    filled.push_dns_host_routes();
+    filled
+        .materialize_excluded_routes()
+        .map_err(CoreError::msg)?;
     Ok(PendingNativeSession {
         client: Some(client),
         network: snapshot,
         options: filled,
         traffic,
         setup_dtls_after_tun: options.use_dtls,
+        protect_monitor,
     })
 }
 
@@ -1287,6 +1327,8 @@ fn resume_from_options_once(options: &VpnOptions) -> CoreResult<PendingNativeSes
 pub fn spawn_mainloop(
     pending: PendingNativeSession,
     tun_fd: i32,
+    session_generation: u64,
+    attempt_id: String,
 ) -> CoreResult<RunningNativeSession> {
     use std::os::fd::BorrowedFd;
 
@@ -1298,6 +1340,7 @@ pub fn spawn_mainloop(
         client,
         traffic,
         setup_dtls_after_tun,
+        protect_monitor,
         ..
     } = pending;
     let mut client = client.ok_or_else(|| {
@@ -1316,15 +1359,33 @@ pub fn spawn_mainloop(
     // OpenConnect lifecycle: CSTP -> network config -> TUN -> optional DTLS ->
     // mainloop. A DTLS failure is non-fatal because CSTP remains the transport.
     if setup_dtls_after_tun {
+        if let Some(monitor) = protect_monitor.as_ref() {
+            monitor.clear_error()?;
+        }
         let _ = client.setup_dtls(60);
+        crate::platform_protect::finish_operation(protect_monitor.as_ref())?;
     }
+
+    if let Some(monitor) = protect_monitor.as_ref() {
+        monitor.clear_error()?;
+    }
+    let worker_protect_monitor = protect_monitor.clone();
 
     let join = std::thread::Builder::new()
         .name("hopenconnect-mainloop".to_owned())
         .spawn(move || {
             // 300s reconnect timeout, 10s interval — same order of magnitude as
             // the openconnect CLI defaults for interactive clients.
-            client.run_mainloop(300, 10).map_err(CoreError::from)
+            let mut result = client.run_mainloop(300, 10).map_err(CoreError::from);
+            if let Err(error) =
+                crate::platform_protect::finish_operation(worker_protect_monitor.as_ref())
+            {
+                result = Err(error);
+            }
+            let error = result.as_ref().err().map(ToString::to_string);
+            let _ =
+                crate::engine::shared_engine().on_native_session_ended(session_generation, error);
+            result
         })
         .map_err(|err| CoreError::msg(format!("failed to spawn mainloop thread: {err}")))?;
 
@@ -1332,6 +1393,9 @@ pub fn spawn_mainloop(
         command,
         join,
         traffic,
+        generation: session_generation,
+        attempt_id,
+        protect_monitor,
     })
 }
 

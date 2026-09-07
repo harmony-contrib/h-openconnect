@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::net::{Ipv4Addr, Ipv6Addr};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
@@ -35,6 +36,23 @@ impl ConnectionLifecycle {
 
     pub fn is_active(self) -> bool {
         matches!(self, Self::Connected)
+    }
+
+    /// Whether one observed lifecycle edge should trigger profile-level
+    /// reconnect. The caller must pass the state from before `tick()` as
+    /// `self`; otherwise a freshly detected terminal edge can be lost.
+    pub fn should_auto_reconnect_to(
+        self,
+        current: Self,
+        user_disconnect: bool,
+        dry_run: bool,
+        connect_on_demand: bool,
+    ) -> bool {
+        !user_disconnect
+            && !dry_run
+            && connect_on_demand
+            && self.is_active()
+            && matches!(current, Self::Disconnected | Self::Failed)
     }
 }
 
@@ -658,6 +676,10 @@ pub struct VpnOptions {
     pub search_domains: Vec<String>,
     pub mtu: u32,
     pub allow_bypass: bool,
+    /// Preserve the user's LAN-bypass policy across the isolated Extension handoff.
+    /// `allow_bypass` is only a derived platform hint and is false for full tunnel.
+    #[serde(default)]
+    pub allow_local_lan: bool,
     /// When true, system VPN uses a full default route regardless of split-include.
     #[serde(default)]
     pub force_global: bool,
@@ -846,52 +868,36 @@ impl VpnOptions {
             .filter_map(|s| normalize_route_cidr(s.trim()))
             .collect();
 
-        let (mut routes, dns_out, use_default) =
-            match (profile.force_global, profile.split_tunnel_mode) {
-                // ics full tunnel: default IPv4 (+ IPv6 when configured).
-                (true, _) => {
+        let (routes, dns_out, use_default) = match (profile.force_global, profile.split_tunnel_mode)
+        {
+            // ics full tunnel: default IPv4 (+ IPv6 when configured).
+            (true, _) => {
+                let mut r = vec!["0.0.0.0/0".to_owned()];
+                if has_ipv6 {
+                    r.push("::/0".to_owned());
+                }
+                (r, dns.clone(), true)
+            }
+            (false, SplitTunnelMode::OnVpnDns) if !custom_split.is_empty() => {
+                (custom_split, dns.clone(), false)
+            }
+            (false, SplitTunnelMode::OnUplinkDns) if !custom_split.is_empty() => {
+                // ics: custom routes but empty DNS list (use uplink resolver).
+                (custom_split, Vec::new(), false)
+            }
+            _ => {
+                // Auto: server includes; default when empty (ics addDefaultRoutes).
+                if server_split.is_empty() {
                     let mut r = vec!["0.0.0.0/0".to_owned()];
                     if has_ipv6 {
                         r.push("::/0".to_owned());
                     }
                     (r, dns.clone(), true)
+                } else {
+                    (server_split, dns.clone(), false)
                 }
-                (false, SplitTunnelMode::OnVpnDns) if !custom_split.is_empty() => {
-                    (custom_split, dns.clone(), false)
-                }
-                (false, SplitTunnelMode::OnUplinkDns) if !custom_split.is_empty() => {
-                    // ics: custom routes but empty DNS list (use uplink resolver).
-                    (custom_split, Vec::new(), false)
-                }
-                _ => {
-                    // Auto: server includes; default when empty (ics addDefaultRoutes).
-                    if server_split.is_empty() {
-                        let mut r = vec!["0.0.0.0/0".to_owned()];
-                        if has_ipv6 {
-                            r.push("::/0".to_owned());
-                        }
-                        (r, dns.clone(), true)
-                    } else {
-                        (server_split, dns.clone(), false)
-                    }
-                }
-            };
-
-        // ics ALWAYS (when VPN DNS is used): addRoute(dns, /32 or /128).
-        for server in &dns_out {
-            let dns_host = server.split('%').next().unwrap_or(server).trim();
-            if dns_host.is_empty() {
-                continue;
             }
-            let host_route = if dns_host.contains(':') {
-                format!("{dns_host}/128")
-            } else {
-                format!("{dns_host}/32")
-            };
-            if !routes.iter().any(|r| r == &host_route) {
-                routes.insert(0, host_route);
-            }
-        }
+        };
 
         let excluded_routes: Vec<String> = network
             .split_excludes
@@ -915,6 +921,7 @@ impl VpnOptions {
             },
             mtu,
             allow_bypass: profile.allow_local_lan && !use_default,
+            allow_local_lan: profile.allow_local_lan,
             force_global: use_default,
             server: Some(profile.server_url()),
             username: Some(profile.username.clone()),
@@ -964,6 +971,7 @@ impl VpnOptions {
                 }
             }
         }
+        options.push_dns_host_routes();
         options.normalize_routes();
         options
     }
@@ -978,23 +986,102 @@ impl VpnOptions {
         if has_ipv6 {
             routes.push("::/0".to_owned());
         }
-        for s in &self.dns_addresses {
-            let host = s.split('%').next().unwrap_or(s).trim();
-            if host.is_empty() {
-                continue;
-            }
-            let host_route = if host.contains(':') {
-                format!("{host}/128")
-            } else {
-                format!("{host}/32")
-            };
-            if !routes.iter().any(|r| r == &host_route) {
-                routes.insert(0, host_route);
-            }
-        }
         self.routes = routes;
         self.allow_bypass = false;
+        self.push_dns_host_routes();
         self.normalize_routes();
+    }
+
+    /// Add the VPN DNS resolvers as the most-specific include routes.
+    ///
+    /// Keeping this in one place avoids resume-time duplicate insertion and is
+    /// also important when an RFC1918 exclusion contains a private VPN DNS IP:
+    /// longest-prefix routing keeps the resolver's /32 or /128 on the tunnel.
+    pub fn push_dns_host_routes(&mut self) {
+        for server in self.dns_addresses.iter().rev() {
+            let host = server.split('%').next().unwrap_or(server).trim();
+            let Ok(address) = host.parse::<std::net::IpAddr>() else {
+                continue;
+            };
+            let host_route = match address {
+                std::net::IpAddr::V4(address) => format!("{address}/32"),
+                std::net::IpAddr::V6(address) => format!("{address}/128"),
+            };
+            if !self.routes.iter().any(|route| route == &host_route) {
+                self.routes.insert(0, host_route);
+            }
+        }
+    }
+
+    /// Convert split-exclude routes into positive CIDRs before handing the
+    /// configuration to the platform. This preserves the same longest-prefix
+    /// semantics on older OpenHarmony builds that ignore `isExcludedRoute`.
+    ///
+    /// A more-specific include (notably a private VPN DNS /32) wins over a
+    /// broader exclusion. An empty result is rejected because the platform
+    /// interprets an empty route list as a request to add default routes.
+    pub fn materialize_excluded_routes(&mut self) -> Result<(), String> {
+        for route in &self.routes {
+            if normalize_route_cidr(route).is_none() {
+                return Err(format!("invalid VPN include route: {route}"));
+            }
+        }
+        for route in &self.excluded_routes {
+            if normalize_route_cidr(route).is_none() {
+                return Err(format!("invalid VPN excluded route: {route}"));
+            }
+        }
+        self.normalize_routes();
+        if self.excluded_routes.is_empty() {
+            if self.routes.is_empty() {
+                return Err("VPN route policy has no include routes".to_owned());
+            }
+            return Ok(());
+        }
+
+        let exclusions: Vec<IpPrefix> = self
+            .excluded_routes
+            .iter()
+            .map(|route| {
+                IpPrefix::parse(route).ok_or_else(|| format!("invalid VPN excluded route: {route}"))
+            })
+            .collect::<Result<_, _>>()?;
+        let mut materialized = Vec::new();
+        for route in &self.routes {
+            let include = IpPrefix::parse(route)
+                .ok_or_else(|| format!("invalid VPN include route: {route}"))?;
+            let mut fragments = vec![include];
+            for exclusion in &exclusions {
+                // Longest-prefix semantics: a narrower include wins over a
+                // broader exclude. Exact ties are treated as exclusion.
+                if include.family() != exclusion.family()
+                    || (include.prefix_len() > exclusion.prefix_len()
+                        && exclusion.contains(include))
+                {
+                    continue;
+                }
+                fragments = fragments
+                    .into_iter()
+                    .flat_map(|fragment| fragment.subtract(*exclusion))
+                    .collect();
+                if fragments.is_empty() {
+                    break;
+                }
+            }
+            materialized.extend(fragments.into_iter().map(IpPrefix::to_cidr));
+        }
+
+        let mut seen = std::collections::HashSet::new();
+        materialized.retain(|route| seen.insert(route.clone()));
+        if materialized.is_empty() {
+            return Err(
+                "VPN route exclusions remove every include route; refusing implicit default route"
+                    .to_owned(),
+            );
+        }
+        self.routes = materialized;
+        self.excluded_routes.clear();
+        Ok(())
     }
 
     /// Convert any dotted-netmask routes to CIDR; normalise network bits (ics CIDRIP).
@@ -1006,6 +1093,156 @@ impl VpnOptions {
             .collect();
         let mut seen = std::collections::HashSet::new();
         self.routes.retain(|r| seen.insert(r.clone()));
+        self.excluded_routes = self
+            .excluded_routes
+            .iter()
+            .filter_map(|route| normalize_route_cidr(route))
+            .collect();
+        let mut seen_excluded = std::collections::HashSet::new();
+        self.excluded_routes
+            .retain(|route| seen_excluded.insert(route.clone()));
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum IpPrefix {
+    V4 { network: u32, bits: u8 },
+    V6 { network: u128, bits: u8 },
+}
+
+impl IpPrefix {
+    fn parse(value: &str) -> Option<Self> {
+        let (address, prefix) = value.trim().split_once('/')?;
+        match address.parse::<std::net::IpAddr>().ok()? {
+            std::net::IpAddr::V4(address) => {
+                let bits = prefix.parse::<u8>().ok()?;
+                if bits > 32 {
+                    return None;
+                }
+                let value = u32::from(address);
+                let mask = prefix_mask_v4(bits);
+                Some(Self::V4 {
+                    network: value & mask,
+                    bits,
+                })
+            }
+            std::net::IpAddr::V6(address) => {
+                let bits = prefix.parse::<u8>().ok()?;
+                if bits > 128 {
+                    return None;
+                }
+                let value = u128::from(address);
+                let mask = prefix_mask_v6(bits);
+                Some(Self::V6 {
+                    network: value & mask,
+                    bits,
+                })
+            }
+        }
+    }
+
+    fn family(self) -> u8 {
+        match self {
+            Self::V4 { .. } => 4,
+            Self::V6 { .. } => 6,
+        }
+    }
+
+    fn prefix_len(self) -> u8 {
+        match self {
+            Self::V4 { bits, .. } | Self::V6 { bits, .. } => bits,
+        }
+    }
+
+    fn contains(self, other: Self) -> bool {
+        match (self, other) {
+            (Self::V4 { network, bits }, Self::V4 { network: other, .. }) => {
+                other & prefix_mask_v4(bits) == network
+            }
+            (Self::V6 { network, bits }, Self::V6 { network: other, .. }) => {
+                other & prefix_mask_v6(bits) == network
+            }
+            _ => false,
+        }
+    }
+
+    fn subtract(self, exclusion: Self) -> Vec<Self> {
+        if self.family() != exclusion.family() {
+            return vec![self];
+        }
+        if exclusion.prefix_len() <= self.prefix_len() && exclusion.contains(self) {
+            return Vec::new();
+        }
+        if !self.contains(exclusion) {
+            return vec![self];
+        }
+
+        let (left, right) = self.children();
+        let mut result = Vec::new();
+        for child in [left, right] {
+            if child.contains(exclusion) {
+                result.extend(child.subtract(exclusion));
+            } else {
+                result.push(child);
+            }
+        }
+        result
+    }
+
+    fn children(self) -> (Self, Self) {
+        match self {
+            Self::V4 { network, bits } => {
+                let child_bits = bits + 1;
+                let right = network | (1u32 << (32 - child_bits));
+                (
+                    Self::V4 {
+                        network,
+                        bits: child_bits,
+                    },
+                    Self::V4 {
+                        network: right,
+                        bits: child_bits,
+                    },
+                )
+            }
+            Self::V6 { network, bits } => {
+                let child_bits = bits + 1;
+                let right = network | (1u128 << (128 - child_bits));
+                (
+                    Self::V6 {
+                        network,
+                        bits: child_bits,
+                    },
+                    Self::V6 {
+                        network: right,
+                        bits: child_bits,
+                    },
+                )
+            }
+        }
+    }
+
+    fn to_cidr(self) -> String {
+        match self {
+            Self::V4 { network, bits } => format!("{}/{bits}", Ipv4Addr::from(network)),
+            Self::V6 { network, bits } => format!("{}/{bits}", Ipv6Addr::from(network)),
+        }
+    }
+}
+
+fn prefix_mask_v4(bits: u8) -> u32 {
+    if bits == 0 {
+        0
+    } else {
+        u32::MAX << (32 - bits)
+    }
+}
+
+fn prefix_mask_v6(bits: u8) -> u128 {
+    if bits == 0 {
+        0
+    } else {
+        u128::MAX << (128 - bits)
     }
 }
 
@@ -1018,13 +1255,19 @@ pub fn normalize_route_cidr(route: &str) -> Option<String> {
     }
     let (ip, suffix) = match route.split_once('/') {
         Some((ip, suffix)) => (ip.trim(), suffix.trim()),
-        None => return Some(format!("{route}/32")),
+        None => {
+            let address = route.parse::<std::net::IpAddr>().ok()?;
+            return Some(match address {
+                std::net::IpAddr::V4(address) => format!("{address}/32"),
+                std::net::IpAddr::V6(address) => format!("{address}/128"),
+            });
+        }
     };
     if ip.is_empty() {
         return None;
     }
     if ip.contains(':') {
-        // IPv6: keep numeric prefix only
+        // IPv6: parse and normalise host bits as well.
         let bits: u8 = if suffix.contains('.') {
             return None;
         } else {
@@ -1033,7 +1276,9 @@ pub fn normalize_route_cidr(route: &str) -> Option<String> {
         if bits > 128 {
             return None;
         }
-        return Some(format!("{ip}/{bits}"));
+        let address = ip.parse::<Ipv6Addr>().ok()?;
+        let network = u128::from(address) & prefix_mask_v6(bits);
+        return Some(format!("{}/{bits}", Ipv6Addr::from(network)));
     }
     let bits = if suffix.contains('.') {
         ipv4_netmask_prefix(suffix)?

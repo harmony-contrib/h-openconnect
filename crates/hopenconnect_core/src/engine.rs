@@ -33,6 +33,8 @@ use crate::native_session::{
 
 const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 const PLATFORM_VPN_START_DEADLINE: Duration = Duration::from_secs(120);
+const PLATFORM_HEARTBEAT_STALE_AFTER: Duration = Duration::from_secs(15);
+const PLATFORM_HEARTBEAT_WAKE_GRACE: Duration = Duration::from_secs(6);
 
 #[cfg(feature = "native-anyconnect")]
 const BACKEND: &str = "anyconnect-rs";
@@ -61,6 +63,7 @@ struct Inner {
     store: Option<ProfileStore>,
     preferences: Preferences,
     connected_at: Option<Instant>,
+    dry_run: bool,
     generation: u64,
     platform_vpn_running: bool,
     platform_vpn_starting: bool,
@@ -72,7 +75,12 @@ struct Inner {
     platform_browser_request: Option<BrowserOpenRequest>,
     platform_browser_request_sequence: u64,
     last_platform_browser_request_id: String,
-    platform_vpn_state_updated_at: u128,
+    /// Revisions are lane-local. Never let a UI publish revision mask a newer
+    /// Extension heartbeat (or vice versa).
+    platform_local_state_updated_at: u128,
+    platform_remote_state_updated_at: u128,
+    platform_remote_state_seen_at: Option<Instant>,
+    platform_remote_stale_since: Option<Instant>,
     last_vpn_options: VpnOptions,
     logs: RecordedLogBuffer,
     platform_diagnostics: Vec<DiagnosticEntry>,
@@ -117,6 +125,7 @@ impl SessionEngine {
                 store: None,
                 preferences: Preferences::default(),
                 connected_at: None,
+                dry_run: false,
                 generation: 0,
                 platform_vpn_running: false,
                 platform_vpn_starting: false,
@@ -128,7 +137,10 @@ impl SessionEngine {
                 platform_browser_request: None,
                 platform_browser_request_sequence: 0,
                 last_platform_browser_request_id: String::new(),
-                platform_vpn_state_updated_at: 0,
+                platform_local_state_updated_at: 0,
+                platform_remote_state_updated_at: 0,
+                platform_remote_state_seen_at: None,
+                platform_remote_stale_since: None,
                 last_vpn_options: VpnOptions::default(),
                 logs: RecordedLogBuffer::new("."),
                 platform_diagnostics: Vec::new(),
@@ -210,6 +222,7 @@ fn sanitized_want_options(options: &VpnOptions) -> VpnOptions {
         search_domains: options.search_domains.clone(),
         mtu: options.mtu,
         allow_bypass: options.allow_bypass,
+        allow_local_lan: options.allow_local_lan,
         force_global: options.force_global,
         trusted_applications: options.trusted_applications.clone(),
         blocked_applications: options.blocked_applications.clone(),

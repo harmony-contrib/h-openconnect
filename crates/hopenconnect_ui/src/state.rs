@@ -492,20 +492,18 @@ pub(crate) fn reduce(state: &mut State, action: Action) -> Command<Action> {
                 }
             }
             let prev = state.last_lifecycle;
+            let _ = shared_engine().tick();
             state.sync_engine();
             let now = state.snapshot.lifecycle;
             // Profile-level auto-reconnect after an unexpected drop while the app is active.
-            let want_reconnect = !state.user_disconnect
-                && !state.dry_run
-                && prev.is_active()
-                && matches!(
-                    now,
-                    ConnectionLifecycle::Disconnected | ConnectionLifecycle::Failed
-                )
-                && state
+            let want_reconnect = prev.should_auto_reconnect_to(
+                now,
+                state.user_disconnect,
+                state.dry_run,
+                state
                     .active_connection()
-                    .map(|c| c.connect_on_demand)
-                    .unwrap_or(false);
+                    .is_some_and(|connection| connection.connect_on_demand),
+            );
             state.last_lifecycle = now;
             if want_reconnect {
                 // Silent reconnect; home status already updates via lifecycle.
@@ -516,9 +514,6 @@ pub(crate) fn reduce(state: &mut State, action: Action) -> Command<Action> {
                     |_| Action::TickSession,
                 ));
             }
-            let _ = shared_engine().tick();
-            state.sync_engine();
-            state.last_lifecycle = state.snapshot.lifecycle;
             // Poll faster while connecting/authenticating so challenge sheets
             // appear promptly after OpenConnect posts a form.
             let fast_poll = state.snapshot.pending_auth.is_some()
@@ -705,7 +700,8 @@ pub(crate) fn reduce(state: &mut State, action: Action) -> Command<Action> {
                         if let Some(group) = fallback {
                             state.draft.group = group.name.clone();
                             if !requested.is_empty() {
-                                warning = Some(translate_ui(state.locale, tr::toast_group_fallback()));
+                                warning =
+                                    Some(translate_ui(state.locale, tr::toast_group_fallback()));
                             }
                         }
                     }
@@ -973,10 +969,9 @@ pub(crate) fn reduce(state: &mut State, action: Action) -> Command<Action> {
             }
             Command::none()
         }
-        Action::OpenExternalUrl(url) => Command::perform(
-            bridge::open_external_url(url),
-            Action::ExternalUrlOpened,
-        ),
+        Action::OpenExternalUrl(url) => {
+            Command::perform(bridge::open_external_url(url), Action::ExternalUrlOpened)
+        }
         Action::ExternalUrlOpened(result) => {
             if let Err(error) = result {
                 state.push_toast(format!(

@@ -85,6 +85,19 @@ pub fn attach_platform_shared_memory(ashmem_fd: i32, notification_fd: i32) -> Re
         .map_err(to_napi_error)
 }
 
+/// Check that a Want still names the current UI transaction without changing
+/// the Extension's existing IPC binding or native-session owner.
+#[napi]
+pub fn validate_platform_vpn_start_request(
+    ashmem_fd: i32,
+    notification_fd: i32,
+    attempt_id: String,
+) -> Result<()> {
+    shared_engine()
+        .validate_platform_vpn_start_request(ashmem_fd, notification_fd, &attempt_id)
+        .map_err(to_napi_error)
+}
+
 /// Block until the peer process publishes a platform frame (or the wait is
 /// cancelled). Fully event driven: parks on the notification socket, never
 /// polls a timeout.
@@ -298,11 +311,21 @@ pub async fn start_vpn(fd: i32, options_json: String) -> Result<()> {
         .map_err(to_napi_error)
 }
 
+/// VPN-extension heartbeat: reconcile cross-process terminal state, refresh
+/// native statistics, and publish a fresh Extension lane frame.
 #[napi]
-pub async fn stop_vpn() -> Result<()> {
-    shared_engine().disconnect().await.map_err(to_napi_error)?;
+pub fn extension_tick() -> Result<String> {
     shared_engine()
-        .set_platform_vpn_running(false)
+        .tick()
+        .map(|snapshot| snapshot.lifecycle.as_str().to_owned())
+        .map_err(to_napi_error)
+}
+
+#[napi]
+pub async fn stop_vpn(attempt_id: String) -> Result<bool> {
+    shared_engine()
+        .disconnect_platform_attempt(&attempt_id)
+        .await
         .map_err(to_napi_error)
 }
 

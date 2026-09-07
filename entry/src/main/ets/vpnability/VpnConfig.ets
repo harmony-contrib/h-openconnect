@@ -78,6 +78,7 @@ export interface VpnOptions {
   searchDomains?: string[];
   mtu?: number;
   allowBypass?: boolean;
+  allowLocalLan?: boolean;
   forceGlobal?: boolean;
   trustedApplications?: string[];
   blockedApplications?: string[];
@@ -106,6 +107,11 @@ export class HOpenVpnConfig {
       parseLinkAddress(value, addressDefaultPrefix(value)));
 
     const routeStrs = options.routes ?? [];
+    if (routeStrs.length === 0) {
+      // NetVpnImpl adds defaults for an empty list. Never turn an invalid or
+      // fully-excluded policy into an accidental full tunnel.
+      throw new Error('VPN configuration has no explicit routes');
+    }
     this.routes = routeStrs.map((value: string) =>
       new RouteInfo(parseLinkAddress(value, routeDefaultPrefix(value))));
     const excludedRouteStrs = options.excludedRoutes ?? [];
