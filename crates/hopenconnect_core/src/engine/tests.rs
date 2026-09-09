@@ -146,13 +146,391 @@ fn platform_vpn_state_revision_is_strictly_monotonic() {
     let future_revision = PlatformVpnState::now_nanos().saturating_add(3_600_000_000_000);
     {
         let mut inner = engine.lock().unwrap();
-        inner.platform_vpn_state_updated_at = future_revision;
+        inner.platform_local_state_updated_at = future_revision;
     }
 
     engine.set_platform_vpn_starting(true).unwrap();
 
-    let revision = engine.lock().unwrap().platform_vpn_state_updated_at;
+    let revision = engine.lock().unwrap().platform_local_state_updated_at;
     assert_eq!(revision, future_revision + 1);
+}
+
+#[test]
+fn stale_native_exit_cannot_clobber_a_newer_generation() {
+    let engine = SessionEngine::new();
+    {
+        let mut inner = engine.lock().unwrap();
+        inner.generation = 7;
+        inner.platform_vpn_running = true;
+        engine.set_lifecycle_locked(&mut inner, ConnectionLifecycle::Connected, None);
+    }
+
+    engine
+        .on_native_session_ended(6, Some("old worker failed".to_owned()))
+        .unwrap();
+
+    let snapshot = engine.snapshot().unwrap();
+    assert_eq!(snapshot.lifecycle, ConnectionLifecycle::Connected);
+    assert!(snapshot.last_error.is_none());
+}
+
+#[test]
+fn current_native_exit_publishes_a_terminal_state() {
+    let engine = SessionEngine::new();
+    {
+        let mut inner = engine.lock().unwrap();
+        inner.generation = 7;
+        inner.platform_vpn_running = true;
+        inner.platform_start_outcome = PlatformStartOutcome::Connected;
+        engine.set_lifecycle_locked(&mut inner, ConnectionLifecycle::Connected, None);
+    }
+
+    engine
+        .on_native_session_ended(7, Some("peer closed".to_owned()))
+        .unwrap();
+
+    let snapshot = engine.snapshot().unwrap();
+    assert_eq!(snapshot.lifecycle, ConnectionLifecycle::Failed);
+    assert_eq!(snapshot.last_error.as_deref(), Some("peer closed"));
+}
+
+#[test]
+fn delayed_starting_ipc_frame_cannot_revive_a_cancelled_attempt() {
+    let engine = SessionEngine::new();
+    let mut inner = engine.lock().unwrap();
+    inner.platform_start_attempt_id = "attempt-cancelled".to_owned();
+    inner.platform_start_outcome = PlatformStartOutcome::Cancelled;
+    inner.platform_vpn_starting = false;
+    inner.platform_vpn_running = false;
+    engine.set_lifecycle_locked(&mut inner, ConnectionLifecycle::Disconnected, None);
+
+    let delayed = crate::platform_ipc::PlatformEnvelope {
+        state: Some(PlatformVpnState {
+            start_attempt_id: "attempt-cancelled".to_owned(),
+            start_outcome: PlatformStartOutcome::Pending,
+            extension_attached: true,
+            starting: true,
+            lifecycle: ConnectionLifecycle::Establishing,
+            updated_at: 9,
+            ..PlatformVpnState::default()
+        }),
+        ..crate::platform_ipc::PlatformEnvelope::default()
+    };
+
+    engine.apply_platform_envelope_locked(&mut inner, true, None, delayed);
+
+    assert_eq!(inner.snapshot.lifecycle, ConnectionLifecycle::Disconnected);
+    assert_eq!(
+        inner.platform_start_outcome,
+        PlatformStartOutcome::Cancelled
+    );
+    assert!(!inner.platform_vpn_starting);
+    assert!(!inner.platform_vpn_running);
+}
+
+#[test]
+fn pending_attachment_frame_does_not_cancel_start_before_extension_runs() {
+    let engine = SessionEngine::new();
+    let mut inner = engine.lock().unwrap();
+    inner.platform_start_attempt_id = "attempt-starting".to_owned();
+    inner.platform_start_outcome = PlatformStartOutcome::Pending;
+    inner.platform_vpn_starting = true;
+    engine.set_lifecycle_locked(&mut inner, ConnectionLifecycle::Establishing, None);
+
+    let attachment = crate::platform_ipc::PlatformEnvelope {
+        state: Some(PlatformVpnState {
+            start_attempt_id: "attempt-starting".to_owned(),
+            start_outcome: PlatformStartOutcome::Pending,
+            extension_attached: true,
+            lifecycle: ConnectionLifecycle::Disconnected,
+            updated_at: 20,
+            ..PlatformVpnState::default()
+        }),
+        ..crate::platform_ipc::PlatformEnvelope::default()
+    };
+    engine.apply_platform_envelope_locked(&mut inner, true, None, attachment);
+    assert_eq!(inner.snapshot.lifecycle, ConnectionLifecycle::Establishing);
+    assert_eq!(inner.platform_start_outcome, PlatformStartOutcome::Pending);
+    assert!(inner.platform_vpn_starting);
+    assert!(!inner.platform_vpn_running);
+
+    let starting = crate::platform_ipc::PlatformEnvelope {
+        state: Some(PlatformVpnState {
+            start_attempt_id: "attempt-starting".to_owned(),
+            start_outcome: PlatformStartOutcome::Pending,
+            extension_attached: true,
+            starting: true,
+            lifecycle: ConnectionLifecycle::Establishing,
+            updated_at: 21,
+            ..PlatformVpnState::default()
+        }),
+        ..crate::platform_ipc::PlatformEnvelope::default()
+    };
+    engine.apply_platform_envelope_locked(&mut inner, true, None, starting);
+    assert_eq!(inner.snapshot.lifecycle, ConnectionLifecycle::Establishing);
+    assert!(inner.platform_vpn_starting);
+
+    let connected = crate::platform_ipc::PlatformEnvelope {
+        state: Some(PlatformVpnState {
+            start_attempt_id: "attempt-starting".to_owned(),
+            start_outcome: PlatformStartOutcome::Connected,
+            extension_attached: true,
+            running: true,
+            lifecycle: ConnectionLifecycle::Connected,
+            updated_at: 22,
+            ..PlatformVpnState::default()
+        }),
+        ..crate::platform_ipc::PlatformEnvelope::default()
+    };
+    engine.apply_platform_envelope_locked(&mut inner, true, None, connected);
+    assert_eq!(inner.snapshot.lifecycle, ConnectionLifecycle::Connected);
+    assert!(inner.platform_vpn_running);
+}
+
+#[test]
+fn cancelled_after_pending_attachment_reaches_disconnected_terminal() {
+    let engine = SessionEngine::new();
+    let mut inner = engine.lock().unwrap();
+    inner.platform_start_attempt_id = "attempt-cancel".to_owned();
+    inner.platform_start_outcome = PlatformStartOutcome::Pending;
+    inner.platform_vpn_starting = true;
+    engine.set_lifecycle_locked(&mut inner, ConnectionLifecycle::Establishing, None);
+
+    for (updated_at, outcome) in [
+        (40, PlatformStartOutcome::Pending),
+        (41, PlatformStartOutcome::Cancelled),
+    ] {
+        engine.apply_platform_envelope_locked(
+            &mut inner,
+            true,
+            None,
+            crate::platform_ipc::PlatformEnvelope {
+                state: Some(PlatformVpnState {
+                    start_attempt_id: "attempt-cancel".to_owned(),
+                    start_outcome: outcome,
+                    extension_attached: true,
+                    lifecycle: ConnectionLifecycle::Disconnected,
+                    updated_at,
+                    ..PlatformVpnState::default()
+                }),
+                ..crate::platform_ipc::PlatformEnvelope::default()
+            },
+        );
+    }
+
+    assert_eq!(
+        inner.platform_start_outcome,
+        PlatformStartOutcome::Cancelled
+    );
+    assert_eq!(inner.snapshot.lifecycle, ConnectionLifecycle::Disconnected);
+    assert!(!inner.platform_vpn_starting);
+    assert!(!inner.platform_vpn_running);
+}
+
+#[test]
+fn extension_adopts_new_pending_attempt_as_establishing() {
+    let engine = SessionEngine::new();
+    let mut inner = engine.lock().unwrap();
+
+    let start = crate::platform_ipc::PlatformEnvelope {
+        state: Some(PlatformVpnState {
+            start_attempt_id: "attempt-new".to_owned(),
+            start_outcome: PlatformStartOutcome::Pending,
+            starting: true,
+            lifecycle: ConnectionLifecycle::Establishing,
+            updated_at: 30,
+            ..PlatformVpnState::default()
+        }),
+        ..crate::platform_ipc::PlatformEnvelope::default()
+    };
+    engine.apply_platform_envelope_locked(&mut inner, false, Some("attempt-new"), start);
+
+    assert_eq!(inner.platform_start_attempt_id, "attempt-new");
+    assert_eq!(inner.snapshot.lifecycle, ConnectionLifecycle::Establishing);
+    assert!(inner.platform_vpn_starting);
+}
+
+#[test]
+fn extension_attempt_adoption_requires_the_exact_explicit_want() {
+    let engine = SessionEngine::new();
+    let mut inner = engine.lock().unwrap();
+    inner.generation = 7;
+    inner.platform_start_attempt_id = "attempt-old".to_owned();
+    inner.platform_start_outcome = PlatformStartOutcome::Failed;
+    engine.set_lifecycle_locked(
+        &mut inner,
+        ConnectionLifecycle::Failed,
+        Some("old mainloop exited".to_owned()),
+    );
+
+    let next = crate::platform_ipc::PlatformEnvelope {
+        state: Some(PlatformVpnState {
+            start_attempt_id: "attempt-next".to_owned(),
+            start_outcome: PlatformStartOutcome::Pending,
+            starting: true,
+            lifecycle: ConnectionLifecycle::Establishing,
+            updated_at: 31,
+            ..PlatformVpnState::default()
+        }),
+        ..crate::platform_ipc::PlatformEnvelope::default()
+    };
+
+    // An old cleanup heartbeat and a stale old Want must not acquire the new
+    // transaction merely because it is now visible in the shared UI lane.
+    let stale_error =
+        super::platform::validate_platform_start_envelope(&next, "attempt-old").unwrap_err();
+    assert!(stale_error.to_string().contains("attempt-next"));
+    engine.apply_platform_envelope_locked(&mut inner, false, None, next.clone());
+    engine.apply_platform_envelope_locked(&mut inner, false, Some("attempt-old"), next.clone());
+    assert_eq!(inner.platform_start_attempt_id, "attempt-old");
+    assert_eq!(inner.generation, 7);
+    assert_eq!(inner.platform_start_outcome, PlatformStartOutcome::Failed);
+    assert_eq!(inner.snapshot.lifecycle, ConnectionLifecycle::Failed);
+
+    // The onRequest path carrying the exact new id is the ownership boundary.
+    engine.apply_platform_envelope_locked(&mut inner, false, Some("attempt-next"), next);
+    assert_eq!(inner.platform_start_attempt_id, "attempt-next");
+    assert_eq!(inner.generation, 8);
+    assert_eq!(inner.platform_start_outcome, PlatformStartOutcome::Pending);
+    assert_eq!(inner.snapshot.lifecycle, ConnectionLifecycle::Establishing);
+    assert!(inner.platform_vpn_starting);
+}
+
+#[tokio::test]
+async fn stale_disconnect_completion_does_not_overwrite_a_new_attempt() {
+    let engine = Arc::new(SessionEngine::new());
+    {
+        let mut inner = engine.lock().unwrap();
+        inner.generation = 10;
+        inner.platform_start_attempt_id = "attempt-old".to_owned();
+        inner.platform_start_outcome = PlatformStartOutcome::Failed;
+        inner.platform_vpn_running = false;
+        engine.set_lifecycle_locked(
+            &mut inner,
+            ConnectionLifecycle::Failed,
+            Some("old mainloop exited".to_owned()),
+        );
+    }
+
+    let cleanup = {
+        let engine = Arc::clone(&engine);
+        tokio::spawn(async move { engine.disconnect_platform_attempt("attempt-old").await })
+    };
+    tokio::time::sleep(Duration::from_millis(20)).await;
+    {
+        let mut inner = engine.lock().unwrap();
+        inner.generation = inner.generation.saturating_add(1);
+        inner.platform_start_attempt_id = "attempt-next".to_owned();
+        inner.platform_start_outcome = PlatformStartOutcome::Pending;
+        inner.platform_vpn_starting = true;
+        engine.set_lifecycle_locked(&mut inner, ConnectionLifecycle::Establishing, None);
+    }
+
+    assert!(!cleanup.await.unwrap().unwrap());
+    let inner = engine.lock().unwrap();
+    assert_eq!(inner.platform_start_attempt_id, "attempt-next");
+    assert_eq!(inner.platform_start_outcome, PlatformStartOutcome::Pending);
+    assert_eq!(inner.snapshot.lifecycle, ConnectionLifecycle::Establishing);
+    assert!(inner.platform_vpn_starting);
+}
+
+#[test]
+#[cfg(feature = "native-anyconnect")]
+fn matching_extension_attachment_releases_ui_auth_client_for_reconnect() {
+    let engine = SessionEngine::new();
+    let mut inner = engine.lock().unwrap();
+    inner.platform_start_attempt_id = "attempt-connected".to_owned();
+    inner.platform_start_outcome = PlatformStartOutcome::Pending;
+    inner.platform_vpn_starting = true;
+    inner.pending_native = Some(crate::native_session::test_pending_native_session());
+    engine.set_lifecycle_locked(&mut inner, ConnectionLifecycle::Establishing, None);
+
+    let connected = crate::platform_ipc::PlatformEnvelope {
+        state: Some(PlatformVpnState {
+            start_attempt_id: "attempt-connected".to_owned(),
+            start_outcome: PlatformStartOutcome::Connected,
+            extension_attached: true,
+            running: true,
+            lifecycle: ConnectionLifecycle::Connected,
+            updated_at: 10,
+            ..PlatformVpnState::default()
+        }),
+        ..crate::platform_ipc::PlatformEnvelope::default()
+    };
+
+    engine.apply_platform_envelope_locked(&mut inner, true, None, connected);
+
+    assert!(inner.pending_native.is_none());
+    assert_eq!(inner.snapshot.lifecycle, ConnectionLifecycle::Connected);
+}
+
+#[test]
+#[cfg(feature = "native-anyconnect")]
+fn auth_client_release_is_scoped_to_ui_and_matching_attempt() {
+    let remote_state = |attempt_id: &str, updated_at: u128| PlatformVpnState {
+        start_attempt_id: attempt_id.to_owned(),
+        start_outcome: PlatformStartOutcome::Connected,
+        extension_attached: true,
+        running: true,
+        lifecycle: ConnectionLifecycle::Connected,
+        updated_at,
+        ..PlatformVpnState::default()
+    };
+
+    let extension = SessionEngine::new();
+    let mut extension_inner = extension.lock().unwrap();
+    extension_inner.platform_start_attempt_id = "attempt-current".to_owned();
+    extension_inner.pending_native = Some(crate::native_session::test_pending_native_session());
+    extension.apply_platform_envelope_locked(
+        &mut extension_inner,
+        false,
+        None,
+        crate::platform_ipc::PlatformEnvelope {
+            state: Some(remote_state("attempt-current", 11)),
+            ..crate::platform_ipc::PlatformEnvelope::default()
+        },
+    );
+    assert!(extension_inner.pending_native.is_some());
+    drop(extension_inner);
+
+    let ui = SessionEngine::new();
+    let mut ui_inner = ui.lock().unwrap();
+    ui_inner.platform_start_attempt_id = "attempt-current".to_owned();
+    ui_inner.pending_native = Some(crate::native_session::test_pending_native_session());
+    ui.apply_platform_envelope_locked(
+        &mut ui_inner,
+        true,
+        None,
+        crate::platform_ipc::PlatformEnvelope {
+            state: Some(remote_state("attempt-old", 12)),
+            ..crate::platform_ipc::PlatformEnvelope::default()
+        },
+    );
+    assert!(ui_inner.pending_native.is_some());
+}
+
+#[test]
+fn heartbeat_watchdog_uses_monotonic_wake_grace_and_clears_on_refresh() {
+    let engine = SessionEngine::new();
+    let mut inner = engine.lock().unwrap();
+    inner.platform_vpn_running = true;
+    let now = Instant::now();
+    inner.platform_remote_state_seen_at =
+        Some(now - PLATFORM_HEARTBEAT_STALE_AFTER - PLATFORM_HEARTBEAT_WAKE_GRACE);
+
+    // The first stale observation starts a fresh wake-up grace period.
+    assert!(!super::platform::heartbeat_watchdog_expired(
+        &mut inner, now, true, true, true, false,
+    ));
+    inner.platform_remote_stale_since = Some(now - PLATFORM_HEARTBEAT_WAKE_GRACE);
+    assert!(super::platform::heartbeat_watchdog_expired(
+        &mut inner, now, true, true, true, false,
+    ));
+
+    assert!(!super::platform::heartbeat_watchdog_expired(
+        &mut inner, now, true, true, true, true,
+    ));
+    assert!(inner.platform_remote_stale_since.is_none());
 }
 
 #[test]

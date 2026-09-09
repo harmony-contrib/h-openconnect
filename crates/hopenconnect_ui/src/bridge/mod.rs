@@ -15,16 +15,21 @@ mod safe_area;
 mod url;
 mod vpn;
 
-use std::sync::{LazyLock, RwLock};
+use std::sync::{mpsc, LazyLock, RwLock};
+use std::time::Duration;
 
 use arkit::openharmony_ability::{AsyncBridge, BridgeCallOptions, BridgePlugin, OpenHarmonyApp};
 
 pub(crate) use self::cert_file::{CertFileRequest, CertFileResponse, HOpenCertFileBridgePlugin};
-pub(crate) use self::color_mode::{ColorModeRequest, ColorModeResponse, HOpenColorModeBridgePlugin};
+pub(crate) use self::color_mode::{
+    ColorModeRequest, ColorModeResponse, HOpenColorModeBridgePlugin,
+};
 pub(crate) use self::export::{ExportTextRequest, ExportTextResponse, HOpenExportBridgePlugin};
-pub(crate) use self::safe_area::{initial_safe_area, InitialSafeArea, HOpenSafeAreaBridgePlugin};
+pub(crate) use self::safe_area::{initial_safe_area, HOpenSafeAreaBridgePlugin, InitialSafeArea};
 pub(crate) use self::url::{HOpenUrlBridgePlugin, UrlOpenRequest, UrlOpenResponse};
-pub(crate) use self::vpn::{VpnStartRequest, VpnStartResponse, VpnStopRequest, VpnStopResponse, HOpenVpnBridgePlugin};
+pub(crate) use self::vpn::{
+    HOpenVpnBridgePlugin, VpnStartRequest, VpnStartResponse, VpnStopRequest, VpnStopResponse,
+};
 
 /// Rust-side handle of the current Ability session, installed by `init`.
 static INNER_APP: LazyLock<RwLock<Option<OpenHarmonyApp>>> = LazyLock::new(|| RwLock::new(None));
@@ -58,27 +63,25 @@ where
         .map_err(|err| err.to_string())
 }
 
-/// Fire-and-forget outbound plugin call (no observable outcome for the UI).
-fn spawn_call<P, R, S>(action: &'static str, request: R)
+/// Queue a fire-and-forget outbound plugin call after proving that the current
+/// Ability and its bridge are available. The eventual ArkTS result is not
+/// observable by synchronous native callbacks such as OpenConnect's browser
+/// opener, but failure to queue the call must be reported immediately.
+fn spawn_call<P, R, S>(action: &'static str, request: R) -> std::result::Result<(), String>
 where
     P: BridgePlugin<Mode = AsyncBridge>,
     R: arkit::openharmony_ability::BridgeNapiType + 'static,
     S: arkit::openharmony_ability::BridgeNapiType + 'static,
 {
-    let app = match current_app() {
-        Ok(app) => app,
-        Err(_) => return,
-    };
-    let bridge = match app.bridge() {
-        Ok(bridge) => bridge,
-        Err(_) => return,
-    };
+    let app = current_app()?;
+    let bridge = app.bridge().map_err(|err| err.to_string())?;
     let task = async move {
         let _ = bridge
             .call_async::<P, R, S>(action, request, BridgeCallOptions::default())
             .await;
     };
     arkit::napi_ohos::bindgen_prelude::spawn(task);
+    Ok(())
 }
 
 /// Certificate file role for the system document picker.
@@ -141,14 +144,13 @@ pub(crate) fn set_color_mode(color_mode: i32) -> std::result::Result<(), String>
     spawn_call::<HOpenColorModeBridgePlugin, ColorModeRequest, ColorModeResponse>(
         "set-color-mode",
         ColorModeRequest { mode: color_mode },
-    );
-    Ok(())
+    )
 }
 
-/// Open a SAML/SSO or generic external URL through the system link opener.
+/// Queue an external URL without waiting for the platform result.
 ///
-/// Fire-and-forget: OpenConnect's SSO loop is a blocking native thread, so we
-/// only queue the open and let the ArkTS plugin report failures.
+/// This remains appropriate for extension-to-UI requests: the UI render loop
+/// must not block while consuming the ashmem notification.
 pub(crate) fn open_external_browser(uri: String) -> std::result::Result<(), String> {
     if uri.trim().is_empty() {
         return Err("empty browser uri".to_owned());
@@ -156,8 +158,43 @@ pub(crate) fn open_external_browser(uri: String) -> std::result::Result<(), Stri
     spawn_call::<HOpenUrlBridgePlugin, UrlOpenRequest, UrlOpenResponse>(
         "open-url",
         UrlOpenRequest { url: uri },
-    );
-    Ok(())
+    )
+}
+
+/// Open the SAML/SSO URL and synchronously observe the system acknowledgement.
+///
+/// OpenConnect invokes its browser callback on a blocking authentication
+/// worker. Waiting here is therefore safe for the UI thread and, unlike a
+/// fire-and-forget call, lets OpenConnect cancel its loopback accept when the
+/// device has no browser Ability or `openLink` rejects the request.
+pub(crate) fn open_external_browser_blocking(uri: String) -> std::result::Result<(), String> {
+    if uri.trim().is_empty() {
+        return Err("empty browser uri".to_owned());
+    }
+    let app = current_app()?;
+    let bridge = app.bridge().map_err(|err| err.to_string())?;
+    let (sender, receiver) = mpsc::sync_channel(1);
+    let task = async move {
+        let result = bridge
+            .call_async::<HOpenUrlBridgePlugin, UrlOpenRequest, UrlOpenResponse>(
+                "open-url",
+                UrlOpenRequest { url: uri },
+                BridgeCallOptions::default(),
+            )
+            .await
+            .map_err(|err| err.to_string())
+            .and_then(|response| {
+                response
+                    .accepted
+                    .then_some(())
+                    .ok_or_else(|| "URL plugin rejected the open request".to_owned())
+            });
+        let _ = sender.send(result);
+    };
+    arkit::napi_ohos::bindgen_prelude::spawn(task);
+    receiver
+        .recv_timeout(Duration::from_secs(10))
+        .map_err(|_| "timed out waiting for the system browser".to_owned())?
 }
 
 /// Open an external URL, awaiting the platform acknowledgement so the caller

@@ -4,10 +4,10 @@
 //! host to open `sso_login` in an external browser.
 //!
 //! Dual-process HarmonyOS:
-//! - Full auth runs in the VPN **extension** process (no UI Ability).
+//! - Interactive authentication normally runs in the **UI** process.
 //! - Opening the system browser needs the **UI** process (`startAbility`).
 //! - When no in-process handler is registered, the request is published through
-//!   the Extension-owned ashmem lane for the UI to consume exactly once.
+//!   the Extension-owned ashmem lane for a later extension reauthentication.
 
 use std::sync::Mutex;
 
@@ -34,18 +34,13 @@ pub fn open(uri: &str) -> bool {
         return false;
     }
 
-    // 1) Same-process handler (UI process, if auth ever runs there).
-    let in_process = if let Ok(mut guard) = OPEN_BROWSER.lock() {
+    // 1) Same-process handler. A registered handler owns the result: when the
+    // platform rejects the URL we must not turn that rejection into a queued
+    // fallback and leave OpenConnect waiting indefinitely.
+    if let Ok(mut guard) = OPEN_BROWSER.lock() {
         if let Some(handler) = guard.as_mut() {
-            handler(uri)
-        } else {
-            false
+            return handler(uri);
         }
-    } else {
-        false
-    };
-    if in_process {
-        return true;
     }
 
     // 2) Cross-process: extension → UI via ashmem.

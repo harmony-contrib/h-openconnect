@@ -40,6 +40,20 @@ export default function localUnitTest() {
       expect(rejected).assertEqual(true);
     });
 
+    it('rejectsEmptyRoutesInsteadOfPlatformDefaultRouteFallback', 0, () => {
+      let rejected = false;
+      try {
+        buildVpnConfig(parseOptions(JSON.stringify({
+          addresses: ['10.10.10.2/24'],
+          routes: [],
+          dnsAddresses: ['8.8.8.8'],
+        })));
+      } catch (_err) {
+        rejected = true;
+      }
+      expect(rejected).assertEqual(true);
+    });
+
     it('rejectsMalformedOptionsInsteadOfUsingDefaults', 0, () => {
       let rejected = false;
       try {

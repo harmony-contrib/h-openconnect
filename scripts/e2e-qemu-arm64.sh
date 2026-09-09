@@ -16,16 +16,29 @@ QEMU_ACCEL="${QEMU_ACCEL:-auto}"
 QEMU_BOOT_TIMEOUT="${QEMU_BOOT_TIMEOUT:-240}"
 VPN_START_TIMEOUT="${VPN_START_TIMEOUT:-100}"
 VPN_DEADLINE_TIMEOUT="${VPN_DEADLINE_TIMEOUT:-150}"
-RUN_DEADLINE_TEST="${RUN_DEADLINE_TEST:-1}"
+RUN_DEADLINE_TEST="${RUN_DEADLINE_TEST:-}"
+RUN_ISSUE3_MATRIX="${RUN_ISSUE3_MATRIX:-0}"
 BUNDLE_NAME="${BUNDLE_NAME:-com.richerfu.h_openconnect}"
 ABILITY_NAME="${ABILITY_NAME:-EntryAbility}"
 OCSERV_PORT="${OCSERV_PORT:-14433}"
 OCSERV_USER="${OCSERV_USER:-demo}"
 OCSERV_PASS="${OCSERV_PASS:-demo}"
+OCSERV_AUTH_MODE="${OCSERV_AUTH_MODE:-password}"
+OCSERV_CLIENT_KEY_PASS="${OCSERV_CLIENT_KEY_PASS:-hopenconnect}"
+CLIENT_CERT_FORMAT="${CLIENT_CERT_FORMAT:-pem}"
+SSO_FRONTEND_PORT="${SSO_FRONTEND_PORT:-15445}"
+SSO_BROWSER_PORT="${SSO_BROWSER_PORT:-18082}"
+SSO_PYTHON="${SSO_PYTHON:-python3}"
+SSO_BROWSER_DRIVER="${SSO_BROWSER_DRIVER:-system}"
+EXPECT_SSO_BROWSER_FAILURE="${EXPECT_SSO_BROWSER_FAILURE:-0}"
+TUN_ENDPOINT_PORT="${TUN_ENDPOINT_PORT:-18443}"
+LAN_ENDPOINT_PORT="${LAN_ENDPOINT_PORT:-18080}"
+LAN_ENDPOINT_HOST="${LAN_ENDPOINT_HOST:-}"
 RUN_ID="${GITHUB_RUN_ID:-local}-$(date +%s)-$$"
 OCSERV_NAME="${OCSERV_NAME:-hopenconnect-ocserv-ci-${RUN_ID}}"
 ARTIFACT_DIR="${ARTIFACT_DIR:-$ROOT_DIR/smoke-logs/qemu-ci-${RUN_ID}}"
 KEEP_QEMU_RUN_DIR="${KEEP_QEMU_RUN_DIR:-0}"
+QEMU_TEST_TMP_PARENT="${QEMU_TEST_TMP_PARENT:-${TMPDIR:-/tmp}}"
 
 if [ -z "$QEMU_PACKAGE_DIR" ]; then
   echo "QEMU_PACKAGE_DIR is required" >&2
@@ -35,12 +48,57 @@ if [ ! -f "$HAP_PATH" ]; then
   echo "signed HAP not found: $HAP_PATH" >&2
   exit 2
 fi
+case "$OCSERV_AUTH_MODE" in
+  password|certificate|password-and-certificate|saml) ;;
+  *) echo "unsupported OCSERV_AUTH_MODE: $OCSERV_AUTH_MODE" >&2; exit 2 ;;
+esac
+if [ -z "$RUN_DEADLINE_TEST" ]; then
+  if [ "$OCSERV_AUTH_MODE" = "password" ]; then
+    RUN_DEADLINE_TEST=1
+  else
+    RUN_DEADLINE_TEST=0
+  fi
+fi
+case "$RUN_DEADLINE_TEST" in
+  0|1) ;;
+  *) echo "RUN_DEADLINE_TEST must be 0 or 1" >&2; exit 2 ;;
+esac
+if [ "$OCSERV_AUTH_MODE" = "saml" ] && [ "$RUN_DEADLINE_TEST" = "1" ]; then
+  echo "RUN_DEADLINE_TEST=1 is incompatible with browser authentication" >&2
+  exit 2
+fi
+case "$CLIENT_CERT_FORMAT" in
+  pem|p12) ;;
+  *) echo "unsupported CLIENT_CERT_FORMAT: $CLIENT_CERT_FORMAT" >&2; exit 2 ;;
+esac
+case "$SSO_BROWSER_DRIVER" in
+  system|device) ;;
+  *) echo "unsupported SSO_BROWSER_DRIVER: $SSO_BROWSER_DRIVER" >&2; exit 2 ;;
+esac
+case "$EXPECT_SSO_BROWSER_FAILURE" in
+  0|1) ;;
+  *) echo "EXPECT_SSO_BROWSER_FAILURE must be 0 or 1" >&2; exit 2 ;;
+esac
+if [ "$EXPECT_SSO_BROWSER_FAILURE" = "1" ] && \
+   { [ "$OCSERV_AUTH_MODE" != "saml" ] || [ "$SSO_BROWSER_DRIVER" != "system" ]; }; then
+  echo "EXPECT_SSO_BROWSER_FAILURE=1 requires SAML with the system browser driver" >&2
+  exit 2
+fi
 if [ "$(uname -s)" != "Darwin" ] || [ "$(uname -m)" != "arm64" ]; then
   echo "this E2E requires an ARM64 macOS host (got $(uname -s)/$(uname -m))" >&2
   exit 2
 fi
 
-for command_name in qemu-system-aarch64 "$HDC" docker pgrep python3; do
+if [ "$RUN_ISSUE3_MATRIX" = "1" ] && [ -z "$LAN_ENDPOINT_HOST" ]; then
+  default_interface="$(route -n get default 2>/dev/null | awk '$1 == "interface:" {print $2; exit}')"
+  LAN_ENDPOINT_HOST="$(ipconfig getifaddr "$default_interface" 2>/dev/null || true)"
+  if [ -z "$LAN_ENDPOINT_HOST" ]; then
+    echo "LAN_ENDPOINT_HOST is required for the issue-3 route matrix" >&2
+    exit 2
+  fi
+fi
+
+for command_name in qemu-system-aarch64 "$HDC" docker pgrep python3 nc; do
   if ! command -v "$command_name" >/dev/null 2>&1; then
     echo "required command not found: $command_name" >&2
     exit 2
@@ -60,7 +118,8 @@ if ! grep -Eq '"guest_arch"[[:space:]]*:[[:space:]]*"arm64"' "$QEMU_MANIFEST" ||
 fi
 
 mkdir -p "$ARTIFACT_DIR"
-TEST_TMP="$(mktemp -d "${TMPDIR:-/tmp}/hopenconnect-qemu-ci.XXXXXX")"
+mkdir -p "$QEMU_TEST_TMP_PARENT"
+TEST_TMP="$(mktemp -d "$QEMU_TEST_TMP_PARENT/hopenconnect-qemu-ci.XXXXXX")"
 QEMU_RUN_ROOT="$TEST_TMP/qemu"
 QEMU_RUN_DIR="$QEMU_RUN_ROOT/$(basename "$QEMU_PACKAGE_DIR")"
 OCSERV_DATA_DIR="$TEST_TMP/ocserv"
@@ -74,6 +133,9 @@ QEMU_PID=""
 QEMU_CHILD_PID=""
 HDC_READY=0
 OCSERV_STARTED=0
+LAN_SERVER_PID=""
+SSO_SERVER_PID=""
+SSO_DRIVER_PID=""
 
 hdc_cmd() {
   # Establishing a system VPN can reset QEMU's existing host-forwarded HDC
@@ -124,6 +186,132 @@ wait_tun_absent() {
   return 1
 }
 
+start_headend_listener() {
+  # Some ocserv versions configure only the peer address on vpns*. Give the
+  # test endpoint an explicit local address so success proves TUN delivery to
+  # this container rather than depending on an implicit gateway alias.
+  docker exec "$OCSERV_NAME" ip address add 10.10.10.1/32 dev lo >/dev/null 2>&1 || true
+  docker exec "$OCSERV_NAME" sh -c \
+    'if [ -f /tmp/hopen-listener.pid ]; then kill "$(cat /tmp/hopen-listener.pid)" 2>/dev/null || true; fi' \
+    >/dev/null 2>&1 || true
+  docker exec -d "$OCSERV_NAME" sh -c \
+    "openssl s_server -quiet -www -accept ${TUN_ENDPOINT_PORT} -cert /etc/ocserv/server-cert.pem -key /etc/ocserv/server-key.pem >/tmp/hopen-listener.log 2>&1 & echo \$! >/tmp/hopen-listener.pid; wait"
+  for _ in $(seq 1 20); do
+    if docker exec "$OCSERV_NAME" sh -c \
+      'test -s /tmp/hopen-listener.pid && kill -0 "$(cat /tmp/hopen-listener.pid)"' \
+      >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 0.25
+  done
+  docker exec "$OCSERV_NAME" sh -c 'cat /tmp/hopen-listener.log 2>/dev/null' >&2 || true
+  echo "headend listener failed to start" >&2
+  return 1
+}
+
+prepare_headend_counters() {
+  docker exec "$OCSERV_NAME" iptables -N HOPEN_E2E >/dev/null 2>&1 || \
+    docker exec "$OCSERV_NAME" iptables -F HOPEN_E2E
+  docker exec "$OCSERV_NAME" iptables -C FORWARD -j HOPEN_E2E >/dev/null 2>&1 || \
+    docker exec "$OCSERV_NAME" iptables -I FORWARD 1 -j HOPEN_E2E
+  docker exec "$OCSERV_NAME" iptables -A HOPEN_E2E -i 'vpns+' \
+    -d "${LAN_ENDPOINT_HOST}/32" -p tcp --dport "$LAN_ENDPOINT_PORT" -j RETURN
+  docker exec "$OCSERV_NAME" iptables -A HOPEN_E2E -i 'vpns+' \
+    -p tcp --dport 443 -j RETURN
+}
+
+headend_counter() {
+  local line="$1"
+  docker exec "$OCSERV_NAME" iptables -L HOPEN_E2E -nvx --line-numbers | \
+    awk -v line="$line" '$1 == line {print $2; exit}'
+}
+
+probe_full_lan_through_headend() {
+  local probe_output="$1"
+  local counter_output="$2"
+  local before
+  local after
+  before="$(headend_counter 1)"
+  hdc_cmd shell "/data/local/tmp/device-net-probe $app_uid $LAN_ENDPOINT_HOST $LAN_ENDPOINT_PORT" | \
+    tee "$probe_output"
+  after="$(headend_counter 1)"
+  printf 'before=%s\nafter=%s\n' "$before" "$after" >"$counter_output"
+  grep -q "connected ${LAN_ENDPOINT_HOST}:${LAN_ENDPOINT_PORT}" "$probe_output"
+  if [ "$after" -le "$before" ]; then
+    echo "full LAN-off TCP did not traverse the headend (before=$before after=$after)" >&2
+    return 1
+  fi
+}
+
+capture_guest_network_policy() {
+  local output="$1"
+  hdc_cmd shell "
+    id
+    ifconfig
+    netstat -rn
+    cat /proc/net/route
+    cat /proc/net/ipv6_route
+    ip rule show 2>&1 || true
+    ip -4 route show table all 2>&1 || true
+    iptables -L -nvx 2>&1 || true
+    iptables -t mangle -L -nvx 2>&1 || true
+  " >"$output" 2>&1 || true
+}
+
+enable_test_log_recording() {
+  hdc_cmd shell "
+    mkdir -p $app_home/logs
+    echo $RUN_ID >$app_home/logs/.recording
+    chown -R $app_uid:$app_uid $app_home/logs
+    chmod 700 $app_home/logs
+    chmod 600 $app_home/logs/.recording
+  "
+}
+
+ocserv_session_id() {
+  docker exec "$OCSERV_NAME" occtl show users 2>/dev/null | \
+    awk -v user="$OCSERV_USER" '$2 == user && $NF == "connected" {print $1; exit}'
+}
+
+wait_new_ocserv_session() {
+  local old_id="$1"
+  local timeout="$2"
+  local deadline=$((SECONDS + timeout))
+  while [ "$SECONDS" -lt "$deadline" ]; do
+    local new_id
+    new_id="$(ocserv_session_id || true)"
+    if [ -n "$new_id" ] && [ "$new_id" != "$old_id" ]; then
+      printf '%s\n' "$new_id"
+      return 0
+    fi
+    sleep 1
+  done
+  echo "no replacement ocserv session within ${timeout}s (old=$old_id)" >&2
+  return 1
+}
+
+vpn_extension_pid() {
+  hdc_cmd shell "pidof $BUNDLE_NAME:vpn" 2>/dev/null | tr -d '\r ' | awk '{print $1}'
+}
+
+wait_new_extension_pid() {
+  local old_pid="$1"
+  local timeout="$2"
+  local deadline=$((SECONDS + timeout))
+  while [ "$SECONDS" -lt "$deadline" ]; do
+    local new_pid
+    new_pid="$(vpn_extension_pid || true)"
+    if [ -n "$new_pid" ] && [ "$new_pid" != "$old_pid" ] && tun_exists && \
+       dump_layout && grep -Eq '已连接|Connected' "$LAYOUT_FILE"; then
+      printf '%s\n' "$new_pid"
+      return 0
+    fi
+    sleep 1
+  done
+  echo "VPN extension did not restart within ${timeout}s (old=$old_pid)" >&2
+  return 1
+}
+
 capture_hilog() {
   local output="$1"
   local filter="${2:-}"
@@ -151,10 +339,21 @@ collect_artifacts() {
     capture_hilog "$HILOG_FILE" || true
     dump_layout || true
     hdc_cmd shell "ifconfig vpn-tun; netstat -rn" >"$ARTIFACT_DIR/network.txt" 2>&1 || true
+    capture_guest_network_policy "$ARTIFACT_DIR/guest-network-policy-final.txt"
+    hdc_cmd shell "ls -la $app_home/logs 2>&1; cat $app_home/logs/*.log 2>&1" \
+      >"$ARTIFACT_DIR/app-runtime.log" 2>&1 || true
+    hdc_cmd shell "cat $app_home/openconnect-progress.log 2>&1" \
+      >"$ARTIFACT_DIR/openconnect-progress.log" 2>&1 || true
   fi
   if [ "$OCSERV_STARTED" = "1" ]; then
     docker logs "$OCSERV_NAME" >"$ARTIFACT_DIR/ocserv.log" 2>&1 || true
     docker exec "$OCSERV_NAME" occtl show users >"$ARTIFACT_DIR/ocserv-users.txt" 2>&1 || true
+    docker exec "$OCSERV_NAME" sh -c 'cat /tmp/hopen-listener.log 2>/dev/null' \
+      >"$ARTIFACT_DIR/headend-listener.log" 2>&1 || true
+    docker exec "$OCSERV_NAME" sh -c 'ip -4 addr; ss -lntp' \
+      >"$ARTIFACT_DIR/headend-network.txt" 2>&1 || true
+    docker exec "$OCSERV_NAME" iptables -L HOPEN_E2E -nvx --line-numbers \
+      >"$ARTIFACT_DIR/headend-counters-final.txt" 2>&1 || true
   fi
 }
 
@@ -162,6 +361,10 @@ resolve_qemu_child() {
   if [ -n "$QEMU_PID" ]; then
     pgrep -P "$QEMU_PID" -f 'qemu-system-aarch64' 2>/dev/null | head -n 1 || true
   fi
+}
+
+resolve_qemu_run_pid() {
+  pgrep -f "qemu-system-aarch64.*${QEMU_RUN_DIR}/images/Image" 2>/dev/null | head -n 1 || true
 }
 
 stop_qemu() {
@@ -184,6 +387,11 @@ stop_qemu() {
   if [ -n "$QEMU_CHILD_PID" ] && kill -0 "$QEMU_CHILD_PID" >/dev/null 2>&1; then
     kill -KILL "$QEMU_CHILD_PID" >/dev/null 2>&1 || true
   fi
+  local run_pid
+  run_pid="$(resolve_qemu_run_pid)"
+  if [ -n "$run_pid" ] && kill -0 "$run_pid" >/dev/null 2>&1; then
+    kill -KILL "$run_pid" >/dev/null 2>&1 || true
+  fi
 }
 
 cleanup() {
@@ -191,6 +399,18 @@ cleanup() {
   trap - EXIT INT TERM
   set +e
   collect_artifacts
+  if [ -n "$LAN_SERVER_PID" ] && kill -0 "$LAN_SERVER_PID" >/dev/null 2>&1; then
+    kill -TERM "$LAN_SERVER_PID" >/dev/null 2>&1 || true
+    wait "$LAN_SERVER_PID" >/dev/null 2>&1 || true
+  fi
+  if [ -n "$SSO_SERVER_PID" ] && kill -0 "$SSO_SERVER_PID" >/dev/null 2>&1; then
+    kill -TERM "$SSO_SERVER_PID" >/dev/null 2>&1 || true
+    wait "$SSO_SERVER_PID" >/dev/null 2>&1 || true
+  fi
+  if [ -n "$SSO_DRIVER_PID" ] && kill -0 "$SSO_DRIVER_PID" >/dev/null 2>&1; then
+    kill -TERM "$SSO_DRIVER_PID" >/dev/null 2>&1 || true
+    wait "$SSO_DRIVER_PID" >/dev/null 2>&1 || true
+  fi
   if [ "$OCSERV_STARTED" = "1" ]; then
     OCSERV_NAME="$OCSERV_NAME" OCSERV_DATA_DIR="$OCSERV_DATA_DIR" \
       OCSERV_PORT="$OCSERV_PORT" "$ROOT_DIR/scripts/dev-ocserv.sh" stop >/dev/null 2>&1
@@ -213,10 +433,52 @@ if ! cp -cR "$QEMU_PACKAGE_DIR" "$QEMU_RUN_DIR" 2>/dev/null; then
 fi
 
 echo "==> start local AnyConnect headend"
+headend_auth_mode="$OCSERV_AUTH_MODE"
+if [ "$OCSERV_AUTH_MODE" = "saml" ]; then
+  headend_auth_mode="password"
+fi
 OCSERV_NAME="$OCSERV_NAME" OCSERV_DATA_DIR="$OCSERV_DATA_DIR" \
   OCSERV_PORT="$OCSERV_PORT" OCSERV_USER="$OCSERV_USER" OCSERV_PASS="$OCSERV_PASS" \
-  OCSERV_HOST_IP="10.0.2.2" "$ROOT_DIR/scripts/dev-ocserv.sh" start
+  OCSERV_AUTH_MODE="$headend_auth_mode" OCSERV_CLIENT_KEY_PASS="$OCSERV_CLIENT_KEY_PASS" \
+  OCSERV_HOST_IP="10.0.2.2" OCSERV_DISABLE_NO_ROUTES="$RUN_ISSUE3_MATRIX" \
+  "$ROOT_DIR/scripts/dev-ocserv.sh" start
 OCSERV_STARTED=1
+
+if [ "$OCSERV_AUTH_MODE" = "saml" ]; then
+  echo "==> start SSO-v2/HPKE test gateway backed by ocserv"
+  if ! "$SSO_PYTHON" -c 'import cryptography' >/dev/null 2>&1; then
+    echo "SSO_PYTHON must provide the cryptography package" >&2
+    exit 2
+  fi
+  "$SSO_PYTHON" "$ROOT_DIR/scripts/dev-sso-v2-server.py" \
+    --port "$SSO_FRONTEND_PORT" --browser-port "$SSO_BROWSER_PORT" \
+    --backend-port "$OCSERV_PORT" --username "$OCSERV_USER" --password "$OCSERV_PASS" \
+    --cert "$OCSERV_DATA_DIR/server-cert.pem" --key "$OCSERV_DATA_DIR/server-key.pem" \
+    >"$ARTIFACT_DIR/sso-v2-server.log" 2>&1 &
+  SSO_SERVER_PID=$!
+  for _ in $(seq 1 40); do
+    if ! kill -0 "$SSO_SERVER_PID" >/dev/null 2>&1; then
+      cat "$ARTIFACT_DIR/sso-v2-server.log" >&2
+      echo "SSO-v2 test gateway exited during startup" >&2
+      exit 1
+    fi
+    if nc -z 127.0.0.1 "$SSO_FRONTEND_PORT" >/dev/null 2>&1 && \
+       nc -z 127.0.0.1 "$SSO_BROWSER_PORT" >/dev/null 2>&1; then
+      break
+    fi
+    sleep 0.25
+  done
+fi
+
+if [ "$RUN_ISSUE3_MATRIX" = "1" ]; then
+  echo "==> start controlled host-LAN endpoint"
+  echo "host LAN endpoint: ${LAN_ENDPOINT_HOST}:${LAN_ENDPOINT_PORT}"
+  mkdir -p "$TEST_TMP/lan-endpoint"
+  printf '%s\n' 'h-openconnect issue 3 LAN endpoint' >"$TEST_TMP/lan-endpoint/index.html"
+  python3 -m http.server "$LAN_ENDPOINT_PORT" --bind 0.0.0.0 \
+    --directory "$TEST_TMP/lan-endpoint" >"$ARTIFACT_DIR/lan-endpoint.log" 2>&1 &
+  LAN_SERVER_PID=$!
+fi
 
 echo "==> boot ARM64 OpenHarmony QEMU"
 QEMU_DISPLAY=none QEMU_ACCEL="$QEMU_ACCEL" QEMU_HDC_HOST_PORT="$HDC_HOST_PORT" \
@@ -272,19 +534,66 @@ echo "application UID: $app_uid"
 
 echo "==> provision a normal local ocserv profile"
 mkdir -p "$PROFILE_DIR"
-cat >"$PROFILE_DIR/connections.json" <<JSON
+app_home="/data/app/el2/100/base/$BUNDLE_NAME/haps/entry/files/h-openconnect"
+# The module-scoped filesDir path seen inside this Stage-model application.
+# HDC provisioning still writes through app_home above.
+app_visible_home="/data/storage/el2/base/haps/entry/files/h-openconnect"
+profile_auth_method="password"
+profile_username="$OCSERV_USER"
+profile_password="$OCSERV_PASS"
+profile_certificate=""
+profile_private_key=""
+profile_key_password=""
+profile_server_port="$OCSERV_PORT"
+profile_external_browser_auth=false
+case "$OCSERV_AUTH_MODE" in
+  certificate)
+    profile_auth_method="certificate"
+    profile_password=""
+    ;;
+  password-and-certificate)
+    profile_auth_method="passwordAndCertificate"
+    ;;
+  saml)
+    profile_server_port="$SSO_FRONTEND_PORT"
+    profile_auth_method="saml"
+    profile_username=""
+    profile_password=""
+    profile_external_browser_auth=true
+    ;;
+esac
+if [ "$OCSERV_AUTH_MODE" = "certificate" ] || \
+   [ "$OCSERV_AUTH_MODE" = "password-and-certificate" ]; then
+  if [ "$CLIENT_CERT_FORMAT" = "p12" ]; then
+    profile_certificate="$app_visible_home/certs/client.p12"
+    profile_key_password="$OCSERV_CLIENT_KEY_PASS"
+  else
+    profile_certificate="$app_visible_home/certs/client-cert.pem"
+    profile_private_key="$app_visible_home/certs/client-key.pem"
+  fi
+fi
+write_profile() {
+  local allow_local_lan="$1"
+  local force_global="$2"
+  local split_tunnel_mode="$3"
+  local split_tunnel_networks="$4"
+  local connect_on_demand="$5"
+  cat >"$PROFILE_DIR/connections.json" <<JSON
 [
   {
-    "id": "qemu-ci", "name": "QEMU CI ocserv", "server": "10.0.2.2:${OCSERV_PORT}",
-    "group": "", "username": "${OCSERV_USER}", "password": "${OCSERV_PASS}",
-    "protocol": "anyConnect", "authMethod": "password", "certificate": "",
-    "privateKey": "", "secondaryCertificate": "", "secondaryPrivateKey": "",
-    "caCertificate": "", "keyPassword": "", "secondaryKeyPassword": "",
+    "id": "qemu-ci", "name": "QEMU CI ocserv", "server": "10.0.2.2:${profile_server_port}",
+    "group": "", "username": "${profile_username}", "password": "${profile_password}",
+    "protocol": "anyConnect", "authMethod": "${profile_auth_method}",
+    "certificate": "${profile_certificate}", "privateKey": "${profile_private_key}",
+    "secondaryCertificate": "", "secondaryPrivateKey": "",
+    "caCertificate": "", "keyPassword": "${profile_key_password}", "secondaryKeyPassword": "",
     "httpProxy": "", "serverCertHash": "", "backupServers": "",
     "strictCertificateTrust": false, "blockUntrustedServers": false,
-    "allowLocalLan": false, "forceGlobal": false, "splitTunnelMode": "auto",
-    "splitTunnelNetworks": "", "connectOnDemand": false,
-    "externalBrowserAuth": false, "fipsMode": false, "allowInsecureCrypto": false,
+    "allowLocalLan": ${allow_local_lan}, "forceGlobal": ${force_global},
+    "splitTunnelMode": "${split_tunnel_mode}",
+    "splitTunnelNetworks": "${split_tunnel_networks}",
+    "connectOnDemand": ${connect_on_demand},
+    "externalBrowserAuth": ${profile_external_browser_auth}, "fipsMode": false, "allowInsecureCrypto": false,
     "useDtls": false, "reportedOs": "OpenHarmony", "userAgent": "",
     "clientVersion": "", "sni": "", "requirePfs": false,
     "disableXmlPost": false, "dpdSeconds": 0, "softwareToken": "disabled",
@@ -293,18 +602,71 @@ cat >"$PROFILE_DIR/connections.json" <<JSON
   }
 ]
 JSON
+}
+if [ "$RUN_ISSUE3_MATRIX" = "1" ] || [ "$OCSERV_AUTH_MODE" != "password" ]; then
+  write_profile false true auto "" true
+else
+  write_profile false false auto "" false
+fi
 cat >"$PROFILE_DIR/preferences.json" <<'JSON'
 {"activeConnectionId":"qemu-ci","language":"system","theme":"system"}
 JSON
 
-app_home="/data/app/el2/100/base/$BUNDLE_NAME/haps/entry/files/h-openconnect"
-hdc_cmd shell "mkdir -p $app_home"
-hdc_cmd file send "$PROFILE_DIR/connections.json" "$app_home/connections.json" >/dev/null
-hdc_cmd file send "$PROFILE_DIR/preferences.json" "$app_home/preferences.json" >/dev/null
-hdc_cmd shell "chown -R $app_uid:$app_uid $app_home; chmod 700 $app_home; chmod 600 $app_home/*.json"
+install_profile() {
+  hdc_cmd shell "mkdir -p $app_home"
+  hdc_cmd file send "$PROFILE_DIR/connections.json" "$app_home/connections.json" >/dev/null
+  hdc_cmd file send "$PROFILE_DIR/preferences.json" "$app_home/preferences.json" >/dev/null
+  hdc_cmd shell "chown -R $app_uid:$app_uid $app_home; chmod 700 $app_home; chmod 600 $app_home/*.json"
+}
+install_client_identity() {
+  if [ "$OCSERV_AUTH_MODE" != "certificate" ] && \
+     [ "$OCSERV_AUTH_MODE" != "password-and-certificate" ]; then
+    return
+  fi
+  hdc_cmd shell "mkdir -p $app_home/certs"
+  if [ "$CLIENT_CERT_FORMAT" = "p12" ]; then
+    hdc_cmd file send "$OCSERV_DATA_DIR/client.p12" "$app_home/certs/client.p12" >/dev/null
+  else
+    hdc_cmd file send "$OCSERV_DATA_DIR/client-cert.pem" "$app_home/certs/client-cert.pem" >/dev/null
+    hdc_cmd file send "$OCSERV_DATA_DIR/client-key.pem" "$app_home/certs/client-key.pem" >/dev/null
+  fi
+  hdc_cmd shell "chown -R $app_uid:$app_uid $app_home/certs; chmod 700 $app_home/certs; chmod 600 $app_home/certs/*"
+}
+reload_profile() {
+  hdc_cmd shell "aa force-stop $BUNDLE_NAME" >/dev/null 2>&1 || true
+  install_profile
+  hdc_cmd shell "aa start -a $ABILITY_NAME -b $BUNDLE_NAME" >/dev/null
+  wait_layout_text 'QEMU CI ocserv' 30
+  if [ "$RUN_ISSUE3_MATRIX" = "1" ]; then
+    enable_test_log_recording
+  fi
+}
+install_client_identity
+install_profile
 
 hdc_cmd shell "hilog -G 8M >/dev/null; hilog -r >/dev/null; aa start -a $ABILITY_NAME -b $BUNDLE_NAME" >/dev/null
 wait_layout_text 'QEMU CI ocserv' 30
+if [ "$OCSERV_AUTH_MODE" = "certificate" ] || \
+   [ "$OCSERV_AUTH_MODE" = "password-and-certificate" ]; then
+  app_pid="$(hdc_cmd shell "pidof $BUNDLE_NAME" 2>/dev/null | tr -d '\r ' | awk '{print $1}')"
+  if ! [[ "$app_pid" =~ ^[0-9]+$ ]]; then
+    echo "failed to find application process for certificate visibility check" >&2
+    exit 1
+  fi
+  hdc_cmd shell "ls -la /proc/$app_pid/root$app_visible_home/certs" \
+    >"$ARTIFACT_DIR/client-identity-files.txt" 2>&1 || true
+  if ! grep -q "$(basename "$profile_certificate")" \
+    "$ARTIFACT_DIR/client-identity-files.txt"; then
+    echo "client certificate is not readable inside the application sandbox" >&2
+    cat "$ARTIFACT_DIR/client-identity-files.txt" >&2
+    exit 1
+  fi
+fi
+if [ "$RUN_ISSUE3_MATRIX" = "1" ]; then
+  # This marker uses the app's normal opt-in recorder after startup has reset
+  # any stale marker. It keeps late lifecycle evidence available after cleanup.
+  enable_test_log_recording
+fi
 
 if [ "$RUN_DEADLINE_TEST" = "1" ]; then
   echo "==> verify a pending API 24 authorization reaches the global deadline"
@@ -325,10 +687,67 @@ if [ "$RUN_DEADLINE_TEST" = "1" ]; then
 fi
 
 echo "==> authorize and establish the real AnyConnect tunnel"
+if [ "$OCSERV_AUTH_MODE" = "saml" ] && [ "$SSO_BROWSER_DRIVER" = "device" ]; then
+  OHOS_CLANG="${OHOS_CLANG:-${OHOS_NDK_HOME:-}/native/llvm/bin/aarch64-unknown-linux-ohos-clang}"
+  if [ ! -x "$OHOS_CLANG" ]; then
+    echo "OpenHarmony aarch64 clang not found: $OHOS_CLANG" >&2
+    exit 2
+  fi
+  "$OHOS_CLANG" "$ROOT_DIR/scripts/device-sso-browser.c" -o "$TEST_TMP/device-sso-browser"
+  hdc_cmd file send "$TEST_TMP/device-sso-browser" /data/local/tmp/device-sso-browser >/dev/null
+  hdc_cmd shell "chmod 755 /data/local/tmp/device-sso-browser"
+  (
+    browser_deadline=$((SECONDS + 30))
+    browser_url=""
+    while [ "$SECONDS" -lt "$browser_deadline" ]; do
+      browser_url="$(sed -n 's/^.*BROWSER_URL //p' "$ARTIFACT_DIR/sso-v2-server.log" | tail -n 1)"
+      [ -n "$browser_url" ] && break
+      sleep 0.1
+    done
+    if [ -z "$browser_url" ]; then
+      echo "timed out waiting for the SSO browser URL" >&2
+      exit 1
+    fi
+    hdc_cmd shell "/data/local/tmp/device-sso-browser '$browser_url'" | \
+      tee "$ARTIFACT_DIR/sso-device-browser.log"
+  ) &
+  SSO_DRIVER_PID=$!
+fi
 click 400 340
+if [ "$EXPECT_SSO_BROWSER_FAILURE" = "1" ]; then
+  wait_layout_text '连接失败|Connection failed' 30
+  if tun_exists; then
+    echo "vpn-tun exists after the system rejected the SSO browser" >&2
+    exit 1
+  fi
+  hdc_cmd shell "cat $app_home/openconnect-progress.log 2>&1" \
+    >"$ARTIFACT_DIR/openconnect-progress-browser-failure.log" 2>&1 || true
+  if ! grep -q 'Failed to spawn external browser' \
+    "$ARTIFACT_DIR/openconnect-progress-browser-failure.log"; then
+    echo "OpenConnect did not record the rejected external browser" >&2
+    exit 1
+  fi
+  if ! grep -q 'Socket accept cancelled' \
+    "$ARTIFACT_DIR/openconnect-progress-browser-failure.log"; then
+    echo "OpenConnect did not cancel the SSO loopback wait" >&2
+    exit 1
+  fi
+  echo "ARM64 QEMU SSO browser rejection E2E OK"
+  echo "artifacts: $ARTIFACT_DIR"
+  exit 0
+fi
 wait_layout_text '是否允许使用 VPN|Allow.*VPN|VPN.*Allow' 30
 click 495 316
+if [ "$OCSERV_AUTH_MODE" = "saml" ]; then
+  # The external browser remains foregrounded after the loopback callback.
+  # Bring the existing EntryAbility task forward without restarting it.
+  hdc_cmd shell "aa start -a $ABILITY_NAME -b $BUNDLE_NAME" >/dev/null
+fi
 wait_layout_text '已连接|Connected' "$VPN_START_TIMEOUT"
+if [ -n "$SSO_DRIVER_PID" ]; then
+  wait "$SSO_DRIVER_PID"
+  SSO_DRIVER_PID=""
+fi
 
 hdc_cmd shell "ifconfig vpn-tun" | tee "$ARTIFACT_DIR/tun-connected.txt"
 hdc_cmd shell "netstat -rn" | tee "$ARTIFACT_DIR/routes-connected.txt"
@@ -360,30 +779,203 @@ fi
 "$OHOS_CLANG" "$ROOT_DIR/scripts/device-net-probe.c" -o "$TEST_TMP/device-net-probe"
 hdc_cmd file send "$TEST_TMP/device-net-probe" /data/local/tmp/device-net-probe >/dev/null
 hdc_cmd shell "chmod 755 /data/local/tmp/device-net-probe"
-hdc_cmd shell "/data/local/tmp/device-net-probe $app_uid 10.10.10.1 443" | \
-  tee "$ARTIFACT_DIR/probe-internal.txt"
+start_headend_listener
+if [ "$RUN_ISSUE3_MATRIX" = "1" ]; then
+  prepare_headend_counters
+fi
+if [ "$OCSERV_AUTH_MODE" = "password" ]; then
+  hdc_cmd shell "/data/local/tmp/device-net-probe $app_uid 10.10.10.1 $TUN_ENDPOINT_PORT" | \
+    tee "$ARTIFACT_DIR/probe-internal.txt"
+fi
+capture_guest_network_policy "$ARTIFACT_DIR/guest-network-policy-full-lan-off.txt"
+if [ "$RUN_ISSUE3_MATRIX" = "1" ]; then
+  public_before="$(headend_counter 2)"
+  printf 'packets=%s\n' "$public_before" >"$ARTIFACT_DIR/forward-before-public.txt"
+fi
 hdc_cmd shell "/data/local/tmp/device-net-probe $app_uid example.com 443" | \
   tee "$ARTIFACT_DIR/probe-dns-tcp.txt"
-grep -q 'connected 10.10.10.1:443' "$ARTIFACT_DIR/probe-internal.txt"
+if [ "$RUN_ISSUE3_MATRIX" = "1" ]; then
+  public_after="$(headend_counter 2)"
+  printf 'packets=%s\n' "$public_after" >"$ARTIFACT_DIR/forward-after-public.txt"
+fi
+if [ "$OCSERV_AUTH_MODE" = "password" ]; then
+  grep -q "connected 10.10.10.1:${TUN_ENDPOINT_PORT}" "$ARTIFACT_DIR/probe-internal.txt"
+fi
 grep -q 'connected example.com:443' "$ARTIFACT_DIR/probe-dns-tcp.txt"
+if [ "$RUN_ISSUE3_MATRIX" = "1" ] && [ "$public_after" -le "$public_before" ]; then
+  echo "public TCP did not traverse the headend (before=$public_before after=$public_after)" >&2
+  exit 1
+fi
+
+if [ "$RUN_ISSUE3_MATRIX" = "1" ]; then
+  echo "==> verify full tunnel sends host-LAN traffic through VPN when LAN access is off"
+  lan_before="$(headend_counter 1)"
+  hdc_cmd shell "/data/local/tmp/device-net-probe $app_uid $LAN_ENDPOINT_HOST $LAN_ENDPOINT_PORT" | \
+    tee "$ARTIFACT_DIR/probe-full-lan-off.txt"
+  lan_after="$(headend_counter 1)"
+  printf 'before=%s\nafter=%s\n' "$lan_before" "$lan_after" \
+    >"$ARTIFACT_DIR/forward-full-lan-off.txt"
+  grep -q "connected ${LAN_ENDPOINT_HOST}:${LAN_ENDPOINT_PORT}" \
+    "$ARTIFACT_DIR/probe-full-lan-off.txt"
+  if [ "$lan_after" -le "$lan_before" ]; then
+    echo "LAN-off TCP did not traverse the headend (before=$lan_before after=$lan_after)" >&2
+    exit 1
+  fi
+
+  echo "==> reconnect full tunnel with LAN access enabled"
+  click 400 340
+  wait_layout_text '未连接|Disconnected' 30
+  wait_tun_absent 30
+  write_profile true true auto "" true
+  reload_profile
+  click 400 340
+  wait_layout_text '已连接|Connected' "$VPN_START_TIMEOUT"
+  start_headend_listener
+  capture_guest_network_policy "$ARTIFACT_DIR/guest-network-policy-full-lan-on.txt"
+  lan_before="$(headend_counter 1)"
+  hdc_cmd shell "/data/local/tmp/device-net-probe $app_uid $LAN_ENDPOINT_HOST $LAN_ENDPOINT_PORT" | \
+    tee "$ARTIFACT_DIR/probe-full-lan-on.txt"
+  lan_after="$(headend_counter 1)"
+  printf 'before=%s\nafter=%s\n' "$lan_before" "$lan_after" \
+    >"$ARTIFACT_DIR/forward-full-lan-on.txt"
+  hdc_cmd shell "/data/local/tmp/device-net-probe $app_uid example.com 443" | \
+    tee "$ARTIFACT_DIR/probe-full-lan-on-dns-tcp.txt"
+  grep -q "connected ${LAN_ENDPOINT_HOST}:${LAN_ENDPOINT_PORT}" "$ARTIFACT_DIR/probe-full-lan-on.txt"
+  grep -q 'connected example.com:443' "$ARTIFACT_DIR/probe-full-lan-on-dns-tcp.txt"
+  if [ "$lan_after" -ne "$lan_before" ]; then
+    echo "LAN-on TCP unexpectedly traversed the headend (before=$lan_before after=$lan_after)" >&2
+    exit 1
+  fi
+
+  echo "==> reconnect with an explicit split-tunnel include"
+  click 400 340
+  wait_layout_text '未连接|Disconnected' 30
+  wait_tun_absent 30
+  write_profile false false onVpnDns "10.10.10.1/32" true
+  reload_profile
+  click 400 340
+  wait_layout_text '已连接|Connected' "$VPN_START_TIMEOUT"
+  start_headend_listener
+  capture_guest_network_policy "$ARTIFACT_DIR/guest-network-policy-split.txt"
+  hdc_cmd shell "/data/local/tmp/device-net-probe $app_uid 10.10.10.1 $TUN_ENDPOINT_PORT" | \
+    tee "$ARTIFACT_DIR/probe-split-tunnel.txt"
+  lan_before="$(headend_counter 1)"
+  hdc_cmd shell "/data/local/tmp/device-net-probe $app_uid $LAN_ENDPOINT_HOST $LAN_ENDPOINT_PORT" | \
+    tee "$ARTIFACT_DIR/probe-split-lan.txt"
+  lan_after="$(headend_counter 1)"
+  printf 'before=%s\nafter=%s\n' "$lan_before" "$lan_after" \
+    >"$ARTIFACT_DIR/forward-split-lan.txt"
+  grep -q "connected 10.10.10.1:${TUN_ENDPOINT_PORT}" "$ARTIFACT_DIR/probe-split-tunnel.txt"
+  grep -q "connected ${LAN_ENDPOINT_HOST}:${LAN_ENDPOINT_PORT}" "$ARTIFACT_DIR/probe-split-lan.txt"
+  if [ "$lan_after" -ne "$lan_before" ]; then
+    echo "split LAN TCP unexpectedly traversed the headend (before=$lan_before after=$lan_after)" >&2
+    exit 1
+  fi
+
+  echo "==> return to full tunnel with LAN access off for lifecycle fault injection"
+  click 400 340
+  wait_layout_text '未连接|Disconnected' 30
+  wait_tun_absent 30
+  write_profile false true auto "" true
+  reload_profile
+  click 400 340
+  wait_layout_text '已连接|Connected' "$VPN_START_TIMEOUT"
+  start_headend_listener
+  capture_guest_network_policy "$ARTIFACT_DIR/guest-network-policy-full-lan-off-faults.txt"
+  probe_full_lan_through_headend \
+    "$ARTIFACT_DIR/probe-before-server-kick.txt" \
+    "$ARTIFACT_DIR/forward-before-server-kick.txt"
+
+  echo "==> kick the server session and measure automatic recovery"
+  old_session="$(ocserv_session_id)"
+  kick_started="$SECONDS"
+  docker exec "$OCSERV_NAME" occtl disconnect user "$OCSERV_USER" \
+    >"$ARTIFACT_DIR/server-kick.txt" 2>&1
+  new_session="$(wait_new_ocserv_session "$old_session" "$VPN_START_TIMEOUT")"
+  kick_elapsed=$((SECONDS - kick_started))
+  printf 'old_session=%s\nnew_session=%s\nelapsed_seconds=%s\n' \
+    "$old_session" "$new_session" "$kick_elapsed" >"$ARTIFACT_DIR/server-kick-recovery.txt"
+  wait_layout_text '已连接|Connected' "$VPN_START_TIMEOUT"
+  start_headend_listener
+  hdc_cmd shell "/data/local/tmp/device-net-probe $app_uid 10.10.10.1 $TUN_ENDPOINT_PORT" | \
+    tee "$ARTIFACT_DIR/probe-after-server-kick.txt"
+  grep -q "connected 10.10.10.1:${TUN_ENDPOINT_PORT}" \
+    "$ARTIFACT_DIR/probe-after-server-kick.txt"
+  probe_full_lan_through_headend \
+    "$ARTIFACT_DIR/probe-full-lan-after-server-kick.txt" \
+    "$ARTIFACT_DIR/forward-full-lan-after-server-kick.txt"
+
+  echo "==> kill the VPN extension and measure watchdog/on-demand recovery"
+  old_extension_pid="$(vpn_extension_pid)"
+  if ! [[ "$old_extension_pid" =~ ^[0-9]+$ ]]; then
+    echo "failed to find $BUNDLE_NAME:vpn process" >&2
+    exit 1
+  fi
+  extension_kill_started="$SECONDS"
+  hdc_cmd shell "kill -9 $old_extension_pid"
+  new_extension_pid="$(wait_new_extension_pid "$old_extension_pid" "$VPN_START_TIMEOUT")"
+  extension_kill_elapsed=$((SECONDS - extension_kill_started))
+  printf 'old_pid=%s\nnew_pid=%s\nelapsed_seconds=%s\n' \
+    "$old_extension_pid" "$new_extension_pid" "$extension_kill_elapsed" \
+    >"$ARTIFACT_DIR/extension-kill-recovery.txt"
+  start_headend_listener
+  hdc_cmd shell "/data/local/tmp/device-net-probe $app_uid 10.10.10.1 $TUN_ENDPOINT_PORT" | \
+    tee "$ARTIFACT_DIR/probe-after-extension-kill.txt"
+  grep -q "connected 10.10.10.1:${TUN_ENDPOINT_PORT}" \
+    "$ARTIFACT_DIR/probe-after-extension-kill.txt"
+  probe_full_lan_through_headend \
+    "$ARTIFACT_DIR/probe-full-lan-after-extension-kill.txt" \
+    "$ARTIFACT_DIR/forward-full-lan-after-extension-kill.txt"
+fi
 
 echo "==> disconnect and reconnect with a new platform start transaction"
 click 400 340
 wait_layout_text '未连接|Disconnected' 30
 wait_tun_absent 30
+if [ "$OCSERV_AUTH_MODE" = "saml" ] && [ "$SSO_BROWSER_DRIVER" = "device" ]; then
+  previous_browser_url="$(sed -n 's/^.*BROWSER_URL //p' \
+    "$ARTIFACT_DIR/sso-v2-server.log" | tail -n 1)"
+  (
+    browser_deadline=$((SECONDS + 30))
+    browser_url=""
+    while [ "$SECONDS" -lt "$browser_deadline" ]; do
+      browser_url="$(sed -n 's/^.*BROWSER_URL //p' \
+        "$ARTIFACT_DIR/sso-v2-server.log" | tail -n 1)"
+      [ -n "$browser_url" ] && [ "$browser_url" != "$previous_browser_url" ] && break
+      sleep 0.1
+    done
+    if [ -z "$browser_url" ] || [ "$browser_url" = "$previous_browser_url" ]; then
+      echo "timed out waiting for the reconnect SSO browser URL" >&2
+      exit 1
+    fi
+    hdc_cmd shell "/data/local/tmp/device-sso-browser '$browser_url'" | \
+      tee "$ARTIFACT_DIR/sso-device-browser-reconnect.log"
+  ) &
+  SSO_DRIVER_PID=$!
+fi
 click 400 340
 wait_layout_text '已连接|Connected' "$VPN_START_TIMEOUT"
+if [ -n "$SSO_DRIVER_PID" ]; then
+  wait "$SSO_DRIVER_PID"
+  SSO_DRIVER_PID=""
+fi
 
-capture_hilog "$ENTRY_HILOG_FILE" HOpenConnectEntry
+capture_hilog "$ENTRY_HILOG_FILE" HOpenConnect
 attempt_count="$(sed -n 's/.*VPN start completed attempt \([^ ]*\).*/\1/p' "$ENTRY_HILOG_FILE" | \
   sort -u | wc -l | tr -d ' ')"
-if [ "$attempt_count" -lt 2 ]; then
-  echo "expected at least two distinct completed VPN start attempts, got $attempt_count" >&2
+minimum_attempts=2
+if [ "$RUN_ISSUE3_MATRIX" = "1" ]; then
+  minimum_attempts=5
+  capture_hilog "$ARTIFACT_DIR/hilog-issue3-lifecycle.log" HOpenConnect
+fi
+if [ "$attempt_count" -lt "$minimum_attempts" ]; then
+  echo "expected at least ${minimum_attempts} distinct completed VPN start attempts, got $attempt_count" >&2
   exit 1
 fi
 
 hdc_cmd shell "ifconfig vpn-tun" >"$ARTIFACT_DIR/tun-reconnected.txt"
 grep -Eq 'UP.*RUNNING|RUNNING.*UP' "$ARTIFACT_DIR/tun-reconnected.txt"
+grep -Eq 'RX packets:[1-9][0-9]*|TX packets:[1-9][0-9]*' "$ARTIFACT_DIR/tun-connected.txt"
 
 echo "ARM64 QEMU AnyConnect E2E OK"
 echo "artifacts: $ARTIFACT_DIR"

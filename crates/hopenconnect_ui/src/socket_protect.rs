@@ -24,20 +24,27 @@ static SOCKET_PROTECT: SocketProtectSlot = LazyLock::new(|| RwLock::new(None));
 
 pub(crate) fn register_socket_protect(callbacks: Object<'static>) -> Result<()> {
     if !callbacks.has_named_property("protectSocket")? {
-        return Ok(());
+        return Err(Error::from_reason(
+            "socket protect registration requires protectSocket",
+        ));
     }
-    let protect_socket: SocketProtectCall<'static> = callbacks.get_named_property("protectSocket")?;
-    let tsfn = protect_socket
-        .build_threadsafe_function()
-        .callee_handled::<false>()
-        .build()?;
+    let protect_socket: SocketProtectCall<'static> =
+        callbacks.get_named_property("protectSocket")?;
+    let tsfn = Arc::new(
+        protect_socket
+            .build_threadsafe_function()
+            .callee_handled::<false>()
+            .build()?,
+    );
     SOCKET_PROTECT
         .write()
         .map_err(|_| Error::from_reason("failed to store socket protect callback"))?
-        .replace(Arc::new(tsfn));
+        .replace(Arc::clone(&tsfn));
     // OpenConnect protect_socket_handler → ArkTS vpnConnection.protect(fd)
-    hopenconnect_core::set_socket_protect_handler(Some(Box::new(|fd| {
-        let _ = protect_socket_fd(fd);
+    let handler_tsfn = Arc::clone(&tsfn);
+    hopenconnect_core::set_socket_protect_handler(Some(Box::new(move |fd| {
+        protect_socket_fd_with(&handler_tsfn, fd)
+            .map_err(|error| hopenconnect_core::CoreError::msg(error.to_string()))
     })));
     Ok(())
 }
@@ -49,24 +56,10 @@ pub(crate) fn clear_socket_protect() {
     }
 }
 
-/// Call platform `vpnConnection.protect(fd)` and wait for its Promise.
-///
-/// OpenHarmony exposes socket protection as a Promise. OpenConnect starts
-/// `connect(2)` immediately after this callback returns, so merely scheduling
-/// the Promise introduces a race with an already-active VPN. Waiting here
-/// preserves the OpenConnect ordering: protection completes first.
-pub(crate) fn protect_socket_fd(fd: i32) -> Result<()> {
+fn protect_socket_fd_with(tsfn: &SocketProtectThreadsafeFunction, fd: i32) -> Result<()> {
     if fd < 0 {
         return Ok(());
     }
-    let tsfn = SOCKET_PROTECT
-        .read()
-        .map_err(|_| Error::from_reason("failed to read socket protect callback"))?
-        .as_ref()
-        .map(Arc::clone);
-    let Some(tsfn) = tsfn else {
-        return Ok(());
-    };
     let (completion_tx, completion_rx) = mpsc::sync_channel(1);
     let status = tsfn.call_with_return_value(
         fd,

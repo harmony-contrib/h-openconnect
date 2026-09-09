@@ -12,6 +12,7 @@ const ZH_CN: &str = include_str!("../locales/zh-CN.ftl");
 const PACKAGE_MANIFEST: &str = include_str!("../../../oh-package.json5");
 const UI_MODEL: &str = include_str!("../src/model.rs");
 const UI_STATE: &str = include_str!("../src/state.rs");
+const UI_LIB: &str = include_str!("../src/lib.rs");
 const HOME_PAGE: &str = include_str!("../src/view/pages/home.rs");
 const CONNECTIONS_PAGE: &str = include_str!("../src/view/pages/connections.rs");
 const CHALLENGE_PAGE: &str = include_str!("../src/view/pages/challenge.rs");
@@ -78,4 +79,19 @@ fn dynamic_text_is_sanitized_at_every_visible_error_boundary() {
     assert!(CONNECTIONS_PAGE.contains("content: sanitize_display_text(&error)"));
     assert!(CHALLENGE_PAGE.matches("sanitize_display_text").count() >= 2);
     assert!(LOGS_PAGE.contains("let message = sanitize_display_text(&log.message);"));
+}
+
+#[test]
+fn interactive_sso_registers_a_direct_ui_browser_handler() {
+    let set_app = UI_LIB.find("bridge::set_app(handle)").expect("UI bridge");
+    let register = UI_LIB
+        .find("set_external_browser_handler")
+        .expect("OpenConnect browser handler");
+    assert!(set_app < register);
+    assert!(UI_LIB.contains("bridge::open_external_browser_blocking(uri.to_owned()).is_ok()"));
+}
+
+#[test]
+fn app_home_enables_native_openconnect_progress_logging_in_both_processes() {
+    assert_eq!(UI_LIB.matches("set_var(\"HANYCONNECT_HOME\"").count(), 2);
 }

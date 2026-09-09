@@ -26,6 +26,13 @@ mod view;
 fn app(handle: OpenHarmonyApp) -> Element {
     let initial_safe_area = bridge::initial_safe_area(&handle);
     bridge::set_app(handle);
+    // Interactive authentication runs in the UI process before a platform VPN
+    // attempt or ashmem channel exists. Register the direct system-browser
+    // path here; the extension-to-UI ashmem path remains the fallback for a
+    // later protocol reauthentication initiated by the extension process.
+    hopenconnect_core::set_external_browser_handler(Some(Box::new(|uri| {
+        bridge::open_external_browser_blocking(uri.to_owned()).is_ok()
+    })));
     view::App(initial_safe_area)
 }
 
@@ -36,6 +43,9 @@ fn to_napi_error(err: impl std::fmt::Display) -> Error {
 #[napi]
 pub fn configure_app_home(home_dir: String) -> Result<()> {
     std::env::set_var("HOPENCONNECT_HOME", &home_dir);
+    // anyconnect-sys owns the native OpenConnect progress sink and uses this
+    // compatibility variable for its durable diagnostic log.
+    std::env::set_var("HANYCONNECT_HOME", &home_dir);
     shared_engine()
         .configure_home(home_dir)
         .map_err(to_napi_error)
@@ -46,6 +56,7 @@ pub fn configure_app_home(home_dir: String) -> Result<()> {
 #[napi]
 pub fn configure_app_home_for_extension(home_dir: String) -> Result<()> {
     std::env::set_var("HOPENCONNECT_HOME", &home_dir);
+    std::env::set_var("HANYCONNECT_HOME", &home_dir);
     shared_engine()
         .configure_home(home_dir)
         .map_err(to_napi_error)
@@ -82,6 +93,19 @@ pub fn initialize_platform_shared_memory() -> Result<String> {
 pub fn attach_platform_shared_memory(ashmem_fd: i32, notification_fd: i32) -> Result<()> {
     shared_engine()
         .attach_platform_shared_memory(ashmem_fd, notification_fd)
+        .map_err(to_napi_error)
+}
+
+/// Check that a Want still names the current UI transaction without changing
+/// the Extension's existing IPC binding or native-session owner.
+#[napi]
+pub fn validate_platform_vpn_start_request(
+    ashmem_fd: i32,
+    notification_fd: i32,
+    attempt_id: String,
+) -> Result<()> {
+    shared_engine()
+        .validate_platform_vpn_start_request(ashmem_fd, notification_fd, &attempt_id)
         .map_err(to_napi_error)
 }
 
@@ -298,11 +322,21 @@ pub async fn start_vpn(fd: i32, options_json: String) -> Result<()> {
         .map_err(to_napi_error)
 }
 
+/// VPN-extension heartbeat: reconcile cross-process terminal state, refresh
+/// native statistics, and publish a fresh Extension lane frame.
 #[napi]
-pub async fn stop_vpn() -> Result<()> {
-    shared_engine().disconnect().await.map_err(to_napi_error)?;
+pub fn extension_tick() -> Result<String> {
     shared_engine()
-        .set_platform_vpn_running(false)
+        .tick()
+        .map(|snapshot| snapshot.lifecycle.as_str().to_owned())
+        .map_err(to_napi_error)
+}
+
+#[napi]
+pub async fn stop_vpn(attempt_id: String) -> Result<bool> {
+    shared_engine()
+        .disconnect_platform_attempt(&attempt_id)
+        .await
         .map_err(to_napi_error)
 }
 

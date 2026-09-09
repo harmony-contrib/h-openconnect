@@ -18,6 +18,7 @@ impl SessionEngine {
             // Fresh interactive-auth session for this connect attempt.
             self.auth.begin_session();
             inner.snapshot.pending_auth = None;
+            inner.dry_run = request.dry_run;
             // Reset the UI lane for a fresh ashmem session attempt.
             inner.platform_vpn_running = false;
             inner.platform_vpn_starting = false;
@@ -154,12 +155,28 @@ impl SessionEngine {
     pub async fn prepare_in_extension(&self, _options_json: &str) -> CoreResult<String> {
         #[cfg(feature = "native-anyconnect")]
         {
-            let options = self.session_handoff_from_ashmem()?.options;
+            let handoff = self.session_handoff_from_ashmem()?;
+            let attempt_id = handoff.attempt_id;
+            let options = handoff.options;
+            let generation = {
+                let mut inner = self.lock()?;
+                inner.generation = inner.generation.saturating_add(1);
+                inner.generation
+            };
             let pending = tokio::task::spawn_blocking(move || resume_from_options(&options))
                 .await
                 .map_err(|err| CoreError::msg(format!("extension prepare join: {err}")))??;
 
             let mut inner = self.lock()?;
+            if inner.generation != generation
+                || inner.platform_start_attempt_id != attempt_id
+                || matches!(
+                    inner.platform_start_outcome,
+                    PlatformStartOutcome::Failed | PlatformStartOutcome::Cancelled
+                )
+            {
+                return Err(CoreError::msg("stale extension prepare generation"));
+            }
             inner.snapshot.network = pending.network.clone();
             inner.last_vpn_options = pending.options.clone();
             inner.snapshot.stats.assigned_ip = pending
@@ -197,9 +214,14 @@ impl SessionEngine {
     pub async fn attach_tun(&self, fd: i32, _options_json: &str) -> CoreResult<()> {
         #[cfg(feature = "native-anyconnect")]
         {
-            let pending = {
+            let (pending, generation, attempt_id) = {
                 let mut inner = self.lock()?;
-                inner.pending_native.take()
+                inner.generation = inner.generation.saturating_add(1);
+                (
+                    inner.pending_native.take(),
+                    inner.generation,
+                    inner.platform_start_attempt_id.clone(),
+                )
             };
 
             let pending = if let Some(pending) = pending {
@@ -211,13 +233,49 @@ impl SessionEngine {
                     .map_err(|err| CoreError::msg(format!("resume worker join failed: {err}")))??
             };
 
+            {
+                let inner = self.lock()?;
+                if inner.generation != generation
+                    || inner.platform_start_attempt_id != attempt_id
+                    || matches!(
+                        inner.platform_start_outcome,
+                        PlatformStartOutcome::Failed | PlatformStartOutcome::Cancelled
+                    )
+                {
+                    return Err(CoreError::msg("stale TUN attach generation"));
+                }
+            }
+
             let network = pending.network.clone();
             let options = pending.options.clone();
-            let running = tokio::task::spawn_blocking(move || spawn_mainloop(pending, fd))
-                .await
-                .map_err(|err| CoreError::msg(format!("attach worker join failed: {err}")))??;
+            let spawn_attempt_id = attempt_id.clone();
+            let running = tokio::task::spawn_blocking(move || {
+                spawn_mainloop(pending, fd, generation, spawn_attempt_id)
+            })
+            .await
+            .map_err(|err| CoreError::msg(format!("attach worker join failed: {err}")))??;
 
             let mut inner = self.lock()?;
+            if inner.generation != generation
+                || inner.platform_start_attempt_id != attempt_id
+                || !matches!(
+                    inner.snapshot.lifecycle,
+                    ConnectionLifecycle::Connecting
+                        | ConnectionLifecycle::Authenticating
+                        | ConnectionLifecycle::Establishing
+                )
+                || matches!(
+                    inner.platform_start_outcome,
+                    PlatformStartOutcome::Failed | PlatformStartOutcome::Cancelled
+                )
+            {
+                drop(inner);
+                running.cancel();
+                let _ = running.join(Duration::from_secs(2));
+                return Err(CoreError::msg(
+                    "OpenConnect mainloop exited during TUN attach",
+                ));
+            }
             inner.snapshot.network = network.clone();
             inner.last_vpn_options = options;
             inner.snapshot.stats.assigned_ip = network
@@ -275,10 +333,35 @@ impl SessionEngine {
     }
 
     pub async fn disconnect(&self) -> CoreResult<()> {
-        {
+        self.disconnect_inner(None).await.map(|_| ())
+    }
+
+    /// Stop only the platform transaction currently owned by this process.
+    ///
+    /// VPN-extension cleanup is asynchronous. The UI may publish its next
+    /// attempt while the old native worker is joining, so both the entry and
+    /// completion sides must verify the captured owner before changing state.
+    pub async fn disconnect_platform_attempt(&self, attempt_id: &str) -> CoreResult<bool> {
+        if attempt_id.is_empty() {
+            return Ok(false);
+        }
+        self.disconnect_inner(Some(attempt_id)).await
+    }
+
+    async fn disconnect_inner(&self, expected_attempt_id: Option<&str>) -> CoreResult<bool> {
+        #[cfg(feature = "native-anyconnect")]
+        let pending;
+        #[cfg(feature = "native-anyconnect")]
+        let running;
+        let disconnect_generation = {
             let mut inner = self.lock()?;
+            if expected_attempt_id
+                .is_some_and(|attempt_id| inner.platform_start_attempt_id != attempt_id)
+            {
+                return Ok(false);
+            }
             if matches!(inner.snapshot.lifecycle, ConnectionLifecycle::Disconnected) {
-                return Ok(());
+                return Ok(true);
             }
             // Unblock any auth worker waiting on a challenge form.
             self.auth.abort();
@@ -289,16 +372,21 @@ impl SessionEngine {
             self.set_lifecycle_locked(&mut inner, ConnectionLifecycle::Disconnecting, None);
             self.push_diag_locked(&mut inner, "info", "disconnect requested");
             inner.generation += 1;
-        }
+
+            // Capture every native resource while the owner/generation check
+            // is protected by the same lock. A concurrent bind can never make
+            // this old cleanup take a newer attempt's worker.
+            #[cfg(feature = "native-anyconnect")]
+            {
+                pending = inner.pending_native.take();
+                running = inner.running_native.take();
+            }
+            inner.generation
+        };
 
         #[cfg(feature = "native-anyconnect")]
         {
-            let running = {
-                let mut inner = self.lock()?;
-                let pending = inner.pending_native.take();
-                drop(pending);
-                inner.running_native.take()
-            };
+            drop(pending);
             if let Some(running) = running {
                 running.cancel();
                 let _ =
@@ -310,6 +398,12 @@ impl SessionEngine {
         tokio::time::sleep(Duration::from_millis(200)).await;
         {
             let mut inner = self.lock()?;
+            if inner.generation != disconnect_generation
+                || expected_attempt_id
+                    .is_some_and(|attempt_id| inner.platform_start_attempt_id != attempt_id)
+            {
+                return Ok(false);
+            }
             if !inner.platform_vpn_running
                 || matches!(
                     inner.snapshot.lifecycle,
@@ -327,12 +421,19 @@ impl SessionEngine {
                 let _ = self.persist_platform_locked(&mut inner);
             }
         }
-        Ok(())
+        Ok(true)
     }
 
     /// Called when the mainloop thread exits unexpectedly (peer hangup, error).
-    pub fn on_native_session_ended(&self, error: Option<String>) -> CoreResult<()> {
+    pub fn on_native_session_ended(
+        &self,
+        session_generation: u64,
+        error: Option<String>,
+    ) -> CoreResult<()> {
         let mut inner = self.lock()?;
+        if inner.generation != session_generation {
+            return Ok(());
+        }
         #[cfg(feature = "native-anyconnect")]
         {
             if let Some(running) = inner.running_native.take() {
@@ -343,10 +444,19 @@ impl SessionEngine {
         }
         inner.platform_vpn_running = false;
         inner.platform_vpn_starting = false;
-        if let Some(message) = error {
-            if inner.platform_start_outcome == PlatformStartOutcome::Pending {
-                inner.platform_start_outcome = PlatformStartOutcome::Failed;
-            }
+        let already_terminal = matches!(
+            inner.snapshot.lifecycle,
+            ConnectionLifecycle::Disconnected
+                | ConnectionLifecycle::Disconnecting
+                | ConnectionLifecycle::Failed
+        ) || matches!(
+            inner.platform_start_outcome,
+            PlatformStartOutcome::Failed | PlatformStartOutcome::Cancelled
+        );
+        if already_terminal {
+            // A UI terminal verdict or explicit disconnect owns the outcome.
+        } else if let Some(message) = error {
+            inner.platform_start_outcome = PlatformStartOutcome::Failed;
             self.set_lifecycle_locked(
                 &mut inner,
                 ConnectionLifecycle::Failed,
@@ -365,10 +475,79 @@ impl SessionEngine {
     }
 
     pub fn tick(&self) -> CoreResult<SessionSnapshot> {
+        #[cfg(feature = "native-anyconnect")]
+        let stop_native = {
+            let mut inner = self.lock()?;
+            // UI process: pick up Connected/Failed written by the VPN extension process.
+            // Extension process: pick up a matching UI terminal verdict.
+            self.sync_platform_locked(&mut inner);
+            self.refresh_stats_locked(&mut inner);
+            let is_extension = self
+                .platform_ipc()?
+                .is_some_and(|platform| !platform.is_ui());
+            let owner_mismatch = inner.running_native.as_ref().is_some_and(|session| {
+                session.attempt_id() != inner.platform_start_attempt_id
+                    || session.generation() != inner.generation
+            });
+            let protect_error = inner
+                .running_native
+                .as_ref()
+                .and_then(|session| session.take_protect_error().err());
+            if let Some(error) = protect_error {
+                let message = error.to_string();
+                inner.generation = inner.generation.saturating_add(1);
+                let session = inner.running_native.take();
+                inner.pending_native = None;
+                inner.platform_vpn_running = false;
+                inner.platform_vpn_starting = false;
+                inner.platform_start_outcome = PlatformStartOutcome::Failed;
+                inner.connected_at = None;
+                self.set_lifecycle_locked(
+                    &mut inner,
+                    ConnectionLifecycle::Failed,
+                    Some(message.clone()),
+                );
+                self.push_diag_locked(&mut inner, "error", message);
+                let _ = self.persist_platform_locked(&mut inner);
+                session
+            } else if is_extension
+                && (owner_mismatch
+                    || matches!(
+                        inner.platform_start_outcome,
+                        PlatformStartOutcome::Failed | PlatformStartOutcome::Cancelled
+                    ))
+            {
+                let session = inner.running_native.take();
+                if session.is_some() {
+                    inner.pending_native = None;
+                    inner.platform_vpn_running = false;
+                    inner.platform_vpn_starting = false;
+                    self.push_diag_locked(
+                        &mut inner,
+                        "warn",
+                        "UI ended this attempt; stopping orphaned native session",
+                    );
+                    let _ = self.persist_platform_locked(&mut inner);
+                }
+                session
+            } else {
+                None
+            }
+        };
+        #[cfg(not(feature = "native-anyconnect"))]
+        {
+            let mut inner = self.lock()?;
+            self.sync_platform_locked(&mut inner);
+            self.refresh_stats_locked(&mut inner);
+        }
+
+        #[cfg(feature = "native-anyconnect")]
+        if let Some(session) = stop_native {
+            session.cancel();
+            let _ = session.join(Duration::from_secs(2));
+        }
+
         let mut inner = self.lock()?;
-        // UI process: pick up Connected/Failed written by the VPN extension process.
-        self.sync_platform_locked(&mut inner);
-        self.refresh_stats_locked(&mut inner);
 
         #[cfg(feature = "native-anyconnect")]
         {
@@ -418,7 +597,7 @@ impl SessionEngine {
             }
         }
 
-        if inner.snapshot.lifecycle.is_active() {
+        if inner.dry_run && inner.snapshot.lifecycle.is_active() {
             // Dry-run / platform-only: synthetic traffic so the stats page moves.
             let stats = &mut inner.snapshot.stats;
             stats.bytes_sent = stats.bytes_sent.saturating_add(4096);

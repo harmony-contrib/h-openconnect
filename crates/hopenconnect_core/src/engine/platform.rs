@@ -57,7 +57,34 @@ impl SessionEngine {
         // The extension process may be reused after the UI process restarts.
         // Always bind the latest Want descriptors before checking VPN state.
         drop(previous);
-        self.sync_platform_changes()
+        {
+            let mut inner = self.lock()?;
+            inner.platform_remote_state_updated_at = 0;
+            inner.platform_remote_state_seen_at = None;
+            inner.platform_remote_stale_since = None;
+        }
+        // Do not consume/adopt the UI transaction here. A reused Extension
+        // may still be cleaning up its previous owner when a new Want arrives.
+        // Only bind_platform_vpn_start, with the explicit attempt id carried
+        // by that Want, is allowed to transfer ownership.
+        Ok(())
+    }
+
+    /// Validate a delivered Want against its own shared-memory UI lane without
+    /// replacing this process's current IPC binding or session owner.
+    pub fn validate_platform_vpn_start_request(
+        &self,
+        ashmem_fd: i32,
+        notification_fd: i32,
+        attempt_id: &str,
+    ) -> CoreResult<()> {
+        let platform =
+            PlatformIpc::attach_vpn_raw(ashmem_fd, notification_fd).map_err(platform_ipc_error)?;
+        let envelope = platform
+            .read_remote()
+            .map_err(platform_ipc_error)?
+            .ok_or_else(|| CoreError::msg("platform VPN start has no UI state"))?;
+        validate_platform_start_envelope(&envelope, attempt_id)
     }
 
     pub fn sync_platform_changes(&self) -> CoreResult<()> {
@@ -221,6 +248,7 @@ impl SessionEngine {
         }
         inner.platform_vpn_starting = true;
         inner.platform_vpn_running = false;
+        inner.platform_remote_stale_since = None;
         self.set_lifecycle_locked(&mut inner, ConnectionLifecycle::Establishing, None);
         self.push_diag_locked(
             &mut inner,
@@ -237,7 +265,7 @@ impl SessionEngine {
             return Err(CoreError::msg("platform VPN start attempt id is empty"));
         }
         let mut inner = self.lock()?;
-        self.sync_platform_locked(&mut inner);
+        self.sync_platform_for_binding_locked(&mut inner, attempt_id)?;
         if inner.platform_start_attempt_id != attempt_id {
             return Err(CoreError::msg(format!(
                 "stale platform VPN start attempt {attempt_id}"
@@ -693,6 +721,37 @@ impl SessionEngine {
 
     /// Read the newest sibling-process frame from the opposite ashmem lane.
     pub(super) fn sync_platform_locked(&self, inner: &mut Inner) -> bool {
+        self.sync_platform_locked_with_adoption(inner, None)
+    }
+
+    fn sync_platform_for_binding_locked(
+        &self,
+        inner: &mut Inner,
+        attempt_id: &str,
+    ) -> CoreResult<bool> {
+        let Some(platform) = self.platform_ipc()? else {
+            // Keep the coordinator independently testable; production
+            // Extension calls always attach ashmem immediately before bind.
+            return Ok(false);
+        };
+        if platform.is_ui() {
+            return Err(CoreError::msg(
+                "platform VPN start binding is only valid in the Extension",
+            ));
+        }
+        let envelope = platform
+            .read_remote()
+            .map_err(platform_ipc_error)?
+            .ok_or_else(|| CoreError::msg("platform VPN start has no UI state"))?;
+        validate_platform_start_envelope(&envelope, attempt_id)?;
+        Ok(self.apply_platform_envelope_locked(inner, false, Some(attempt_id), envelope))
+    }
+
+    fn sync_platform_locked_with_adoption(
+        &self,
+        inner: &mut Inner,
+        expected_extension_attempt_id: Option<&str>,
+    ) -> bool {
         let Some(platform) = self.platform_ipc().ok().flatten() else {
             return false;
         };
@@ -708,19 +767,30 @@ impl SessionEngine {
                 return false;
             }
         };
-        let is_ui = platform.is_ui();
+        self.apply_platform_envelope_locked(
+            inner,
+            platform.is_ui(),
+            expected_extension_attempt_id,
+            envelope,
+        )
+    }
+
+    pub(super) fn apply_platform_envelope_locked(
+        &self,
+        inner: &mut Inner,
+        is_ui: bool,
+        expected_extension_attempt_id: Option<&str>,
+        envelope: crate::platform_ipc::PlatformEnvelope,
+    ) -> bool {
         let browser_request_acknowledged = !is_ui
             && acknowledge_platform_browser_request_locked(
                 inner,
                 envelope.browser_request_ack.as_deref(),
             );
-        let Some(remote) = envelope
-            .state
-            .filter(|state| state.updated_at > inner.platform_vpn_state_updated_at)
-        else {
+        let Some(remote) = envelope.state else {
             return browser_request_acknowledged;
         };
-        let remote_attempt_matches = !remote.start_attempt_id.is_empty()
+        let mut remote_attempt_matches = !remote.start_attempt_id.is_empty()
             && remote.start_attempt_id == inner.platform_start_attempt_id;
 
         // The UI owns transaction creation and only accepts replies for its
@@ -730,14 +800,89 @@ impl SessionEngine {
         if is_ui && !remote_attempt_matches {
             return browser_request_acknowledged;
         }
-        if !is_ui
-            && !remote.start_attempt_id.is_empty()
-            && remote.start_attempt_id != inner.platform_start_attempt_id
-        {
+
+        // The Extension must not acquire a transaction merely because a
+        // normal heartbeat/sync observed a newer UI lane. In particular, an
+        // old session's asynchronous stop must remain scoped to its old
+        // attempt. Ownership changes only while handling the matching Want in
+        // bind_platform_vpn_start.
+        let adopted_attempt = !is_ui
+            && !remote_attempt_matches
+            && expected_extension_attempt_id
+                .is_some_and(|attempt_id| remote.start_attempt_id == attempt_id)
+            && !remote.start_attempt_id.is_empty();
+        if !is_ui && !remote_attempt_matches && !adopted_attempt {
+            return browser_request_acknowledged;
+        }
+        if adopted_attempt {
+            inner.generation = inner.generation.saturating_add(1);
             inner.platform_start_attempt_id = remote.start_attempt_id.clone();
             inner.platform_start_outcome = remote.start_outcome;
             inner.platform_extension_attached = remote.extension_attached;
-        } else if remote_attempt_matches
+            if remote.starting && remote.start_outcome == PlatformStartOutcome::Pending {
+                inner.platform_vpn_starting = true;
+                inner.platform_vpn_running = false;
+                self.set_lifecycle_locked(inner, ConnectionLifecycle::Establishing, None);
+            }
+            remote_attempt_matches = true;
+        }
+
+        let now = Instant::now();
+        let remote_advanced = remote.updated_at != inner.platform_remote_state_updated_at;
+        if remote_advanced {
+            inner.platform_remote_state_updated_at = remote.updated_at;
+            inner.platform_remote_state_seen_at = Some(now);
+            inner.platform_remote_stale_since = None;
+        }
+
+        // The UI-side native Client exists only to authenticate and publish a
+        // resumable handoff. Once the matching Extension has accepted that
+        // handoff (or published a terminal reply), retaining it makes the next
+        // automatic reconnect fail with `native session already active`.
+        // Never clear the Extension lane's pending Client: it still owns CSTP
+        // until attach_tun moves it into running_native.
+        #[cfg(feature = "native-anyconnect")]
+        if is_ui
+            && remote_attempt_matches
+            && (remote.extension_attached
+                || remote.running
+                || matches!(
+                    remote.start_outcome,
+                    PlatformStartOutcome::Failed | PlatformStartOutcome::Cancelled
+                ))
+        {
+            inner.pending_native = None;
+        }
+
+        // UI watchdog: measure a frozen Extension revision with process-local
+        // monotonic time. The second grace interval is intentionally started
+        // only after staleness is first observed, so waking from device sleep
+        // gives the healthy Extension a full heartbeat period to refresh.
+        if heartbeat_watchdog_expired(
+            inner,
+            now,
+            is_ui,
+            remote.running,
+            remote_attempt_matches,
+            remote_advanced,
+        ) {
+            const MESSAGE: &str = "VPN extension heartbeat stopped";
+            inner.platform_vpn_running = false;
+            inner.platform_vpn_starting = false;
+            inner.platform_start_outcome = PlatformStartOutcome::Failed;
+            inner.platform_remote_stale_since = None;
+            self.set_lifecycle_locked(inner, ConnectionLifecycle::Failed, Some(MESSAGE.to_owned()));
+            self.push_diag_locked(inner, "error", MESSAGE);
+            // Publish the watchdog verdict to the UI lane immediately;
+            // the Extension consumes it to destroy an orphaned TUN.
+            let _ = self.persist_platform_locked(inner);
+            return browser_request_acknowledged;
+        }
+
+        if !remote_advanced && !adopted_attempt {
+            return browser_request_acknowledged;
+        }
+        if remote_attempt_matches
             && inner.platform_start_outcome == PlatformStartOutcome::Pending
             && matches!(
                 remote.start_outcome,
@@ -753,14 +898,48 @@ impl SessionEngine {
         }
 
         #[cfg(feature = "native-anyconnect")]
-        let local_mainloop = inner.running_native.is_some();
+        let local_mainloop = inner.running_native.as_ref().is_some_and(|session| {
+            session.attempt_id() == inner.platform_start_attempt_id
+                && session.generation() == inner.generation
+        });
         #[cfg(not(feature = "native-anyconnect"))]
         let local_mainloop = false;
 
         let was_running = inner.platform_vpn_running;
         let was_starting = inner.platform_vpn_starting;
-        let running = local_mainloop || remote.running;
-        let starting = !running && remote.starting;
+        let remote_terminal = remote_attempt_matches
+            && !remote.running
+            && matches!(
+                remote.start_outcome,
+                PlatformStartOutcome::Failed | PlatformStartOutcome::Cancelled
+            );
+        let accept_remote_running = !is_ui
+            || (matches!(
+                inner.snapshot.lifecycle,
+                ConnectionLifecycle::Connecting
+                    | ConnectionLifecycle::Authenticating
+                    | ConnectionLifecycle::Establishing
+                    | ConnectionLifecycle::Connected
+            ) && !matches!(
+                inner.platform_start_outcome,
+                PlatformStartOutcome::Failed | PlatformStartOutcome::Cancelled
+            ));
+        let running =
+            !remote_terminal && (local_mainloop || (remote.running && accept_remote_running));
+        let accept_remote_starting = inner.platform_start_outcome == PlatformStartOutcome::Pending
+            && matches!(
+                inner.snapshot.lifecycle,
+                ConnectionLifecycle::Connecting
+                    | ConnectionLifecycle::Authenticating
+                    | ConnectionLifecycle::Establishing
+            );
+        let pending_attachment = is_ui
+            && remote_attempt_matches
+            && remote.extension_attached
+            && remote.start_outcome == PlatformStartOutcome::Pending
+            && was_starting;
+        let starting =
+            !running && ((remote.starting && accept_remote_starting) || pending_attachment);
         inner.platform_vpn_starting = starting;
         inner.platform_vpn_running = running;
         if running && inner.platform_start_outcome == PlatformStartOutcome::Pending {
@@ -772,7 +951,6 @@ impl SessionEngine {
         {
             inner.platform_start_outcome = PlatformStartOutcome::Failed;
         }
-        inner.platform_vpn_state_updated_at = remote.updated_at;
         inner.platform_diagnostics = remote.diagnostics.clone();
 
         if running {
@@ -788,25 +966,25 @@ impl SessionEngine {
             if remote.network.address.is_some() || !remote.network.dns.is_empty() {
                 inner.snapshot.network = remote.network.clone();
             }
-            // Prefer richer stats from the extension (bytes counters).
-            if remote.stats.bytes_sent > inner.snapshot.stats.bytes_sent
-                || remote.stats.bytes_received > inner.snapshot.stats.bytes_received
-            {
-                let mut stats = remote.stats.clone();
-                if stats.assigned_ip.is_empty() {
-                    stats.assigned_ip = inner.snapshot.stats.assigned_ip.clone();
-                }
-                if stats.gateway.is_empty() {
-                    stats.gateway = inner.snapshot.stats.gateway.clone();
-                }
-                if stats.mtu == 0 {
-                    stats.mtu = inner.snapshot.stats.mtu;
-                }
-                inner.snapshot.stats = stats;
+            // The Extension is authoritative even when byte counters are
+            // unchanged; connected time and a counter reset must still land.
+            let mut stats = remote.stats.clone();
+            if stats.assigned_ip.is_empty() {
+                stats.assigned_ip = inner.snapshot.stats.assigned_ip.clone();
             }
-            if !inner.snapshot.lifecycle.is_active()
-                && !matches!(inner.snapshot.lifecycle, ConnectionLifecycle::Disconnecting)
-            {
+            if stats.gateway.is_empty() {
+                stats.gateway = inner.snapshot.stats.gateway.clone();
+            }
+            if stats.mtu == 0 {
+                stats.mtu = inner.snapshot.stats.mtu;
+            }
+            inner.snapshot.stats = stats;
+            if matches!(
+                inner.snapshot.lifecycle,
+                ConnectionLifecycle::Connecting
+                    | ConnectionLifecycle::Authenticating
+                    | ConnectionLifecycle::Establishing
+            ) {
                 self.set_lifecycle_locked(inner, ConnectionLifecycle::Connected, None);
                 if inner.connected_at.is_none() {
                     inner.connected_at = Some(Instant::now());
@@ -818,7 +996,14 @@ impl SessionEngine {
             {
                 self.set_lifecycle_locked(inner, ConnectionLifecycle::Establishing, None);
             }
-        } else if matches!(remote.lifecycle, ConnectionLifecycle::Failed)
+        } else if remote_attempt_matches && remote.start_outcome == PlatformStartOutcome::Cancelled
+        {
+            if !matches!(inner.snapshot.lifecycle, ConnectionLifecycle::Failed) {
+                self.set_lifecycle_locked(inner, ConnectionLifecycle::Disconnected, None);
+                inner.connected_at = None;
+            }
+        } else if remote.start_outcome == PlatformStartOutcome::Failed
+            || matches!(remote.lifecycle, ConnectionLifecycle::Failed)
             || remote.last_error.is_some()
         {
             if !matches!(
@@ -831,7 +1016,10 @@ impl SessionEngine {
                     remote.last_error.clone(),
                 );
             }
-        } else if (was_running || was_starting)
+        } else if remote_attempt_matches
+            && remote.start_outcome != PlatformStartOutcome::Pending
+            && matches!(remote.lifecycle, ConnectionLifecycle::Disconnected)
+            && (was_running || was_starting)
             && matches!(
                 inner.snapshot.lifecycle,
                 ConnectionLifecycle::Connected | ConnectionLifecycle::Establishing
@@ -847,8 +1035,8 @@ impl SessionEngine {
     pub(super) fn persist_platform_locked(&self, inner: &mut Inner) -> CoreResult<()> {
         // Device SystemTime can be coarser than nanoseconds. Always advance the
         // revision so a terminal state cannot be discarded as a duplicate.
-        inner.platform_vpn_state_updated_at = PlatformVpnState::now_nanos()
-            .max(inner.platform_vpn_state_updated_at.saturating_add(1));
+        inner.platform_local_state_updated_at = PlatformVpnState::now_nanos()
+            .max(inner.platform_local_state_updated_at.saturating_add(1));
         let Some(platform) = self.platform_ipc()? else {
             self.notify_platform_start_locked(inner);
             return Ok(());
@@ -861,7 +1049,10 @@ impl SessionEngine {
             running: inner.platform_vpn_running || {
                 #[cfg(feature = "native-anyconnect")]
                 {
-                    inner.running_native.is_some()
+                    inner.running_native.as_ref().is_some_and(|session| {
+                        session.attempt_id() == inner.platform_start_attempt_id
+                            && session.generation() == inner.generation
+                    })
                 }
                 #[cfg(not(feature = "native-anyconnect"))]
                 {
@@ -876,7 +1067,7 @@ impl SessionEngine {
             network: inner.snapshot.network.clone(),
             stats: inner.snapshot.stats.clone(),
             diagnostics: merged_logs(&inner.logs),
-            updated_at: inner.platform_vpn_state_updated_at,
+            updated_at: inner.platform_local_state_updated_at,
         };
         self.notify_platform_start_locked(inner);
         let browser_request_ack =
@@ -920,4 +1111,55 @@ impl SessionEngine {
             self.platform_start_tx.send_replace(event);
         }
     }
+}
+
+pub(super) fn validate_platform_start_envelope(
+    envelope: &crate::platform_ipc::PlatformEnvelope,
+    attempt_id: &str,
+) -> CoreResult<()> {
+    let remote = envelope
+        .state
+        .as_ref()
+        .ok_or_else(|| CoreError::msg("platform VPN start has no UI state"))?;
+    if remote.start_attempt_id != attempt_id {
+        return Err(CoreError::msg(format!(
+            "stale platform VPN start attempt {attempt_id}; UI owns {}",
+            remote.start_attempt_id
+        )));
+    }
+    if matches!(
+        remote.start_outcome,
+        PlatformStartOutcome::Failed | PlatformStartOutcome::Cancelled
+    ) {
+        return Err(CoreError::msg(format!(
+            "platform VPN start attempt {attempt_id} is already terminal"
+        )));
+    }
+    Ok(())
+}
+
+pub(super) fn heartbeat_watchdog_expired(
+    inner: &mut Inner,
+    now: Instant,
+    is_ui: bool,
+    remote_running: bool,
+    remote_attempt_matches: bool,
+    remote_advanced: bool,
+) -> bool {
+    let heartbeat_frozen = is_ui
+        && inner.platform_vpn_running
+        && remote_running
+        && remote_attempt_matches
+        && !remote_advanced
+        && inner
+            .platform_remote_state_seen_at
+            .is_some_and(|seen| now.duration_since(seen) >= PLATFORM_HEARTBEAT_STALE_AFTER);
+    if heartbeat_frozen {
+        let stale_since = inner.platform_remote_stale_since.get_or_insert(now);
+        return now.duration_since(*stale_since) >= PLATFORM_HEARTBEAT_WAKE_GRACE;
+    }
+    if !remote_running || remote_advanced {
+        inner.platform_remote_stale_since = None;
+    }
+    false
 }

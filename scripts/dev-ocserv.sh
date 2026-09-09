@@ -12,6 +12,7 @@
 #
 # Defaults:
 #   OCSERV_PORT=4433  OCSERV_USER=demo  OCSERV_PASS=demo
+#   OCSERV_AUTH_MODE=password
 #
 # Phone fills LAN IP (not 127.0.0.1), turns OFF strict cert trust.
 
@@ -25,6 +26,8 @@ IMAGE_NAME="${OCSERV_IMAGE_NAME:-hopenconnect-ocserv:local}"
 HOST_PORT="${OCSERV_PORT:-4433}"
 USER_NAME="${OCSERV_USER:-demo}"
 USER_PASS="${OCSERV_PASS:-demo}"
+AUTH_MODE="${OCSERV_AUTH_MODE:-password}"
+CLIENT_KEY_PASS="${OCSERV_CLIENT_KEY_PASS:-hopenconnect}"
 
 die() {
   echo "dev-ocserv: $*" >&2
@@ -71,6 +74,7 @@ print_client_hints() {
   Server URL : ${url}
   Username   : ${USER_NAME}
   Password   : ${USER_PASS}
+  Auth mode  : ${AUTH_MODE}
   Group      : (leave empty)
 
   App settings for self-signed cert:
@@ -88,8 +92,24 @@ EOF
 }
 
 write_conf() {
-  cat >"$DATA_DIR/ocserv.conf" <<'CONF'
-auth = "plain[passwd=/etc/ocserv/ocpasswd]"
+  case "$AUTH_MODE" in
+    password)
+      auth_lines='auth = "plain[passwd=/etc/ocserv/ocpasswd]"'
+      ;;
+    certificate)
+      auth_lines='auth = "certificate"'
+      ;;
+    password-and-certificate)
+      auth_lines='auth = "certificate"
+auth = "plain[passwd=/etc/ocserv/ocpasswd]"'
+      ;;
+    *)
+      die "unsupported OCSERV_AUTH_MODE: $AUTH_MODE"
+      ;;
+  esac
+
+  cat >"$DATA_DIR/ocserv.conf" <<CONF
+$auth_lines
 tcp-port = 443
 udp-port = 443
 run-as-user = nobody
@@ -98,7 +118,8 @@ socket-file = /var/run/ocserv/ocserv-socket
 
 server-cert = /etc/ocserv/server-cert.pem
 server-key = /etc/ocserv/server-key.pem
-ca-cert = /etc/ocserv/server-cert.pem
+ca-cert = /etc/ocserv/client-ca.pem
+cert-user-oid = 2.5.4.3
 
 isolate-workers = false
 max-clients = 8
@@ -136,10 +157,18 @@ tunnel-all-dns = true
 
 mtu = 1400
 route = default
+# A real listener is started on this address by the QEMU E2E. Keep the
+# narrower include so longest-prefix policy can be verified even when 10/8 is
+# excluded by the server or the profile's local-LAN switch.
+route = 10.10.10.1/32
+CONF
+  if [ "${OCSERV_DISABLE_NO_ROUTES:-0}" != "1" ]; then
+    cat >>"$DATA_DIR/ocserv.conf" <<'CONF'
 no-route = 192.168.0.0/16
 no-route = 10.0.0.0/8
 no-route = 172.16.0.0/12
 CONF
+  fi
 }
 
 ensure_image() {
@@ -173,6 +202,47 @@ prepare_data() {
       >/dev/null 2>&1
     chmod 644 "$DATA_DIR/server-cert.pem" "$DATA_DIR/server-key.pem"
   fi
+
+  if [ ! -f "$DATA_DIR/client-ca.pem" ] || [ ! -f "$DATA_DIR/client-ca-key.pem" ]; then
+    echo "dev-ocserv: generating client certificate authority..."
+    openssl req -x509 -newkey rsa:2048 -nodes \
+      -keyout "$DATA_DIR/client-ca-key.pem" \
+      -out "$DATA_DIR/client-ca.pem" \
+      -days 3650 \
+      -subj "/CN=hopenconnect-client-ca/O=H-OpenConnect/C=CN" \
+      >/dev/null 2>&1
+  fi
+
+  if [ ! -f "$DATA_DIR/client-cert.pem" ] || [ ! -f "$DATA_DIR/client-key.pem" ]; then
+    echo "dev-ocserv: generating client certificate for '${USER_NAME}'..."
+    openssl req -newkey rsa:2048 -nodes \
+      -keyout "$DATA_DIR/client-key.pem" \
+      -out "$DATA_DIR/client.csr" \
+      -subj "/CN=${USER_NAME}/O=H-OpenConnect/C=CN" \
+      >/dev/null 2>&1
+    printf '%s\n' 'extendedKeyUsage = clientAuth' >"$DATA_DIR/client-ext.cnf"
+    openssl x509 -req \
+      -in "$DATA_DIR/client.csr" \
+      -CA "$DATA_DIR/client-ca.pem" \
+      -CAkey "$DATA_DIR/client-ca-key.pem" \
+      -CAcreateserial \
+      -out "$DATA_DIR/client-cert.pem" \
+      -days 3650 \
+      -extfile "$DATA_DIR/client-ext.cnf" \
+      >/dev/null 2>&1
+  fi
+
+  echo "dev-ocserv: writing encrypted PKCS#12 client identity..."
+  openssl pkcs12 -export \
+    -inkey "$DATA_DIR/client-key.pem" \
+    -in "$DATA_DIR/client-cert.pem" \
+    -certfile "$DATA_DIR/client-ca.pem" \
+    -out "$DATA_DIR/client.p12" \
+    -passout "pass:${CLIENT_KEY_PASS}" \
+    -name "$USER_NAME" \
+    >/dev/null 2>&1
+  chmod 644 "$DATA_DIR"/client-ca.pem "$DATA_DIR"/client-cert.pem \
+    "$DATA_DIR"/client-key.pem "$DATA_DIR"/client.p12
 
   echo "dev-ocserv: writing ocpasswd for user '${USER_NAME}'..."
   ensure_image
@@ -302,10 +372,13 @@ Environment:
   OCSERV_PORT         host port (default 4433)
   OCSERV_USER         username (default demo)
   OCSERV_PASS         password (default demo)
+  OCSERV_AUTH_MODE    password, certificate, or password-and-certificate
+  OCSERV_CLIENT_KEY_PASS  generated PKCS#12 password (default hopenconnect)
   OCSERV_HOST_IP      force advertised LAN IP
   OCSERV_NAME         container name
   OCSERV_DATA_DIR     state dir (default .dev-ocserv/)
   OCSERV_IMAGE_NAME   image tag (default hopenconnect-ocserv:local)
+  OCSERV_DISABLE_NO_ROUTES=1  omit default private-LAN exclusions
 USAGE
 }
 

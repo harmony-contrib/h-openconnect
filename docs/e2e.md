@@ -59,9 +59,12 @@ OHOS 交叉编译需要 NDK；libxml2 与 OpenSSL 分别走 `vendored-libxml2` �
 
 ## 设备 HAP（默认完整接入）
 
+先将 `DEVECO_STUDIO_HOME` 设置为本机 DevEco Studio 安装的 `Contents` 目录。
+
 ```bash
-export OHOS_NDK_HOME=/Applications/DevEco-Studio.app/Contents/sdk/default/openharmony
-export DEVECO_SDK_HOME=/Applications/DevEco-Studio.app/Contents/sdk
+: "${DEVECO_STUDIO_HOME:?请先设置 DevEco Studio 的 Contents 目录}"
+export DEVECO_SDK_HOME="$DEVECO_STUDIO_HOME/sdk"
+export OHOS_NDK_HOME="$DEVECO_SDK_HOME/default/openharmony"
 
 # 默认 FEATURES=native-anyconnect，会 source env-ohos-anyconnect.sh
 ./scripts/package-hap.sh
@@ -107,8 +110,9 @@ HOPEN_E2E_PASSWORD='***' \
 前置：`hdc list targets` 能看到设备；DevEco SDK / `ohrs` 可用。
 
 ```bash
-export OHOS_NDK_HOME=/Applications/DevEco-Studio.app/Contents/sdk/default/openharmony
-export DEVECO_SDK_HOME=/Applications/DevEco-Studio.app/Contents/sdk
+: "${DEVECO_STUDIO_HOME:?请先设置 DevEco Studio 的 Contents 目录}"
+export DEVECO_SDK_HOME="$DEVECO_STUDIO_HOME/sdk"
+export OHOS_NDK_HOME="$DEVECO_SDK_HOME/default/openharmony"
 
 # 构建、安装、启动正式 Ability
 ./scripts/e2e-device.sh
@@ -162,18 +166,51 @@ GitHub Actions 中该测试只在 `main` 推送或手动触发时进入带
 `self-hosted`/`macOS`/`ARM64`/`openharmony-qemu` 标签的专用 Apple Silicon
 runner；PR 只运行宿主协议与生命周期测试，避免不受信任代码接触自托管 runner。
 
+### 认证矩阵
+
+`e2e-qemu-arm64.sh` 也可以在同一生产链路上切换认证方式：
+
+```bash
+# 证书认证：PEM 证书和独立私钥
+OCSERV_AUTH_MODE=certificate CLIENT_CERT_FORMAT=pem \
+  ./scripts/e2e-qemu-arm64.sh
+
+# 用户名/密码 + 加密 PKCS#12 客户端证书
+OCSERV_AUTH_MODE=password-and-certificate CLIENT_CERT_FORMAT=p12 \
+  ./scripts/e2e-qemu-arm64.sh
+
+# SSO-v2 协议和数据链路。device 仅替代裸 QEMU 缺失的浏览器导航；
+# HPKE、loopback callback、cookie、CSTP、TUN 和应用 UID 流量均走真实实现。
+OCSERV_AUTH_MODE=saml SSO_BROWSER_DRIVER=device \
+SSO_PYTHON="$SSO_VENV/bin/python" ./scripts/e2e-qemu-arm64.sh
+
+# 裸镜像的系统 openLink 拒绝必须快速取消认证且不得创建 TUN。
+OCSERV_AUTH_MODE=saml SSO_BROWSER_DRIVER=system \
+EXPECT_SSO_BROWSER_FAILURE=1 SSO_PYTHON="$SSO_VENV/bin/python" \
+  ./scripts/e2e-qemu-arm64.sh
+```
+
+SAML 测试服务需要 Python `cryptography`。`SSO_VENV` 指向开发者自行创建的虚拟环境，
+仓库和文档不依赖任何机器专属绝对路径。完整支持边界和实测结论见
+`docs/authentication-validation.md`。
+
 HDC 的 root shell 不受应用 UID 的 VPN 策略约束，不能用 root `ping` 判断应用是否走隧道。
 使用仓库内探针降权到目标应用 UID 后再解析或连接：
 
+沿用前文的 SDK 环境，将 `DEVICE_PROBE_PATH` 设置为设备上可写且可执行的探针目标路径。
+
 ```bash
-OHOS_CLANG=/Applications/DevEco-Studio.app/Contents/sdk/default/openharmony/native/llvm/bin/aarch64-unknown-linux-ohos-clang
+: "${OHOS_NDK_HOME:?请先配置 SDK 环境}"
+: "${DEVICE_PROBE_PATH:?请先设置设备侧探针目标路径}"
+OHOS_CLANG="$OHOS_NDK_HOME/native/llvm/bin/aarch64-unknown-linux-ohos-clang"
+mkdir -p smoke-logs
 "$OHOS_CLANG" scripts/device-net-probe.c -o smoke-logs/device-net-probe
-hdc file send smoke-logs/device-net-probe /data/local/tmp/device-net-probe
-hdc shell chmod 755 /data/local/tmp/device-net-probe
+hdc file send smoke-logs/device-net-probe "$DEVICE_PROBE_PATH"
+hdc shell "chmod 755 '$DEVICE_PROBE_PATH'"
 
 # 20010042 替换为 bm dump / ps 查到的应用 UID
-hdc shell /data/local/tmp/device-net-probe 20010042 internal.corp.example
-hdc shell /data/local/tmp/device-net-probe 20010042 10.10.10.1 443
+hdc shell "'$DEVICE_PROBE_PATH' 20010042 internal.corp.example"
+hdc shell "'$DEVICE_PROBE_PATH' 20010042 10.10.10.1 443"
 ```
 
 同时在 headend 抓取 `vpns*` 流量，确认 `VpnConfig.dnsAddresses` 使用服务端下发的

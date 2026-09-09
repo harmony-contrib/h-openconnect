@@ -71,7 +71,7 @@ default routes.
 - **Enterprise authentication**
   - External-browser SAML/SSO-v2 with the system browser and OpenConnect's local
     callback listener.
-  - RSA SecurID and TOTP software-token modes.
+  - Built-in TOTP software-token mode; server-driven OTP and challenge forms.
   - Password, certificate, password-plus-certificate, and SAML profile modes.
 - **Certificate and TLS policy**
   - System trust, private CA files, server certificate pins, and explicit
@@ -163,9 +163,13 @@ without a project-local source copy or patch.
 
 ### Build an unsigned release HAP
 
+Set `DEVECO_STUDIO_HOME` to the `Contents` directory of your DevEco Studio
+installation before running these commands:
+
 ```sh
-export OHOS_NDK_HOME=/Applications/DevEco-Studio.app/Contents/sdk/default/openharmony
-export DEVECO_SDK_HOME=/Applications/DevEco-Studio.app/Contents/sdk
+: "${DEVECO_STUDIO_HOME:?Set DEVECO_STUDIO_HOME to your DevEco Studio Contents directory}"
+export DEVECO_SDK_HOME="$DEVECO_STUDIO_HOME/sdk"
+export OHOS_NDK_HOME="$DEVECO_SDK_HOME/default/openharmony"
 
 scripts/package-hap.sh
 ```
@@ -224,7 +228,9 @@ The launch smoke script can build, install, start `EntryAbility`, and capture
 `hilog`:
 
 ```sh
-scripts/e2e-device.sh --target <target-key>
+# Set HDC_TARGET to a target key reported by hdc list targets.
+: "${HDC_TARGET:?Select a device target first}"
+scripts/e2e-device.sh --target "$HDC_TARGET"
 ```
 
 Its default unsigned HAP is intended for compatible development/QEMU
@@ -278,15 +284,21 @@ UID.
 Root `hdc shell` traffic is not necessarily subject to the application's VPN
 policy. The included probe can run with the target application UID:
 
+Use the SDK environment configured above, and set `DEVICE_PROBE_PATH` to a
+writable executable location on the device.
+
 ```sh
-OHOS_CLANG=/Applications/DevEco-Studio.app/Contents/sdk/default/openharmony/native/llvm/bin/aarch64-unknown-linux-ohos-clang
+: "${OHOS_NDK_HOME:?Configure the SDK environment first}"
+: "${DEVICE_PROBE_PATH:?Set the device-side probe destination}"
+OHOS_CLANG="$OHOS_NDK_HOME/native/llvm/bin/aarch64-unknown-linux-ohos-clang"
+mkdir -p smoke-logs
 "$OHOS_CLANG" scripts/device-net-probe.c -o smoke-logs/device-net-probe
-hdc file send smoke-logs/device-net-probe /data/local/tmp/device-net-probe
-hdc shell chmod 755 /data/local/tmp/device-net-probe
+hdc file send smoke-logs/device-net-probe "$DEVICE_PROBE_PATH"
+hdc shell "chmod 755 '$DEVICE_PROBE_PATH'"
 
 # Replace 20010042 with the UID reported for com.richerfu.h_openconnect.
-hdc shell /data/local/tmp/device-net-probe 20010042 internal.example
-hdc shell /data/local/tmp/device-net-probe 20010042 10.10.10.1 443
+hdc shell "'$DEVICE_PROBE_PATH' 20010042 internal.example"
+hdc shell "'$DEVICE_PROBE_PATH' 20010042 10.10.10.1 443"
 ```
 
 The automated production-path test starts a clean copy of that ARM64 image and

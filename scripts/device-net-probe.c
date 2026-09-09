@@ -22,6 +22,33 @@ static void usage(const char *program)
     fprintf(stderr, "usage: %s UID HOST [PORT]\n", program);
 }
 
+static void report_socket(int fd, const char *phase)
+{
+    struct sockaddr_storage local;
+    socklen_t local_length = sizeof(local);
+    char host[NI_MAXHOST] = "unknown";
+    char service[NI_MAXSERV] = "unknown";
+    if (getsockname(fd, (struct sockaddr *)&local, &local_length) == 0) {
+        (void)getnameinfo((struct sockaddr *)&local, local_length,
+                         host, sizeof(host), service, sizeof(service),
+                         NI_NUMERICHOST | NI_NUMERICSERV);
+    }
+#ifdef SO_MARK
+    unsigned int mark = 0;
+    socklen_t mark_length = sizeof(mark);
+    if (getsockopt(fd, SOL_SOCKET, SO_MARK, &mark, &mark_length) == 0) {
+        printf("socket phase=%s fd=%d local=%s:%s mark=0x%x\n",
+               phase, fd, host, service, mark);
+    } else {
+        printf("socket phase=%s fd=%d local=%s:%s mark_error=%s\n",
+               phase, fd, host, service, strerror(errno));
+    }
+#else
+    printf("socket phase=%s fd=%d local=%s:%s mark=unavailable\n",
+           phase, fd, host, service);
+#endif
+}
+
 int main(int argc, char **argv)
 {
     if (argc != 3 && argc != 4) {
@@ -42,6 +69,8 @@ int main(int argc, char **argv)
         fprintf(stderr, "drop uid failed: %s\n", strerror(errno));
         return 3;
     }
+    printf("process pid=%ld uid=%lu euid=%lu gid=%lu\n", (long)getpid(),
+           (unsigned long)getuid(), (unsigned long)geteuid(), (unsigned long)getgid());
 
     const char *host = argv[2];
     const char *port = argc == 4 ? argv[3] : NULL;
@@ -76,8 +105,11 @@ int main(int argc, char **argv)
 
         int fd = socket(address->ai_family, address->ai_socktype, address->ai_protocol);
         if (fd < 0) {
+            fprintf(stderr, "socket family=%d failed: %s\n",
+                    address->ai_family, strerror(errno));
             continue;
         }
+        report_socket(fd, "created");
         struct timeval timeout = {.tv_sec = 5, .tv_usec = 0};
         (void)setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
         (void)setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
@@ -85,7 +117,13 @@ int main(int argc, char **argv)
             printf("uid=%lu connected %s:%s via %s\n",
                    uid_value, host, port, numeric[0] ? numeric : "unknown");
             connected = 1;
+        } else {
+            int connect_error = errno;
+            fprintf(stderr, "uid=%lu connect address=%s:%s errno=%d (%s)\n",
+                    uid_value, numeric[0] ? numeric : "unknown", port,
+                    connect_error, strerror(connect_error));
         }
+        report_socket(fd, connected ? "connected" : "failed");
         close(fd);
     }
     freeaddrinfo(addresses);
