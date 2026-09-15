@@ -31,12 +31,12 @@ pub(crate) fn connections_page(state: Signal<State>) -> Element {
                     background_color: surface(),
                     border_width: 1.0,
                     border_color: line(),
-                    border_radius: 12.0,
+                    border_radius: radius::LG,
                     {arkit::icon("server", 28.0, subtle())}
                     text {
                         content: translate_ui(current.locale, tr::empty_connections()),
                         margin_top: 12.0,
-                        font_size: 14.0,
+                        font_size: typography::SM,
                         font_color: subtle(),
                         text_align: "center",
                     }
@@ -97,9 +97,10 @@ fn ConnectionCard(
             background_color: surface(),
             border_width: if selected { 2.0 } else { 1.0 },
             border_color: if selected { accent() } else { line() },
-            border_radius: 12.0,
+            border_radius: radius::LG,
             clip: true,
             button {
+                button_type: "normal",
                 width: "100%",
                 height: 92.0,
                 background_color: if selected { muted() } else { surface() },
@@ -124,7 +125,7 @@ fn ConnectionCard(
                             text {
                                 content: name,
                                 width: "100%",
-                                font_size: 16.0,
+                                font_size: typography::MD,
                                 font_weight: 700,
                                 font_color: text_color(),
                                 max_lines: 1_i32,
@@ -134,7 +135,7 @@ fn ConnectionCard(
                                 content: server,
                                 width: "100%",
                                 margin_top: 3.0,
-                                font_size: 13.0,
+                                font_size: typography::SM,
                                 font_color: subtle(),
                                 max_lines: 1_i32,
                                 text_overflow: "ellipsis",
@@ -153,7 +154,7 @@ fn ConnectionCard(
                     text {
                         content: format!("{protocol} · {group} · {auth_summary}"),
                         width: "100%",
-                        font_size: 12.0,
+                        font_size: typography::XS,
                         font_color: subtle(),
                         max_lines: 1_i32,
                         text_overflow: "ellipsis",
@@ -286,11 +287,9 @@ pub(crate) fn connection_editor_page(state: Signal<State>, id: String) -> Elemen
         column {
             width: "100%",
             align_items: "stretch",
-            Form {
-                surface: false,
-                submit_label: String::new(),
-                FormItem {
-                    label: translate_ui(current.locale, tr::name()),
+            FieldGroup {
+                Field {
+                    FieldLabel { content: translate_ui(current.locale, tr::name()) }
                     Input {
                         value: Some(draft.name.clone()),
                         width: Some("100%".to_owned()),
@@ -298,8 +297,8 @@ pub(crate) fn connection_editor_page(state: Signal<State>, id: String) -> Elemen
                         on_change: move |value| dispatch(state, Action::SetDraftName(value)),
                     }
                 }
-                FormItem {
-                    label: translate_ui(current.locale, tr::server()),
+                Field {
+                    FieldLabel { content: translate_ui(current.locale, tr::server()) }
                     Input {
                         value: Some(draft.server.clone()),
                         width: Some("100%".to_owned()),
@@ -308,8 +307,8 @@ pub(crate) fn connection_editor_page(state: Signal<State>, id: String) -> Elemen
                         on_change: move |value| dispatch(state, Action::SetDraftServer(value)),
                     }
                 }
-                FormItem {
-                    label: translate_ui(current.locale, tr::group()),
+                Field {
+                    FieldLabel { content: translate_ui(current.locale, tr::group()) }
                     column {
                         width: "100%",
                         align_items: "stretch",
@@ -363,7 +362,7 @@ pub(crate) fn connection_editor_page(state: Signal<State>, id: String) -> Elemen
                                 text {
                                     content: translate_ui(current.locale, tr::conn_reading_groups()),
                                     margin_left: 6.0,
-                                    font_size: 12.0,
+                                    font_size: typography::XS,
                                     font_color: subtle(),
                                 }
                             }
@@ -371,7 +370,7 @@ pub(crate) fn connection_editor_page(state: Signal<State>, id: String) -> Elemen
                             text {
                                 content: sanitize_display_text(&error),
                                 margin_top: 6.0,
-                                font_size: 11.0,
+                                font_size: typography::XS,
                                 max_lines: 2_i32,
                                 text_overflow: "ellipsis",
                                 font_color: subtle(),
@@ -379,8 +378,8 @@ pub(crate) fn connection_editor_page(state: Signal<State>, id: String) -> Elemen
                         }
                     }
                 }
-                FormItem {
-                    label: translate_ui(current.locale, tr::auth_method()),
+                Field {
+                    FieldLabel { content: translate_ui(current.locale, tr::auth_method()) }
                     Select {
                         options: auth_options.clone(),
                         selected: Some(selected_auth.clone()),
@@ -403,8 +402,8 @@ pub(crate) fn connection_editor_page(state: Signal<State>, id: String) -> Elemen
                     }
                 }
                 if show_username {
-                    FormItem {
-                        label: translate_ui(current.locale, tr::username()),
+                    Field {
+                        FieldLabel { content: translate_ui(current.locale, tr::username()) }
                         Input {
                             value: Some(draft.username.clone()),
                             width: Some("100%".to_owned()),
@@ -414,8 +413,8 @@ pub(crate) fn connection_editor_page(state: Signal<State>, id: String) -> Elemen
                     }
                 }
                 if show_password {
-                    FormItem {
-                        label: translate_ui(current.locale, tr::password()),
+                    Field {
+                        FieldLabel { content: translate_ui(current.locale, tr::password()) }
                         Input {
                             value: Some(draft.password.clone()),
                             width: Some("100%".to_owned()),
@@ -426,8 +425,8 @@ pub(crate) fn connection_editor_page(state: Signal<State>, id: String) -> Elemen
                     }
                 }
                 if show_certificate {
-                    FormItem {
-                        label: translate_ui(current.locale, tr::certificate()),
+                    Field {
+                        FieldLabel { content: translate_ui(current.locale, tr::certificate()) }
                         column {
                             width: "100%",
                             align_items: "stretch",
@@ -457,7 +456,7 @@ pub(crate) fn connection_editor_page(state: Signal<State>, id: String) -> Elemen
                                     text {
                                         content: translate_ui(current.locale, tr::conn_browse()),
                                         margin_left: 6.0,
-                                        font_size: 13.0,
+                                        font_size: typography::SM,
                                         font_color: accent(),
                                     }
                                 }
@@ -508,11 +507,9 @@ pub(crate) fn connection_editor_page(state: Signal<State>, id: String) -> Elemen
                 )}
                 if show_advanced {
                     row { height: 12.0 }
-                    Form {
-                        surface: false,
-                        submit_label: String::new(),
-                        FormItem {
-                            label: translate_ui(current.locale, tr::protocol()),
+                    FieldGroup {
+                        Field {
+                            FieldLabel { content: translate_ui(current.locale, tr::protocol()) }
                             Select {
                                 options: protocol_options.clone(),
                                 selected: Some(selected_protocol.clone()),
@@ -526,8 +523,8 @@ pub(crate) fn connection_editor_page(state: Signal<State>, id: String) -> Elemen
                             }
                         }
                         if show_certificate {
-                            FormItem {
-                                label: translate_ui(current.locale, tr::conn_private_key_path()),
+                            Field {
+                                FieldLabel { content: translate_ui(current.locale, tr::conn_private_key_path()) }
                                 column {
                                     width: "100%",
                                     align_items: "stretch",
@@ -557,15 +554,15 @@ pub(crate) fn connection_editor_page(state: Signal<State>, id: String) -> Elemen
                                             text {
                                                 content: translate_ui(current.locale, tr::conn_browse()),
                                                 margin_left: 6.0,
-                                                font_size: 13.0,
+                                                font_size: typography::SM,
                                                 font_color: accent(),
                                             }
                                         }
                                     }
                                 }
                             }
-                            FormItem {
-                                label: translate_ui(current.locale, tr::conn_key_password()),
+                            Field {
+                                FieldLabel { content: translate_ui(current.locale, tr::conn_key_password()) }
                                 Input {
                                     value: Some(draft.key_password.clone()),
                                     width: Some("100%".to_owned()),
@@ -574,8 +571,8 @@ pub(crate) fn connection_editor_page(state: Signal<State>, id: String) -> Elemen
                                     on_change: move |value| dispatch(state, Action::SetDraftKeyPassword(value)),
                                 }
                             }
-                            FormItem {
-                                label: translate_ui(current.locale, tr::conn_secondary_cert()),
+                            Field {
+                                FieldLabel { content: translate_ui(current.locale, tr::conn_secondary_cert()) }
                                 Input {
                                     value: Some(draft.secondary_certificate.clone()),
                                     width: Some("100%".to_owned()),
@@ -584,8 +581,8 @@ pub(crate) fn connection_editor_page(state: Signal<State>, id: String) -> Elemen
                                     on_change: move |value| dispatch(state, Action::SetDraftSecondaryCertificate(value)),
                                 }
                             }
-                            FormItem {
-                                label: translate_ui(current.locale, tr::conn_secondary_key()),
+                            Field {
+                                FieldLabel { content: translate_ui(current.locale, tr::conn_secondary_key()) }
                                 Input {
                                     value: Some(draft.secondary_private_key.clone()),
                                     width: Some("100%".to_owned()),
@@ -594,8 +591,8 @@ pub(crate) fn connection_editor_page(state: Signal<State>, id: String) -> Elemen
                                     on_change: move |value| dispatch(state, Action::SetDraftSecondaryPrivateKey(value)),
                                 }
                             }
-                            FormItem {
-                                label: translate_ui(current.locale, tr::conn_secondary_password()),
+                            Field {
+                                FieldLabel { content: translate_ui(current.locale, tr::conn_secondary_password()) }
                                 Input {
                                     value: Some(draft.secondary_key_password.clone()),
                                     width: Some("100%".to_owned()),
@@ -605,8 +602,8 @@ pub(crate) fn connection_editor_page(state: Signal<State>, id: String) -> Elemen
                                 }
                             }
                         }
-                        FormItem {
-                            label: translate_ui(current.locale, tr::conn_software_token()),
+                        Field {
+                            FieldLabel { content: translate_ui(current.locale, tr::conn_software_token()) }
                             Select {
                                 options: token_options.clone(),
                                 selected: Some(selected_token.clone()),
@@ -619,8 +616,8 @@ pub(crate) fn connection_editor_page(state: Signal<State>, id: String) -> Elemen
                                 })),
                             }
                         }
-                        FormItem {
-                            label: translate_ui(current.locale, tr::conn_token_string()),
+                        Field {
+                            FieldLabel { content: translate_ui(current.locale, tr::conn_token_string()) }
                             Input {
                                 value: Some(draft.token_string.clone()),
                                 width: Some("100%".to_owned()),
@@ -628,8 +625,8 @@ pub(crate) fn connection_editor_page(state: Signal<State>, id: String) -> Elemen
                                 on_change: move |value| dispatch(state, Action::SetDraftTokenString(value)),
                             }
                         }
-                        FormItem {
-                            label: translate_ui(current.locale, tr::backup_servers()),
+                        Field {
+                            FieldLabel { content: translate_ui(current.locale, tr::backup_servers()) }
                             Textarea {
                                 value: Some(draft.backup_servers.clone()),
                                 height: Some(56.0),
@@ -638,8 +635,8 @@ pub(crate) fn connection_editor_page(state: Signal<State>, id: String) -> Elemen
                                 on_change: move |value| dispatch(state, Action::SetDraftBackupServers(value)),
                             }
                         }
-                        FormItem {
-                            label: format!("{} ({})", translate_ui(current.locale, tr::mtu_override()), translate_ui(current.locale, tr::mtu_auto())),
+                        Field {
+                            FieldLabel { content: format!("{} ({})", translate_ui(current.locale, tr::mtu_override()), translate_ui(current.locale, tr::mtu_auto())) }
                             Input {
                                 value: Some(mtu_value.clone()),
                                 width: Some("100%".to_owned()),
@@ -648,8 +645,8 @@ pub(crate) fn connection_editor_page(state: Signal<State>, id: String) -> Elemen
                                 on_change: move |value| dispatch(state, Action::SetDraftMtu(value)),
                             }
                         }
-                        FormItem {
-                            label: translate_ui(current.locale, tr::conn_ca_cert_path()),
+                        Field {
+                            FieldLabel { content: translate_ui(current.locale, tr::conn_ca_cert_path()) }
                             column {
                                 width: "100%",
                                 align_items: "stretch",
@@ -678,15 +675,15 @@ pub(crate) fn connection_editor_page(state: Signal<State>, id: String) -> Elemen
                                         text {
                                             content: translate_ui(current.locale, tr::conn_browse()),
                                             margin_left: 6.0,
-                                            font_size: 13.0,
+                                            font_size: typography::SM,
                                             font_color: accent(),
                                         }
                                     }
                                 }
                             }
                         }
-                        FormItem {
-                            label: translate_ui(current.locale, tr::conn_split_mode()),
+                        Field {
+                            FieldLabel { content: translate_ui(current.locale, tr::conn_split_mode()) }
                             Select {
                                 options: vec![split_auto.clone(), split_vpn.clone(), split_uplink.clone()],
                                 selected: Some(selected_split.clone()),
@@ -699,8 +696,8 @@ pub(crate) fn connection_editor_page(state: Signal<State>, id: String) -> Elemen
                                 })),
                             }
                         }
-                        FormItem {
-                            label: translate_ui(current.locale, tr::conn_split_networks()),
+                        Field {
+                            FieldLabel { content: translate_ui(current.locale, tr::conn_split_networks()) }
                             Textarea {
                                 value: Some(draft.split_tunnel_networks.clone()),
                                 height: Some(56.0),
@@ -709,8 +706,8 @@ pub(crate) fn connection_editor_page(state: Signal<State>, id: String) -> Elemen
                                 on_change: move |value| dispatch(state, Action::SetDraftSplitTunnelNetworks(value)),
                             }
                         }
-                        FormItem {
-                            label: translate_ui(current.locale, tr::conn_reported_os()),
+                        Field {
+                            FieldLabel { content: translate_ui(current.locale, tr::conn_reported_os()) }
                             Input {
                                 value: Some(draft.reported_os.clone()),
                                 width: Some("100%".to_owned()),
@@ -719,8 +716,8 @@ pub(crate) fn connection_editor_page(state: Signal<State>, id: String) -> Elemen
                                 on_change: move |value| dispatch(state, Action::SetDraftReportedOs(value)),
                             }
                         }
-                        FormItem {
-                            label: "SNI".to_owned(),
+                        Field {
+                            FieldLabel { content: "SNI".to_owned() }
                             Input {
                                 value: Some(draft.sni.clone()),
                                 width: Some("100%".to_owned()),
@@ -728,8 +725,8 @@ pub(crate) fn connection_editor_page(state: Signal<State>, id: String) -> Elemen
                                 on_change: move |value| dispatch(state, Action::SetDraftSni(value)),
                             }
                         }
-                        FormItem {
-                            label: "User-Agent".to_owned(),
+                        Field {
+                            FieldLabel { content: "User-Agent".to_owned() }
                             Input {
                                 value: Some(draft.user_agent.clone()),
                                 width: Some("100%".to_owned()),
@@ -738,8 +735,8 @@ pub(crate) fn connection_editor_page(state: Signal<State>, id: String) -> Elemen
                                 on_change: move |value| dispatch(state, Action::SetDraftUserAgent(value)),
                             }
                         }
-                        FormItem {
-                            label: translate_ui(current.locale, tr::conn_client_version()),
+                        Field {
+                            FieldLabel { content: translate_ui(current.locale, tr::conn_client_version()) }
                             Input {
                                 value: Some(draft.client_version.clone()),
                                 width: Some("100%".to_owned()),
@@ -748,8 +745,8 @@ pub(crate) fn connection_editor_page(state: Signal<State>, id: String) -> Elemen
                                 on_change: move |value| dispatch(state, Action::SetDraftClientVersion(value)),
                             }
                         }
-                        FormItem {
-                            label: "DPD (s)".to_owned(),
+                        Field {
+                            FieldLabel { content: "DPD (s)".to_owned() }
                             Input {
                                 value: Some(if draft.dpd_seconds == 0 { String::new() } else { draft.dpd_seconds.to_string() }),
                                 width: Some("100%".to_owned()),
@@ -758,8 +755,8 @@ pub(crate) fn connection_editor_page(state: Signal<State>, id: String) -> Elemen
                                 on_change: move |value| dispatch(state, Action::SetDraftDpdSeconds(value)),
                             }
                         }
-                        FormItem {
-                            label: "CSD wrapper".to_owned(),
+                        Field {
+                            FieldLabel { content: "CSD wrapper".to_owned() }
                             Input {
                                 value: Some(draft.csd_wrapper.clone()),
                                 width: Some("100%".to_owned()),
@@ -767,8 +764,8 @@ pub(crate) fn connection_editor_page(state: Signal<State>, id: String) -> Elemen
                                 on_change: move |value| dispatch(state, Action::SetDraftCsdWrapper(value)),
                             }
                         }
-                        FormItem {
-                            label: translate_ui(current.locale, tr::conn_http_proxy()),
+                        Field {
+                            FieldLabel { content: translate_ui(current.locale, tr::conn_http_proxy()) }
                             Input {
                                 value: Some(draft.http_proxy.clone()),
                                 width: Some("100%".to_owned()),
@@ -777,8 +774,8 @@ pub(crate) fn connection_editor_page(state: Signal<State>, id: String) -> Elemen
                                 on_change: move |value| dispatch(state, Action::SetDraftHttpProxy(value)),
                             }
                         }
-                        FormItem {
-                            label: translate_ui(current.locale, tr::conn_cert_pin()),
+                        Field {
+                            FieldLabel { content: translate_ui(current.locale, tr::conn_cert_pin()) }
                             Input {
                                 value: Some(draft.server_cert_hash.clone()),
                                 width: Some("100%".to_owned()),
@@ -787,8 +784,8 @@ pub(crate) fn connection_editor_page(state: Signal<State>, id: String) -> Elemen
                                 on_change: move |value| dispatch(state, Action::SetDraftServerCertHash(value)),
                             }
                         }
-                        FormItem {
-                            label: translate_ui(current.locale, tr::conn_trusted_apps()),
+                        Field {
+                            FieldLabel { content: translate_ui(current.locale, tr::conn_trusted_apps()) }
                             Textarea {
                                 value: Some(draft.trusted_applications.clone()),
                                 height: Some(48.0),
@@ -797,8 +794,8 @@ pub(crate) fn connection_editor_page(state: Signal<State>, id: String) -> Elemen
                                 on_change: move |value| dispatch(state, Action::SetDraftTrustedApplications(value)),
                             }
                         }
-                        FormItem {
-                            label: translate_ui(current.locale, tr::conn_blocked_apps()),
+                        Field {
+                            FieldLabel { content: translate_ui(current.locale, tr::conn_blocked_apps()) }
                             Textarea {
                                 value: Some(draft.blocked_applications.clone()),
                                 height: Some(48.0),

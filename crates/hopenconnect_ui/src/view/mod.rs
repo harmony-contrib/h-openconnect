@@ -15,13 +15,14 @@ use arkit::dioxus_core::EventHandler;
 use arkit::prelude::*;
 use arkit::router::{use_back_handler, use_navigator, use_route, AnimatedOutlet, Router};
 use arkit::shadcn::components::{
-    Badge, BadgeVariant, BottomNavigation, BottomNavigationItem, ButtonSize, Card, CardContent,
-    CardHeader, CardTitle, DialogFooter, DialogHeader, Field, FieldContent, FieldDescription,
-    FieldOrientation, FieldTitle, Form, FormItem, Input, InputMode, RadioGroup, Select, Separator,
-    Sonner, SonnerPosition, SonnerToast, Spinner, Switch, Textarea, ToastVariant,
+    Badge, BadgeVariant, BottomNavigation, BottomNavigationItem, BottomSheet, Button, ButtonSize,
+    ButtonVariant, Card, CardContent, CardHeader, CardTitle, Dialog, DialogFooter, DialogHeader,
+    Field, FieldContent, FieldDescription, FieldGroup, FieldLabel, FieldOrientation, FieldTitle,
+    Input, InputMode, RadioGroup, Select, Separator, Sonner, SonnerPosition, SonnerToast, Spinner,
+    Switch, TabsList, TabsTrigger, Textarea, ToastVariant,
 };
 use arkit::shadcn::theme::{
-    spacing, typography, use_theme, Theme, ThemeMode, ThemePreset, ThemeProvider,
+    control, radius, spacing, typography, use_theme, Theme, ThemeMode, ThemePreset, ThemeProvider,
 };
 use pages::{
     about_page, appearance_page, auth_challenge_overlay, connection_editor_page, connections_page,
@@ -77,19 +78,31 @@ fn danger() -> u32 {
 }
 
 fn accent() -> u32 {
-    match use_theme().mode {
-        ThemeMode::Light => 0xFF1D4ED8,
-        ThemeMode::Dark => 0xFF60A5FA,
-    }
+    use_theme().colors.primary
+}
+
+fn primary_text() -> u32 {
+    use_theme().colors.primary_foreground
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Default)]
 enum FlatButtonVariant {
     #[default]
     Outline,
+    Primary,
     Destructive,
     Ghost,
-    Accent,
+}
+
+impl FlatButtonVariant {
+    fn to_button_variant(self) -> ButtonVariant {
+        match self {
+            Self::Outline => ButtonVariant::Outline,
+            Self::Primary => ButtonVariant::Default,
+            Self::Destructive => ButtonVariant::Destructive,
+            Self::Ghost => ButtonVariant::Ghost,
+        }
+    }
 }
 
 #[derive(Props, Clone, PartialEq)]
@@ -99,61 +112,22 @@ struct FlatButtonProps {
     #[props(default)]
     size: ButtonSize,
     disabled: Option<bool>,
-    /// CSS width (`"100%"`, `"48"`, …). When unset, size defaults apply.
     width: Option<String>,
     onclick: Option<EventHandler<()>>,
     children: Element,
 }
 
+/// App action names mapped to upstream shadcn variants; styling stays upstream.
 #[component]
 fn FlatButton(props: FlatButtonProps) -> Element {
-    let disabled = props.disabled.unwrap_or(false);
-    let onclick = props.onclick;
-    let (height, size_width, horizontal_padding) = match props.size {
-        ButtonSize::Default => (48.0, None, 20.0),
-        ButtonSize::Sm => (36.0, None, 12.0),
-        ButtonSize::Lg => (56.0, None, 32.0),
-        ButtonSize::Icon => (40.0, Some(40.0), 0.0),
-    };
-    let (background, foreground, border_width, border_color) = match props.variant {
-        FlatButtonVariant::Outline => (surface(), text_color(), 1.0, line()),
-        FlatButtonVariant::Destructive => (danger(), destructive_text(), 0.0, danger()),
-        FlatButtonVariant::Ghost => (0x00000000, text_color(), 0.0, 0x00000000),
-        FlatButtonVariant::Accent => (accent(), 0xFFFFFFFFu32, 0.0, accent()),
-    };
-    // Explicit CSS width wins over the Icon size default.
-    let css_width = props.width.clone();
-
     rsx! {
-        button {
-            height: height,
-            width: if let Some(w) = css_width {
-                w
-            } else if let Some(w) = size_width {
-                format!("{w}")
-            },
-            padding_left: horizontal_padding,
-            padding_right: horizontal_padding,
-            foreground_color: foreground,
-            background_color: background,
-            border_width: border_width,
-            border_color: border_color,
-            border_radius: 10.0,
-            clip: true,
-            opacity: if disabled { 0.5 } else { 1.0 },
-            enabled: !disabled,
-            onclick: move |_| {
-                if !disabled {
-                    if let Some(handler) = onclick {
-                        handler.call(());
-                    }
-                }
-            },
-            row {
-                align_items: "center",
-                justify_content: "center",
-                {props.children}
-            }
+        Button {
+            variant: props.variant.to_button_variant(),
+            size: props.size,
+            disabled: props.disabled,
+            width: props.width,
+            onclick: props.onclick,
+            {props.children}
         }
     }
 }
@@ -165,69 +139,27 @@ struct FlatSegmentedProps {
     on_change: EventHandler<String>,
 }
 
-/// Full-width segmented control matching Paws: a muted track with a raised
-/// active segment and no dividers.
+/// Controlled app selection using upstream shadcn tab styling.
 #[component]
 fn FlatSegmented(props: FlatSegmentedProps) -> Element {
-    let theme = use_theme();
     let runtime = arkit::use_runtime_handle();
-    let options = props
-        .options
-        .into_iter()
-        .map(|option| {
-            let active = option == props.selected;
-            let next = option.clone();
-            let on_change = props.on_change;
-            let runtime = runtime.clone();
-            rsx! {
-                row {
+    rsx! {
+        TabsList {
+            for option in props.options {
+                TabsTrigger {
                     key: "{option}",
-                    layout_weight: 1.0,
-                    height: "100%",
-                    padding_left: 2.0,
-                    padding_right: 2.0,
-                    button {
-                        button_type: "normal",
-                        width: "100%",
-                        height: 32.0,
-                        padding: 0.0,
-                        background_color: if active { theme.colors.background } else { 0x00000000 },
-                        foreground_color: theme.colors.foreground,
-                        border_width: if active { 1.0 } else { 0.0 },
-                        border_color: if active { theme.colors.border } else { 0x00000000 },
-                        border_radius: theme.radii.md,
-                        onclick: move |_| {
-                            let next = next.clone();
+                    label: option.clone(),
+                    active: option == props.selected,
+                    on_press: {
+                        let runtime = runtime.clone();
+                        let on_change = props.on_change;
+                        move |_| {
+                            let next = option.clone();
                             runtime.queue_ui(move || on_change.call(next));
-                        },
-                        text {
-                            content: option,
-                            font_size: typography::SM,
-                            font_weight: if active { 600 } else { 500 },
-                            font_color: if active {
-                                theme.colors.foreground
-                            } else {
-                                theme.colors.muted_foreground
-                            },
                         }
-                    }
+                    },
                 }
             }
-        })
-        .collect::<Vec<_>>();
-
-    rsx! {
-        row {
-            width: "100%",
-            height: 40.0,
-            padding_left: spacing::XXS,
-            padding_right: spacing::XXS,
-            align_items: "center",
-            border_width: 0.0,
-            border_radius: theme.radii.lg,
-            background_color: theme.colors.muted,
-            clip: true,
-            {options.into_iter()}
         }
     }
 }
@@ -239,61 +171,43 @@ struct FlatDialogProps {
     children: Element,
 }
 
-/// Centered, backdrop-dismissible flat dialog matching the Paws log details
-/// and history deletion confirmation interaction.
+/// Use the upstream dialog for focus, dismissal, motion and panel tokens.
 #[component]
 fn FlatDialog(props: FlatDialogProps) -> Element {
-    let theme = use_theme();
-    let close = props.on_close;
-    let panel_close = close;
-    let panel = rsx! {
-        stack {
-            width: "100%",
-            max_width_constraint: 512.0,
-            alignment: "top-start",
-            border_radius: theme.radii.lg,
-            border_width: 1.0,
-            border_color: theme.colors.border,
-            background_color: theme.colors.background,
-            clip: true,
-            column {
-                width: "100%",
-                padding: spacing::XXL,
-                {props.children}
-            }
-            row {
-                width: "100%",
-                justify_content: "end",
-                padding_top: 14.0,
-                padding_right: 14.0,
-                hit_test_behavior: "transparent",
-                button {
-                    button_type: "normal",
-                    width: 28.0,
-                    height: 28.0,
-                    padding: 0.0,
-                    background_color: 0x00000000,
-                    border_width: 0.0,
-                    border_radius: theme.radii.sm,
-                    clip: true,
-                    focusable: false,
-                    focus_on_touch: false,
-                    alignment: "center",
-                    onclick: move |_| panel_close.call(()),
-                    {arkit::icon("x", 18.0, theme.colors.muted_foreground)}
-                }
-            }
-        }
-    };
+    use_modal_back_handler(props.open, props.on_close);
     rsx! {
-        ModalPortal {
-            open: props.open,
-            presentation: ModalPresentation::CenteredDialog,
-            dismiss_on_backdrop: true,
-            backdrop_color: 0x80000000u32,
-            viewport_inset: 8.0,
-            on_dismiss: close,
-            {panel}
+        Dialog {
+            open: Some(props.open),
+            on_close: Some(props.on_close),
+            {props.children}
+        }
+    }
+}
+
+/// Keep native Back inside the topmost modal instead of navigating its page.
+fn use_modal_back_handler(open: bool, on_close: EventHandler<()>) {
+    let callback = arkit::dioxus_hooks::use_callback(move |()| {
+        if open {
+            on_close.call(());
+        }
+        open
+    });
+    let runtime = arkit::use_runtime_handle();
+    let _registration = use_hook(move || {
+        Rc::new(runtime.register_back_handler(Rc::new(move || callback.call(()))))
+    });
+}
+
+#[component]
+fn AuthSheet(title: String, on_close: EventHandler<()>, children: Element) -> Element {
+    use_modal_back_handler(true, on_close);
+    rsx! {
+        BottomSheet {
+            title,
+            open: Some(true),
+            show_header: Some(false),
+            on_close,
+            {children}
         }
     }
 }
@@ -493,7 +407,7 @@ fn scaffold_layout(
                     }
                     text {
                         content: page_title,
-                        font_size: 20.0,
+                        font_size: typography::XL,
                         line_height: 26.0,
                         font_weight: 700,
                         font_color: text_color(),
@@ -559,9 +473,8 @@ fn use_parent_back_handler(parent: Option<Route>) {
     });
     let handler: Rc<dyn Fn() -> bool> = Rc::new(move || scoped_handler.call(()));
     let registered_handler = handler.clone();
-    let _registration = use_hook(|| {
-        Rc::new(arkit::use_runtime_handle().register_back_handler(registered_handler))
-    });
+    let _registration =
+        use_hook(|| Rc::new(arkit::use_runtime_handle().register_back_handler(registered_handler)));
 }
 
 fn card(title: impl Into<String>, subtitle: Option<String>, body: Element) -> Element {
@@ -569,12 +482,8 @@ fn card(title: impl Into<String>, subtitle: Option<String>, body: Element) -> El
     // Avoid `clip: true` on form cards — it can crop trailing switch rows and
     // multi-line controls on HarmonyOS layout.
     rsx! {
-        column {
-            width: "100%",
-            background_color: surface(),
-            border_width: 1.0,
-            border_color: line(),
-            border_radius: 12.0,
+        Card {
+            shadow: Some(false),
             if let Some(subtitle) = subtitle {
                 CardHeader {
                     title: title,
@@ -593,21 +502,6 @@ fn card(title: impl Into<String>, subtitle: Option<String>, body: Element) -> El
             CardContent {
                 {body}
             }
-        }
-    }
-}
-
-fn section_label(title: impl Into<String>) -> Element {
-    let title = title.into();
-    rsx! {
-        text {
-            content: title,
-            margin_left: 4.0,
-            margin_bottom: 8.0,
-            margin_top: 4.0,
-            font_size: 13.0,
-            font_weight: 650,
-            font_color: subtle(),
         }
     }
 }
@@ -709,7 +603,7 @@ fn settings_section(title: impl Into<String>, rows: Vec<Element>) -> Element {
                 content: title,
                 margin_left: 4.0,
                 margin_bottom: 8.0,
-                font_size: 13.0,
+                font_size: typography::SM,
                 font_weight: 650,
                 font_color: subtle(),
             }
@@ -720,7 +614,7 @@ fn settings_section(title: impl Into<String>, rows: Vec<Element>) -> Element {
                 background_color: surface(),
                 border_width: 1.0,
                 border_color: line(),
-                border_radius: 12.0,
+                border_radius: radius::LG,
                 clip: true,
                 {rows}
             }
@@ -737,8 +631,10 @@ fn settings_route_row(page: Route, subtitle: impl Into<String>) -> Element {
     let subtitle = subtitle.into();
     rsx! {
         button {
+            button_type: "normal",
             width: "100%",
             height: 68.0,
+            border_radius: 0.0,
             padding_left: 0.0,
             padding_right: 0.0,
             padding_top: 0.0,
@@ -758,7 +654,7 @@ fn settings_route_row(page: Route, subtitle: impl Into<String>) -> Element {
                     align_items: "center",
                     justify_content: "center",
                     background_color: muted(),
-                    border_radius: 10.0,
+                    border_radius: radius::LG,
                     {arkit::icon(icon, 16.0, text_color())}
                 }
                 column {
@@ -767,14 +663,14 @@ fn settings_route_row(page: Route, subtitle: impl Into<String>) -> Element {
                     align_items: "start",
                     text {
                         content: title,
-                        font_size: 15.0,
+                        font_size: typography::MD,
                         font_weight: 650,
                         font_color: text_color(),
                     }
                     text {
                         content: subtitle,
                         margin_top: 2.0,
-                        font_size: 12.0,
+                        font_size: typography::XS,
                         font_color: subtle(),
                         max_lines: 1,
                         text_overflow: "ellipsis",
@@ -800,15 +696,15 @@ fn settings_value_row(icon: &str, label: impl Into<String>, value: impl Into<Str
                 align_items: "center",
                 justify_content: "center",
                 background_color: muted(),
-                border_radius: 10.0,
+                border_radius: radius::LG,
                 {arkit::icon(icon, 16.0, text_color())}
             }
             column {
                 layout_weight: 1.0,
                 margin_left: 12.0,
                 align_items: "start",
-                text { content: label, font_size: 13.0, font_color: subtle() }
-                text { content: value, margin_top: 2.0, font_size: 15.0, font_weight: 650, font_color: text_color() }
+                text { content: label, font_size: typography::SM, font_color: subtle() }
+                text { content: value, margin_top: 2.0, font_size: typography::MD, font_weight: 650, font_color: text_color() }
             }
         }
     }
@@ -849,7 +745,7 @@ fn metric_tile(icon: &str, label: impl Into<String>, value: impl Into<String>) -
             background_color: surface(),
             border_width: 1.0,
             border_color: line(),
-            border_radius: 12.0,
+            border_radius: radius::LG,
             align_items: "start",
             row {
                 width: 34.0,
@@ -857,11 +753,11 @@ fn metric_tile(icon: &str, label: impl Into<String>, value: impl Into<String>) -
                 align_items: "center",
                 justify_content: "center",
                 background_color: muted(),
-                border_radius: 9.0,
+                border_radius: radius::LG,
                 {arkit::icon(icon, 16.0, accent())}
             }
-            text { content: label, margin_top: 12.0, font_size: 12.0, font_color: subtle() }
-            text { content: value, margin_top: 4.0, font_size: 17.0, font_weight: 700, font_color: text_color() }
+            text { content: label, margin_top: 12.0, font_size: typography::XS, font_color: subtle() }
+            text { content: value, margin_top: 4.0, font_size: typography::LG, font_weight: 700, font_color: text_color() }
         }
     }
 }

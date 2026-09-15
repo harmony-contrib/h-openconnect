@@ -14,6 +14,7 @@ mod socket_protect;
 mod state;
 mod time_format;
 mod view;
+mod virtual_identity;
 
 #[entry(plugins = [
     bridge::HOpenUrlBridgePlugin,

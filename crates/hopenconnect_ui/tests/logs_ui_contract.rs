@@ -9,10 +9,12 @@ fn section<'a>(source: &'a str, start: &str, end: &str) -> &'a str {
 }
 
 #[test]
-fn segmented_filter_buttons_preserve_the_full_label_width() {
+fn segmented_filters_use_upstream_tab_layout() {
     let segmented = section(VIEW_SOURCE, "fn FlatSegmented(", "struct FlatDialogProps");
 
-    assert!(segmented.contains("padding: 0.0"));
+    assert!(segmented.contains("TabsList {"));
+    assert!(segmented.contains("TabsTrigger {"));
+    assert!(segmented.contains("runtime.queue_ui"));
 }
 
 #[test]
@@ -21,17 +23,14 @@ fn logs_use_arkit_rsx_virtual_rows() {
     assert!(LOGS_SOURCE.contains("fn VirtualLogArchiveList("));
     assert_eq!(
         LOGS_SOURCE
-            .matches("use_virtual_source_items_keyed(VirtualKind::List, item_keys")
+            .matches("use_virtual_items(VirtualKind::List, stamps")
             .count(),
         2,
     );
     assert!(!LOGS_SOURCE.contains("use_virtual_node_adapter_items_keyed"));
-    assert_eq!(
-        LOGS_SOURCE
-            .matches("virtual_source: source")
-            .count(),
-        2,
-    );
+    assert!(LOGS_SOURCE.contains("VirtualItemStamp::new(item.file_name.clone(), revision)"));
+    assert!(LOGS_SOURCE.contains("crate::virtual_identity::occurrence_ids"));
+    assert_eq!(LOGS_SOURCE.matches("virtual_source: source").count(), 2,);
     assert!(LOGS_SOURCE.contains("fn VirtualLogRowView("));
     assert!(LOGS_SOURCE.contains("fn VirtualLogArchiveRowView("));
     assert!(LOGS_SOURCE.contains("fn VirtualLogArchiveAction("));
