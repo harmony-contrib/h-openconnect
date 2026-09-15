@@ -16,7 +16,7 @@ package's source distribution.
 | --- | --- | --- | --- |
 | anyconnect | 0.1.1 | MIT OR Apache-2.0 | https://github.com/networks-rs/anyconnect-rs |
 | anyconnect-sys / OpenConnect | 0.1.1 / 9.20 (`8ae87c089bac597d9e09902bbedd03e0c45d8269`) | LGPL-2.1-only | https://github.com/networks-rs/anyconnect-rs |
-| Arkit | `75ff91c619f5e4774fe6badea5cd9c619f189b2f` | MIT OR Apache-2.0 | https://github.com/richerfu/arkit |
+| Arkit | `1d4163f2168a49aba1a6fd8ea6ca81406212c4e9` | MIT OR Apache-2.0 | https://github.com/richerfu/arkit |
 | Dioxus | 0.7.9 | MIT OR Apache-2.0 | https://github.com/DioxusLabs/dioxus |
 | ohos-rs bindings | versions locked in `Cargo.lock` | MIT or MIT OR Apache-2.0 | https://github.com/ohos-rs |
 | OpenSSL | 3.6.3 | Apache-2.0 | https://github.com/openssl/openssl |

@@ -23,7 +23,7 @@ pub(crate) fn about_page(state: Signal<State>) -> Element {
                 background_color: surface(),
                 border_width: 1.0,
                 border_color: line(),
-                border_radius: 16.0,
+                border_radius: radius::XL,
                 align_items: "center",
                 row {
                     width: 72.0,
@@ -31,20 +31,20 @@ pub(crate) fn about_page(state: Signal<State>) -> Element {
                     align_items: "center",
                     justify_content: "center",
                     background_color: muted(),
-                    border_radius: 18.0,
+                    border_radius: radius::XL,
                     {arkit::icon("shield", 34.0, accent())}
                 }
                 text {
                     content: "H-OpenConnect",
                     margin_top: 14.0,
-                    font_size: 22.0,
+                    font_size: typography::XXL,
                     font_weight: 750,
                     font_color: text_color(),
                 }
                 text {
                     content: translate_ui(locale, tr::about_tagline()),
                     margin_top: 6.0,
-                    font_size: 13.0,
+                    font_size: typography::SM,
                     font_color: subtle(),
                     text_align: "center",
                 }
@@ -95,14 +95,14 @@ pub(crate) fn about_page(state: Signal<State>) -> Element {
                     open_source_row(
                         state,
                         "layout-template",
-                        "Arkit 75ff91c",
+                        format!("Arkit {}", &env!("HOPENCONNECT_ARKIT_REV")[..7]),
                         "MIT OR Apache-2.0",
                         "https://github.com/richerfu/arkit",
                     ),
                     open_source_row(
                         state,
                         "component",
-                        "Dioxus 0.7.9",
+                        "Dioxus 0.7.10",
                         "MIT OR Apache-2.0",
                         "https://github.com/DioxusLabs/dioxus",
                     ),
@@ -141,7 +141,7 @@ pub(crate) fn about_page(state: Signal<State>) -> Element {
                 padding_right: 8.0,
                 padding_bottom: 8.0,
                 padding_left: 8.0,
-                font_size: 11.0,
+                font_size: typography::XS,
                 line_height: 17.0,
                 font_color: subtle(),
                 text_align: "center",
@@ -163,8 +163,10 @@ fn open_source_row(
     let detail = detail.into();
     rsx! {
         button {
+            button_type: "normal",
             width: "100%",
             height: 68.0,
+            border_radius: 0.0,
             padding: 0.0,
             background_color: surface(),
             border_width: 0.0,
@@ -179,7 +181,7 @@ fn open_source_row(
                     align_items: "center",
                     justify_content: "center",
                     background_color: muted(),
-                    border_radius: 10.0,
+                    border_radius: radius::LG,
                     {arkit::icon(icon, 16.0, text_color())}
                 }
                 column {
@@ -188,14 +190,14 @@ fn open_source_row(
                     align_items: "start",
                     text {
                         content: title,
-                        font_size: 14.0,
+                        font_size: typography::SM,
                         font_weight: 650,
                         font_color: text_color(),
                     }
                     text {
                         content: detail,
                         margin_top: 2.0,
-                        font_size: 11.0,
+                        font_size: typography::XS,
                         font_color: subtle(),
                         max_lines: 1_i32,
                         text_overflow: "ellipsis",
@@ -228,7 +230,7 @@ fn about_note_row(icon: &'static str, content: impl Into<String>) -> Element {
                 text {
                     content: content,
                     width: "100%",
-                    font_size: 12.0,
+                    font_size: typography::XS,
                     line_height: 18.0,
                     font_color: text_color(),
                 }

@@ -6,6 +6,21 @@ use crate::model::{AuthChallenge, AuthFieldKind};
 /// Field labels and input kinds are rendered from the server form without
 /// reclassifying names such as `password`, `answer`, or `secondary_password`.
 pub(crate) fn auth_challenge_overlay(state: Signal<State>, challenge: AuthChallenge) -> Element {
+    let metrics = arkit::use_window_metrics();
+    let viewport_height = metrics.content_rect.height as f32 / metrics.scale.max(1.0);
+    // The portal panel sizes to its content, so a percentage height would
+    // depend on that same content. Resolve against the window instead.
+    let body_height = if viewport_height > 0.0 {
+        (viewport_height
+            - metrics.safe_area.top
+            - metrics.safe_area.bottom
+            - metrics.ime_area.bottom
+            - 72.0)
+            .max(120.0)
+            * 0.82
+    } else {
+        360.0
+    };
     let locale = state.read().locale;
     let title = sanitize_display_text(
         &challenge
@@ -30,21 +45,12 @@ pub(crate) fn auth_challenge_overlay(state: Signal<State>, challenge: AuthChalle
         .collect();
 
     rsx! {
-        column {
-            width: "100%",
-            height: "100%",
-            background_color: 0x99000000u32,
-            align_items: "center",
-            justify_content: "end",
+        AuthSheet {
+            title: translate_ui(locale, tr::challenge_required()),
+            on_close: move |_| dispatch(state, Action::CancelChallenge),
             column {
                 width: "100%",
-                height: "82%",
-                background_color: surface(),
-                border_radius: 16.0,
-                padding_top: 18.0,
-                padding_right: 16.0,
-                padding_bottom: 20.0,
-                padding_left: 16.0,
+                height: body_height,
                 align_items: "stretch",
                 row {
                     width: "100%",
@@ -56,7 +62,7 @@ pub(crate) fn auth_challenge_overlay(state: Signal<State>, challenge: AuthChalle
                         align_items: "start",
                         text {
                             content: title,
-                            font_size: 17.0,
+                            font_size: typography::LG,
                             font_weight: 700,
                             font_color: text_color(),
                             max_lines: 3_i32,
@@ -65,7 +71,7 @@ pub(crate) fn auth_challenge_overlay(state: Signal<State>, challenge: AuthChalle
                         text {
                             content: subtitle,
                             margin_top: 4.0,
-                            font_size: 12.0,
+                            font_size: typography::XS,
                             font_color: subtle(),
                         }
                     }
@@ -74,7 +80,7 @@ pub(crate) fn auth_challenge_overlay(state: Signal<State>, challenge: AuthChalle
                     text {
                         content: error,
                         margin_top: 12.0,
-                        font_size: 13.0,
+                        font_size: typography::SM,
                         font_color: danger(),
                     }
                 }
@@ -86,9 +92,7 @@ pub(crate) fn auth_challenge_overlay(state: Signal<State>, challenge: AuthChalle
                         width: "100%",
                         height: "100%",
                         alignment: "top_start",
-                        column {
-                            width: "100%",
-                            align_items: "stretch",
+                        FieldGroup {
                             {fields.into_iter().map(|field| {
                             let field_key = field.key.clone();
                             let key_for_input = field.key.clone();
@@ -113,20 +117,14 @@ pub(crate) fn auth_challenge_overlay(state: Signal<State>, challenge: AuthChalle
                             let is_auth_group = field.auth_group;
                             let choices = field.choices.clone();
                             rsx! {
-                                column {
+                                Field {
                                     key: "{render_key}",
-                                    width: "100%",
-                                    margin_bottom: 12.0,
-                                    text {
+                                    FieldLabel {
                                         content: if field.required {
                                             format!("{label} *")
                                         } else {
                                             label
                                         },
-                                        margin_bottom: 6.0,
-                                        font_size: 13.0,
-                                        font_weight: 600,
-                                        font_color: subtle(),
                                     }
                                     if is_select && !choices.is_empty() {
                                         {
@@ -211,7 +209,7 @@ pub(crate) fn auth_challenge_overlay(state: Signal<State>, challenge: AuthChalle
                             onclick: move |_| dispatch(state, Action::CancelChallenge),
                             text {
                                 content: translate_ui(locale, tr::cancel()),
-                                font_size: 14.0,
+                                font_size: typography::SM,
                                 font_weight: 650,
                                 font_color: text_color(),
                             }
@@ -221,14 +219,14 @@ pub(crate) fn auth_challenge_overlay(state: Signal<State>, challenge: AuthChalle
                     column {
                         layout_weight: 1.0,
                         FlatButton {
-                            variant: FlatButtonVariant::Accent,
+                            variant: FlatButtonVariant::Primary,
                             width: Some("100%".to_owned()),
                             onclick: move |_| dispatch(state, Action::SubmitChallenge),
                             text {
                                 content: translate_ui(locale, tr::challenge_submit()),
-                                font_size: 14.0,
+                                font_size: typography::SM,
                                 font_weight: 700,
-                                font_color: 0xFFFFFFFFu32,
+                                font_color: primary_text(),
                             }
                         }
                     }

@@ -44,6 +44,11 @@ pub(crate) fn home_page(state: Signal<State>) -> Element {
     } else {
         translate_ui(current.locale, tr::connect())
     };
+    let action_color = if active {
+        destructive_text()
+    } else {
+        primary_text()
+    };
     let action_icon = if active { "square" } else { "power" };
     let stats = current.snapshot.stats.clone();
     let navigator = use_navigator();
@@ -58,7 +63,7 @@ pub(crate) fn home_page(state: Signal<State>) -> Element {
                 background_color: surface(),
                 border_width: 1.0,
                 border_color: line(),
-                border_radius: 16.0,
+                border_radius: radius::XL,
                 align_items: "center",
                 row {
                     width: 88.0,
@@ -66,7 +71,7 @@ pub(crate) fn home_page(state: Signal<State>) -> Element {
                     align_items: "center",
                     justify_content: "center",
                     background_color: muted(),
-                    border_radius: 44.0,
+                    border_radius: radius::FULL,
                     border_width: 2.0,
                     border_color: status_color,
                     if busy {
@@ -78,21 +83,21 @@ pub(crate) fn home_page(state: Signal<State>) -> Element {
                 text {
                     content: translate_ui(current.locale, tr::home_title()),
                     margin_top: 16.0,
-                    font_size: 13.0,
+                    font_size: typography::SM,
                     font_weight: 600,
                     font_color: subtle(),
                 }
                 text {
                     content: status_label,
                     margin_top: 4.0,
-                    font_size: 26.0,
+                    font_size: typography::XXL,
                     font_weight: 750,
                     font_color: status_color,
                 }
                 text {
                     content: connection_name.clone(),
                     margin_top: 6.0,
-                    font_size: 15.0,
+                    font_size: typography::MD,
                     font_weight: 650,
                     font_color: text_color(),
                 }
@@ -100,24 +105,24 @@ pub(crate) fn home_page(state: Signal<State>) -> Element {
                     text {
                         content: sanitize_display_text(&error),
                         margin_top: 8.0,
-                        font_size: 12.0,
+                        font_size: typography::XS,
                         font_color: danger(),
                         text_align: "center",
                     }
                 }
                 row { height: 18.0 }
                 FlatButton {
-                    variant: if active { FlatButtonVariant::Destructive } else { FlatButtonVariant::Accent },
+                    variant: if active { FlatButtonVariant::Destructive } else { FlatButtonVariant::Primary },
                     size: ButtonSize::Lg,
                     width: Some("100%".to_owned()),
                     disabled: Some(busy || connection.is_none()),
                     onclick: move |_| dispatch(state, Action::ToggleConnect),
                     if busy {
-                        Spinner { size: 18.0, color: Some(0xFFFFFFFF) }
-                        text { content: action_label, margin_left: 8.0, font_size: 16.0, font_weight: 700, font_color: 0xFFFFFFFFu32 }
+                        Spinner { size: 18.0, color: Some(action_color) }
+                        text { content: action_label, margin_left: 8.0, font_size: typography::MD, font_weight: 700, font_color: action_color }
                     } else {
-                        {arkit::icon(action_icon, 18.0, 0xFFFFFFFF)}
-                        text { content: action_label, margin_left: 8.0, font_size: 16.0, font_weight: 700, font_color: 0xFFFFFFFFu32 }
+                        {arkit::icon(action_icon, 18.0, action_color)}
+                        text { content: action_label, margin_left: 8.0, font_size: typography::MD, font_weight: 700, font_color: action_color }
                     }
                 }
             }
@@ -138,8 +143,8 @@ pub(crate) fn home_page(state: Signal<State>) -> Element {
                             column {
                                 layout_weight: 1.0,
                                 align_items: "start",
-                                text { content: translate_ui(current.locale, tr::server()), font_size: 12.0, font_color: subtle() }
-                                text { content: server.clone(), margin_top: 2.0, font_size: 15.0, font_weight: 650, font_color: text_color() }
+                                text { content: translate_ui(current.locale, tr::server()), font_size: typography::XS, font_color: subtle() }
+                                text { content: server.clone(), margin_top: 2.0, font_size: typography::MD, font_weight: 650, font_color: text_color() }
                             }
                             Badge {
                                 content: protocol.clone(),
@@ -154,8 +159,8 @@ pub(crate) fn home_page(state: Signal<State>) -> Element {
                             column {
                                 layout_weight: 1.0,
                                 align_items: "start",
-                                text { content: translate_ui(current.locale, tr::group()), font_size: 12.0, font_color: subtle() }
-                                text { content: group, margin_top: 2.0, font_size: 14.0, font_weight: 600, font_color: text_color() }
+                                text { content: translate_ui(current.locale, tr::group()), font_size: typography::XS, font_color: subtle() }
+                                text { content: group, margin_top: 2.0, font_size: typography::SM, font_weight: 600, font_color: text_color() }
                             }
                             FlatButton {
                                 variant: FlatButtonVariant::Outline,
@@ -163,7 +168,7 @@ pub(crate) fn home_page(state: Signal<State>) -> Element {
                                 onclick: move |_| {
                                     navigator.push(Route::Connections {});
                                 },
-                                text { content: translate_ui(current.locale, tr::nav_connections()), font_size: 13.0, font_weight: 600, font_color: text_color() }
+                                text { content: translate_ui(current.locale, tr::nav_connections()), font_size: typography::SM, font_weight: 600, font_color: text_color() }
                             }
                         }
                     }

@@ -149,7 +149,7 @@ The default native build uses:
 | Dependency             | Source                                                       |
 | ---------------------- | ------------------------------------------------------------ |
 | AnyConnect/OpenConnect | crates.io `anyconnect 0.1.1`, bundled OpenConnect 9.20       |
-| Native UI              | `richerfu/arkit` commit `75ff91c`                            |
+| Native UI              | `richerfu/arkit` commit `1d4163f`                            |
 | TLS                    | Vendored OpenSSL                                             |
 | XML                    | Vendored libxml2 2.15.3 from `anyconnect-sys`                 |
 

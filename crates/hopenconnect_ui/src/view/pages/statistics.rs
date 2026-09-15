@@ -22,27 +22,27 @@ pub(crate) fn statistics_page(state: Signal<State>) -> Element {
                         if active {
                             text {
                                 content: format!("{}  {}", translate_ui(current.locale, tr::duration()), format_duration(stats.connected_seconds)),
-                                font_size: 28.0,
+                                font_size: typography::XXL,
                                 font_weight: 750,
                                 font_color: text_color(),
                             }
                             text {
                                 content: format!("{} · {}", translate_ui(current.locale, tr::gateway()), if stats.gateway.is_empty() { "—" } else { &stats.gateway }),
                                 margin_top: 6.0,
-                                font_size: 13.0,
+                                font_size: typography::SM,
                                 font_color: subtle(),
                             }
                         } else {
                             text {
                                 content: translate_ui(current.locale, tr::disconnected()),
-                                font_size: 18.0,
+                                font_size: typography::LG,
                                 font_weight: 700,
                                 font_color: subtle(),
                             }
                             text {
                                 content: translate_ui(current.locale, tr::statistics_hint()),
                                 margin_top: 8.0,
-                                font_size: 12.0,
+                                font_size: typography::XS,
                                 font_color: subtle(),
                             }
                         }

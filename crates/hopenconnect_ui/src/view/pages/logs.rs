@@ -130,7 +130,7 @@ pub(crate) fn diagnostics_page(state: Signal<State>) -> Element {
                     } else {
                         translate_ui(locale, tr::logs_recording_off())
                     },
-                    font_size: 12.0,
+                    font_size: typography::XS,
                     font_weight: 600,
                     font_color: if recording_enabled { success() } else { subtle() },
                 }
@@ -141,7 +141,7 @@ pub(crate) fn diagnostics_page(state: Signal<State>) -> Element {
                         current.log_recording.archives.len(),
                         translate_ui(locale, tr::logs_files_suffix())
                     ),
-                    font_size: 11.0,
+                    font_size: typography::XS,
                     font_color: subtle(),
                 }
             }
@@ -222,14 +222,14 @@ pub(crate) fn diagnostics_page(state: Signal<State>) -> Element {
                             total_log_count,
                             translate_ui(locale, tr::logs_count_suffix())
                         ),
-                        font_size: 11.0,
+                        font_size: typography::XS,
                         font_color: subtle(),
                     }
                     row { layout_weight: 1.0 }
                     if !empty {
                         text {
                             content: translate_ui(locale, tr::logs_tap_detail()),
-                            font_size: 11.0,
+                            font_size: typography::XS,
                             font_color: subtle(),
                         }
                     }
@@ -313,7 +313,7 @@ fn log_archive_delete_dialog(
                         onclick: move |_| selected.set(None),
                         text {
                             content: translate_ui(locale, tr::cancel()),
-                            font_size: 13.0,
+                            font_size: typography::SM,
                             font_weight: 600,
                             font_color: text_color(),
                         }
@@ -327,7 +327,7 @@ fn log_archive_delete_dialog(
                         },
                         text {
                             content: translate_ui(locale, tr::logs_delete_action()),
-                            font_size: 13.0,
+                            font_size: typography::SM,
                             font_weight: 600,
                             font_color: destructive_text(),
                         }
@@ -381,8 +381,13 @@ fn VirtualLogArchiveList(
             hasher.finish()
         })
         .collect::<Vec<_>>();
+    let stamps = items
+        .iter()
+        .zip(item_keys)
+        .map(|(item, revision)| VirtualItemStamp::new(item.file_name.clone(), revision))
+        .collect();
     let render_items = items;
-    let source = use_virtual_source_items_keyed(VirtualKind::List, item_keys, move |index| {
+    let source = use_virtual_items(VirtualKind::List, stamps, move |index| {
         let Some(item) = render_items.get(index as usize).cloned() else {
             return rsx! {};
         };
@@ -416,8 +421,19 @@ fn VirtualLogList(
             hasher.finish()
         })
         .collect::<Vec<_>>();
+    // Identity excludes palette and uses occurrence counts to distinguish equal records.
+    let ids = crate::virtual_identity::occurrence_ids(
+        items
+            .iter()
+            .map(|item| (item.meta.clone(), item.message.clone())),
+    );
+    let stamps = ids
+        .into_iter()
+        .zip(item_keys)
+        .map(|(id, revision)| VirtualItemStamp::new(id, revision))
+        .collect();
     let render_items = items;
-    let source = use_virtual_source_items_keyed(VirtualKind::List, item_keys, move |index| {
+    let source = use_virtual_items(VirtualKind::List, stamps, move |index| {
         let Some(item) = render_items.get(index as usize).cloned() else {
             return rsx! {};
         };
@@ -468,7 +484,7 @@ fn VirtualLogArchiveRowView(
             margin_bottom: 7.0,
             border_width: 1.0,
             border_color: palette.border,
-            border_radius: 9.0,
+            border_radius: radius::LG,
             clip: true,
             align_items: "center",
             column {
@@ -478,7 +494,7 @@ fn VirtualLogArchiveRowView(
                 text {
                     width: "100%",
                     content: item.file_name,
-                    font_size: 14.0,
+                    font_size: typography::SM,
                     font_weight: 600,
                     font_color: palette.foreground,
                     line_height: 20.0,
@@ -489,7 +505,7 @@ fn VirtualLogArchiveRowView(
                     width: "100%",
                     content: item.detail,
                     padding_top: 4.0,
-                    font_size: 11.0,
+                    font_size: typography::XS,
                     font_weight: 400,
                     font_color: palette.muted_foreground,
                     line_height: 16.0,
@@ -534,17 +550,21 @@ fn VirtualLogArchiveAction(
     disabled: bool,
     on_click: EventHandler<()>,
 ) -> Element {
-    let font_size = if content == "…" { 18.0 } else { 20.0 };
+    let font_size = if content == "…" {
+        typography::LG
+    } else {
+        typography::XL
+    };
     rsx! {
         text {
-            width: 40.0,
-            height: 40.0,
+            width: control::ICON_SM,
+            height: control::ICON_SM,
             content,
             font_size,
             font_color: color,
             font_weight: 500,
             text_align: "center",
-            line_height: 40.0,
+            line_height: control::ICON_SM,
             max_lines: 1,
             enabled: !disabled,
             opacity: if disabled { 0.55 } else { 1.0 },
@@ -578,14 +598,14 @@ fn VirtualLogRowView(
             margin_bottom: 7.0,
             border_width: 1.0,
             border_color: palette.border,
-            border_radius: 9.0,
+            border_radius: radius::LG,
             clip: true,
             align_items: "start",
             onclick: move |_| on_open.call(open_item.clone()),
             text {
                 width: "100%",
                 content: item.meta,
-                font_size: 10.0,
+                font_size: typography::XS,
                 font_weight: 500,
                 font_color: item.color,
                 line_height: 15.0,
@@ -596,7 +616,7 @@ fn VirtualLogRowView(
                 width: "100%",
                 content: item.preview,
                 padding_top: 4.0,
-                font_size: 12.0,
+                font_size: typography::XS,
                 font_weight: 400,
                 font_color: palette.foreground,
                 line_height: 17.0,
@@ -633,7 +653,7 @@ fn log_detail_dialog(
                 alignment: "top-start",
                 scroll_bar: "off",
                 background_color: muted(),
-                border_radius: 9.0,
+                border_radius: radius::LG,
                 column {
                     width: "100%",
                     padding: 12.0,
@@ -642,7 +662,7 @@ fn log_detail_dialog(
                     text {
                         content: log.message,
                         width: "100%",
-                        font_size: 12.0,
+                        font_size: typography::XS,
                         line_height: 19.0,
                         font_color: text_color(),
                     }
