@@ -366,7 +366,10 @@ impl SessionEngine {
             // Unblock any auth worker waiting on a challenge form.
             self.auth.abort();
             inner.snapshot.pending_auth = None;
-            if inner.platform_start_outcome == PlatformStartOutcome::Pending {
+            inner.platform_vpn_starting = false;
+            inner.platform_vpn_running = false;
+            inner.platform_stop_requested = true;
+            if inner.platform_start_outcome != PlatformStartOutcome::Failed {
                 inner.platform_start_outcome = PlatformStartOutcome::Cancelled;
             }
             self.set_lifecycle_locked(&mut inner, ConnectionLifecycle::Disconnecting, None);
@@ -381,7 +384,9 @@ impl SessionEngine {
                 pending = inner.pending_native.take();
                 running = inner.running_native.take();
             }
-            inner.generation
+            let generation = inner.generation;
+            self.persist_platform_locked(&mut inner)?;
+            generation
         };
 
         #[cfg(feature = "native-anyconnect")]
@@ -404,12 +409,10 @@ impl SessionEngine {
             {
                 return Ok(false);
             }
-            if !inner.platform_vpn_running
-                || matches!(
-                    inner.snapshot.lifecycle,
-                    ConnectionLifecycle::Disconnecting | ConnectionLifecycle::Connected
-                )
-            {
+            if matches!(
+                inner.snapshot.lifecycle,
+                ConnectionLifecycle::Disconnecting | ConnectionLifecycle::Connected
+            ) {
                 inner.platform_vpn_running = false;
                 inner.platform_vpn_starting = false;
                 self.set_lifecycle_locked(&mut inner, ConnectionLifecycle::Disconnected, None);
@@ -442,6 +445,8 @@ impl SessionEngine {
             }
             inner.pending_native = None;
         }
+        let was_connected_owner = inner.platform_vpn_running
+            && inner.platform_start_outcome == PlatformStartOutcome::Connected;
         inner.platform_vpn_running = false;
         inner.platform_vpn_starting = false;
         let already_terminal = matches!(
@@ -463,6 +468,15 @@ impl SessionEngine {
                 Some(message.clone()),
             );
             self.push_diag_locked(&mut inner, "error", message.clone());
+        } else if was_connected_owner {
+            const MESSAGE: &str = "native VPN worker is not running";
+            inner.platform_start_outcome = PlatformStartOutcome::Failed;
+            self.set_lifecycle_locked(
+                &mut inner,
+                ConnectionLifecycle::Failed,
+                Some(MESSAGE.to_owned()),
+            );
+            self.push_diag_locked(&mut inner, "error", MESSAGE);
         } else if !matches!(inner.snapshot.lifecycle, ConnectionLifecycle::Disconnected) {
             if inner.platform_start_outcome == PlatformStartOutcome::Pending {
                 inner.platform_start_outcome = PlatformStartOutcome::Cancelled;
@@ -481,10 +495,12 @@ impl SessionEngine {
             // UI process: pick up Connected/Failed written by the VPN extension process.
             // Extension process: pick up a matching UI terminal verdict.
             self.sync_platform_locked(&mut inner);
+            let platform = self.platform_ipc()?;
+            if platform.as_ref().is_some_and(|platform| platform.is_ui()) {
+                self.refresh_platform_vpn_owner_liveness_locked(&mut inner)?;
+            }
             self.refresh_stats_locked(&mut inner);
-            let is_extension = self
-                .platform_ipc()?
-                .is_some_and(|platform| !platform.is_ui());
+            let is_extension = platform.is_some_and(|platform| !platform.is_ui());
             let owner_mismatch = inner.running_native.as_ref().is_some_and(|session| {
                 session.attempt_id() != inner.platform_start_attempt_id
                     || session.generation() != inner.generation
@@ -538,6 +554,12 @@ impl SessionEngine {
         {
             let mut inner = self.lock()?;
             self.sync_platform_locked(&mut inner);
+            if self
+                .platform_ipc()?
+                .is_some_and(|platform| platform.is_ui())
+            {
+                self.refresh_platform_vpn_owner_liveness_locked(&mut inner)?;
+            }
             self.refresh_stats_locked(&mut inner);
         }
 
@@ -558,11 +580,25 @@ impl SessionEngine {
                     if let Some(finished) = finished {
                         match finished.join(Duration::from_millis(1)) {
                             Ok(()) => {
-                                self.set_lifecycle_locked(
-                                    &mut inner,
-                                    ConnectionLifecycle::Disconnected,
-                                    None,
-                                );
+                                if inner.platform_vpn_running
+                                    && inner.platform_start_outcome
+                                        == PlatformStartOutcome::Connected
+                                {
+                                    const MESSAGE: &str = "native VPN worker is not running";
+                                    inner.platform_start_outcome = PlatformStartOutcome::Failed;
+                                    self.set_lifecycle_locked(
+                                        &mut inner,
+                                        ConnectionLifecycle::Failed,
+                                        Some(MESSAGE.to_owned()),
+                                    );
+                                    self.push_diag_locked(&mut inner, "error", MESSAGE);
+                                } else {
+                                    self.set_lifecycle_locked(
+                                        &mut inner,
+                                        ConnectionLifecycle::Disconnected,
+                                        None,
+                                    );
+                                }
                                 inner.platform_vpn_running = false;
                                 inner.connected_at = None;
                                 let _ = self.persist_platform_locked(&mut inner);
@@ -574,6 +610,7 @@ impl SessionEngine {
                                     ConnectionLifecycle::Failed,
                                     Some(message.clone()),
                                 );
+                                inner.platform_start_outcome = PlatformStartOutcome::Failed;
                                 inner.platform_vpn_running = false;
                                 inner.connected_at = None;
                                 let _ = self.persist_platform_locked(&mut inner);

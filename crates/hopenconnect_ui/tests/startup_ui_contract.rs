@@ -13,6 +13,7 @@ const PACKAGE_MANIFEST: &str = include_str!("../../../oh-package.json5");
 const UI_MODEL: &str = include_str!("../src/model.rs");
 const UI_STATE: &str = include_str!("../src/state.rs");
 const UI_LIB: &str = include_str!("../src/lib.rs");
+const UI_VIEW: &str = include_str!("../src/view/mod.rs");
 const HOME_PAGE: &str = include_str!("../src/view/pages/home.rs");
 const CONNECTIONS_PAGE: &str = include_str!("../src/view/pages/connections.rs");
 const CHALLENGE_PAGE: &str = include_str!("../src/view/pages/challenge.rs");
@@ -89,6 +90,22 @@ fn interactive_sso_registers_a_direct_ui_browser_handler() {
         .expect("OpenConnect browser handler");
     assert!(set_app < register);
     assert!(UI_LIB.contains("bridge::open_external_browser_blocking(uri.to_owned()).is_ok()"));
+}
+
+#[test]
+fn authentication_sheet_reserves_the_keyboard_occlusion() {
+    assert!(CHALLENGE_PAGE.contains("let bottom_inset = metrics.ime_area.bottom.max(0.0);"));
+    assert!(CHALLENGE_PAGE.contains("bottom_inset,"));
+
+    let auth_sheet = UI_VIEW
+        .split("fn AuthSheet(")
+        .nth(1)
+        .expect("AuthSheet component")
+        .split("fn App(")
+        .next()
+        .expect("AuthSheet body");
+    assert!(auth_sheet.contains("BottomSheet {"));
+    assert!(auth_sheet.contains("height: bottom_inset"));
 }
 
 #[test]

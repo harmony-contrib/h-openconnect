@@ -54,9 +54,12 @@ impl SessionEngine {
                 .map_err(|_| CoreError::msg("platform IPC lock poisoned"))?;
             slot.replace(platform)
         };
-        // The extension process may be reused after the UI process restarts.
-        // Always bind the latest Want descriptors before checking VPN state.
-        drop(previous);
+        // The Extension process may be reused after the UI process restarts.
+        // Cancel only the waiter bound to the replaced session before dropping
+        // it, then let the subscription loop re-enter on the latest binding.
+        if let Some(previous) = previous {
+            previous.cancel_event_waits();
+        }
         {
             let mut inner = self.lock()?;
             inner.platform_remote_state_updated_at = 0;
@@ -78,6 +81,7 @@ impl SessionEngine {
         notification_fd: i32,
         attempt_id: &str,
     ) -> CoreResult<()> {
+        self.validate_platform_owner_journal_for_want(attempt_id)?;
         let platform =
             PlatformIpc::attach_vpn_raw(ashmem_fd, notification_fd).map_err(platform_ipc_error)?;
         let envelope = platform
@@ -85,6 +89,87 @@ impl SessionEngine {
             .map_err(platform_ipc_error)?
             .ok_or_else(|| CoreError::msg("platform VPN start has no UI state"))?;
         validate_platform_start_envelope(&envelope, attempt_id)
+    }
+
+    fn validate_platform_owner_journal_for_want(&self, attempt_id: &str) -> CoreResult<()> {
+        let (journal_path, issuer_lease_path) = {
+            let inner = self.lock()?;
+            (
+                platform_owner_journal_path(&inner),
+                platform_owner_lease_path(&inner, PlatformVpnOwnerLeaseRole::Issuer),
+            )
+        };
+        let journal = match crate::platform_owner::read(&journal_path)? {
+            JournalRead::Missing => {
+                return Err(CoreError::msg(format!(
+                    "platform VPN owner journal is missing for delivered attempt {attempt_id}"
+                )))
+            }
+            JournalRead::Present(journal) if journal.attempt_id == attempt_id => journal,
+            JournalRead::Present(journal) => {
+                return Err(CoreError::msg(format!(
+                    "stale platform VPN start attempt {attempt_id}; owner journal belongs to {}",
+                    journal.attempt_id
+                )))
+            }
+        };
+        match journal.phase {
+            PlatformVpnOwnerPhase::Pending => {
+                let expected = platform_owner_lease_record(
+                    attempt_id,
+                    journal.issuer,
+                    PlatformVpnOwnerLeaseRole::Issuer,
+                );
+                match crate::platform_owner::observe_owner_lease_exact(
+                    &issuer_lease_path,
+                    &expected,
+                )? {
+                    PlatformVpnOwnerLeaseObservation::HeldExact => {}
+                    PlatformVpnOwnerLeaseObservation::Released => {
+                        return Err(CoreError::msg(format!(
+                            "platform VPN start issuer lease for delivered attempt {attempt_id} was released"
+                        )))
+                    }
+                    PlatformVpnOwnerLeaseObservation::HeldOther => {
+                        return Err(CoreError::msg(format!(
+                            "cannot verify the exact platform VPN start issuer lease for delivered attempt {attempt_id}"
+                        )))
+                    }
+                }
+            }
+            PlatformVpnOwnerPhase::Attached => {}
+            PlatformVpnOwnerPhase::Stopping => {
+                return Err(CoreError::msg(format!(
+                    "platform VPN start attempt {attempt_id} was fenced by a stop intent"
+                )))
+            }
+        }
+        Ok(())
+    }
+
+    pub fn acknowledge_terminal_platform_vpn_start_delivery(
+        &self,
+        ashmem_fd: i32,
+        notification_fd: i32,
+        attempt_id: &str,
+    ) -> CoreResult<bool> {
+        if attempt_id.is_empty() {
+            return Ok(false);
+        }
+        let platform =
+            PlatformIpc::attach_vpn_raw(ashmem_fd, notification_fd).map_err(platform_ipc_error)?;
+        let envelope = platform
+            .read_remote()
+            .map_err(platform_ipc_error)?
+            .ok_or_else(|| CoreError::msg("platform VPN start has no UI state"))?;
+        let Some(mut state) = envelope.state else {
+            return Ok(false);
+        };
+        if !acknowledge_terminal_delivery_state(&mut state, attempt_id) {
+            return Ok(false);
+        }
+        platform.publish_state(state).map_err(platform_ipc_error)?;
+        Ok(true)
     }
 
     pub fn sync_platform_changes(&self) -> CoreResult<()> {
@@ -127,7 +212,9 @@ impl SessionEngine {
 
     /// Wake the in-process waiter parked in [`Self::wait_for_platform_change_event`].
     pub fn cancel_platform_change_wait(&self) {
-        crate::platform_ipc::cancel_event_waits();
+        if let Ok(Some(platform)) = self.platform_ipc() {
+            platform.cancel_event_waits();
+        }
     }
 
     pub fn queue_platform_browser_open_request(&self, uri: String) -> CoreResult<()> {
@@ -223,32 +310,176 @@ impl SessionEngine {
             .map_err(|_| CoreError::msg("platform IPC lock poisoned"))
     }
 
-    pub fn begin_platform_vpn_start(&self) -> CoreResult<String> {
+    /// Issue a process-wide ordering token for one VPN Start/Stop intent.
+    pub fn advance_platform_vpn_intent(&self) -> CoreResult<u64> {
         let mut inner = self.lock()?;
+        inner.platform_vpn_intent_epoch = inner
+            .platform_vpn_intent_epoch
+            .checked_add(1)
+            .ok_or_else(|| CoreError::msg("platform VPN intent epoch exhausted"))?;
+        Ok(inner.platform_vpn_intent_epoch)
+    }
+
+    pub fn is_platform_vpn_intent_current(&self, intent_epoch: u64) -> CoreResult<bool> {
+        let inner = self.lock()?;
+        Ok(intent_epoch > 0 && inner.platform_vpn_intent_epoch == intent_epoch)
+    }
+
+    pub fn is_platform_vpn_stop_current(
+        &self,
+        intent_epoch: u64,
+        attempt_id: &str,
+    ) -> CoreResult<bool> {
+        let inner = self.lock()?;
+        let exact_fence = inner.platform_os_stop_epoch == intent_epoch
+            && inner.platform_os_stop_attempt_id == attempt_id;
+        Ok(intent_epoch > 0
+            && inner.platform_vpn_intent_epoch == intent_epoch
+            && exact_fence
+            && !inner.platform_os_stop_in_flight)
+    }
+
+    pub fn begin_platform_vpn_os_stop(
+        &self,
+        intent_epoch: u64,
+        attempt_id: &str,
+    ) -> CoreResult<bool> {
+        let mut inner = self.lock()?;
+        if intent_epoch == 0
+            || inner.platform_vpn_intent_epoch != intent_epoch
+            || inner.platform_os_stop_in_flight
+        {
+            return Ok(false);
+        }
+        if inner.platform_os_stop_epoch == 0 {
+            if !attempt_id.is_empty() {
+                return Ok(false);
+            }
+            inner.platform_os_stop_epoch = intent_epoch;
+            inner.platform_os_stop_attempt_id.clear();
+        } else if inner.platform_os_stop_epoch != intent_epoch
+            || inner.platform_os_stop_attempt_id != attempt_id
+        {
+            return Ok(false);
+        }
+        inner.platform_os_stop_in_flight = true;
+        Ok(true)
+    }
+
+    pub fn complete_platform_vpn_os_stop(
+        &self,
+        intent_epoch: u64,
+        attempt_id: &str,
+    ) -> CoreResult<bool> {
+        let mut inner = self.lock()?;
+        if inner.platform_os_stop_epoch != intent_epoch
+            || inner.platform_os_stop_attempt_id != attempt_id
+            || !inner.platform_os_stop_in_flight
+        {
+            return Ok(false);
+        }
+        inner.platform_os_stop_epoch = 0;
+        inner.platform_os_stop_attempt_id.clear();
+        inner.platform_os_stop_in_flight = false;
+        Ok(true)
+    }
+
+    pub fn fail_platform_vpn_os_stop(
+        &self,
+        intent_epoch: u64,
+        attempt_id: &str,
+    ) -> CoreResult<bool> {
+        let mut inner = self.lock()?;
+        if inner.platform_os_stop_epoch != intent_epoch
+            || inner.platform_os_stop_attempt_id != attempt_id
+            || !inner.platform_os_stop_in_flight
+        {
+            return Ok(false);
+        }
+        inner.platform_os_stop_in_flight = false;
+        Ok(true)
+    }
+
+    pub fn begin_platform_vpn_start_for_intent(&self, intent_epoch: u64) -> CoreResult<String> {
+        let issuer = crate::platform_owner::current_process_identity()?;
+        let mut inner = self.lock()?;
+        if intent_epoch == 0 || inner.platform_vpn_intent_epoch != intent_epoch {
+            return Err(CoreError::msg(format!(
+                "platform VPN start intent {intent_epoch} was superseded"
+            )));
+        }
+        if inner.platform_os_stop_epoch != 0 {
+            return Err(CoreError::msg(format!(
+                "platform VPN OS stop for attempt {} is still pending confirmation",
+                inner.platform_os_stop_attempt_id
+            )));
+        }
         self.sync_platform_locked(&mut inner);
         if inner.platform_start_outcome == PlatformStartOutcome::Pending {
             return Err(CoreError::msg("platform VPN start is already pending"));
+        }
+        if !inner.platform_start_attempt_id.is_empty() && !inner.platform_vpn_cleanup_complete {
+            return Err(CoreError::msg(
+                "previous platform VPN connection cleanup is still pending",
+            ));
         }
         if inner.platform_vpn_running {
             return Err(CoreError::msg("platform VPN is already connected"));
         }
 
-        inner.platform_start_sequence = inner.platform_start_sequence.saturating_add(1);
-        let attempt_id = format!(
-            "{}-{}",
-            PlatformVpnState::now_nanos(),
-            inner.platform_start_sequence
-        );
+        let next_sequence = inner.platform_start_sequence.saturating_add(1);
+        let attempt_id = format!("{}-{}", PlatformVpnState::now_nanos(), next_sequence);
+        let issuer_lease = {
+            let journal_path = platform_owner_journal_path(&inner);
+            match crate::platform_owner::read(&journal_path)? {
+                JournalRead::Missing => {}
+                JournalRead::Present(owner) => {
+                    return Err(CoreError::msg(format!(
+                    "previous platform VPN owner journal for attempt {} is still pending cleanup",
+                    owner.attempt_id
+                )))
+                }
+            }
+            let lease = crate::platform_owner::acquire_owner_lease_exact(
+                &platform_owner_lease_path(&inner, PlatformVpnOwnerLeaseRole::Issuer),
+                platform_owner_lease_record(
+                    &attempt_id,
+                    issuer.clone(),
+                    PlatformVpnOwnerLeaseRole::Issuer,
+                ),
+            )?;
+            crate::platform_owner::create_pending_exact(
+                &journal_path,
+                PlatformVpnOwnerJournal {
+                    attempt_id: attempt_id.clone(),
+                    issuer,
+                    extension: None,
+                    phase: PlatformVpnOwnerPhase::Pending,
+                },
+            )?;
+            lease
+        };
+        inner.platform_vpn_issuer_lease = Some(issuer_lease);
+        inner.platform_vpn_extension_lease = None;
+        inner.platform_start_sequence = next_sequence;
         inner.platform_start_attempt_id = attempt_id.clone();
         inner.platform_start_outcome = PlatformStartOutcome::Pending;
+        inner.platform_start_delivery_observed = false;
         inner.platform_extension_attached = false;
+        inner.platform_stop_requested = false;
+        inner.platform_extension_owner_pid = 0;
+        inner.platform_extension_owner_start_time = 0;
+        inner.platform_vpn_cleanup_complete = false;
         if let Some(handoff) = inner.platform_session_handoff.as_mut() {
             handoff.attempt_id = attempt_id.clone();
             handoff.updated_at = PlatformVpnState::now_nanos();
         }
         inner.platform_vpn_starting = true;
         inner.platform_vpn_running = false;
+        inner.platform_remote_state_updated_at = 0;
+        inner.platform_remote_state_seen_at = None;
         inner.platform_remote_stale_since = None;
+        inner.platform_watchdog_cleanup_recoverable = false;
         self.set_lifecycle_locked(&mut inner, ConnectionLifecycle::Establishing, None);
         self.push_diag_locked(
             &mut inner,
@@ -260,10 +491,11 @@ impl SessionEngine {
     }
 
     /// Bind the extension process to the transaction delivered in its Want.
-    pub fn bind_platform_vpn_start(&self, attempt_id: &str) -> CoreResult<()> {
+    pub fn bind_platform_vpn_start(&self, attempt_id: &str) -> CoreResult<String> {
         if attempt_id.is_empty() {
             return Err(CoreError::msg("platform VPN start attempt id is empty"));
         }
+        let extension_owner = crate::platform_owner::current_process_identity()?;
         let mut inner = self.lock()?;
         self.sync_platform_for_binding_locked(&mut inner, attempt_id)?;
         if inner.platform_start_attempt_id != attempt_id {
@@ -279,57 +511,453 @@ impl SessionEngine {
                 "platform VPN start attempt {attempt_id} is already terminal"
             )));
         }
+        #[cfg(feature = "native-anyconnect")]
+        let native_vpn_running = inner.running_native.is_some();
+        #[cfg(not(feature = "native-anyconnect"))]
+        let native_vpn_running = false;
+        if inner.platform_start_outcome == PlatformStartOutcome::Connected && !native_vpn_running {
+            // HarmonyOS may recreate the Extension process after a crash and
+            // redeliver the same still-connected Want. The fresh native core
+            // has no worker, so reopen only this non-terminal attempt's start
+            // phase. Failed/Cancelled attempts remain terminal above.
+            inner.platform_start_outcome = PlatformStartOutcome::Pending;
+            inner.platform_vpn_starting = true;
+            inner.platform_vpn_running = false;
+            inner.platform_vpn_cleanup_complete = false;
+            inner.platform_watchdog_cleanup_recoverable = false;
+            self.push_diag_locked(
+                &mut inner,
+                "info",
+                format!("platform VPN extension recovering connected attempt {attempt_id}"),
+            );
+        }
+
+        {
+            let journal_path = platform_owner_journal_path(&inner);
+            let journal = match crate::platform_owner::read(&journal_path)? {
+                JournalRead::Missing => {
+                    return Err(CoreError::msg(format!(
+                        "platform VPN owner journal is missing for attempt {attempt_id}"
+                    )))
+                }
+                JournalRead::Present(journal) if journal.attempt_id == attempt_id => journal,
+                JournalRead::Present(journal) => {
+                    return Err(CoreError::msg(format!(
+                    "stale platform VPN start attempt {attempt_id}; owner journal belongs to {}",
+                    journal.attempt_id
+                )))
+                }
+            };
+            let issuer_lease_path =
+                platform_owner_lease_path(&inner, PlatformVpnOwnerLeaseRole::Issuer);
+            let extension_lease_path =
+                platform_owner_lease_path(&inner, PlatformVpnOwnerLeaseRole::Extension);
+            let extension_lease_record = platform_owner_lease_record(
+                attempt_id,
+                extension_owner.clone(),
+                PlatformVpnOwnerLeaseRole::Extension,
+            );
+            let acquired_extension_lease = match (journal.phase, journal.extension.as_ref()) {
+                (PlatformVpnOwnerPhase::Pending, None) => {
+                    let issuer_lease_record = platform_owner_lease_record(
+                        attempt_id,
+                        journal.issuer.clone(),
+                        PlatformVpnOwnerLeaseRole::Issuer,
+                    );
+                    match crate::platform_owner::observe_owner_lease_exact(
+                        &issuer_lease_path,
+                        &issuer_lease_record,
+                    )? {
+                        PlatformVpnOwnerLeaseObservation::HeldExact => {}
+                        PlatformVpnOwnerLeaseObservation::Released => {
+                            return Err(CoreError::msg(format!(
+                                "platform VPN start issuer lease for attempt {attempt_id} was released"
+                            )))
+                        }
+                        PlatformVpnOwnerLeaseObservation::HeldOther => {
+                            return Err(CoreError::msg(format!(
+                                "cannot verify the exact platform VPN start issuer lease for attempt {attempt_id}"
+                            )))
+                        }
+                    }
+                    let lease = crate::platform_owner::acquire_owner_lease_exact(
+                        &extension_lease_path,
+                        extension_lease_record.clone(),
+                    )?;
+                    crate::platform_owner::upgrade_attached_exact(
+                        &journal_path,
+                        attempt_id,
+                        journal.issuer.clone(),
+                        extension_owner.clone(),
+                    )?;
+                    Some(lease)
+                }
+                (PlatformVpnOwnerPhase::Attached, Some(current_owner))
+                    if current_owner == &extension_owner =>
+                {
+                    if inner.platform_vpn_extension_lease.is_none() {
+                        Some(crate::platform_owner::acquire_owner_lease_exact(
+                            &extension_lease_path,
+                            extension_lease_record,
+                        )?)
+                    } else {
+                        None
+                    }
+                }
+                (PlatformVpnOwnerPhase::Attached, Some(current_owner)) => {
+                    let previous_lease_record = platform_owner_lease_record(
+                        attempt_id,
+                        current_owner.clone(),
+                        PlatformVpnOwnerLeaseRole::Extension,
+                    );
+                    match crate::platform_owner::observe_owner_lease_exact(
+                        &extension_lease_path,
+                        &previous_lease_record,
+                    )? {
+                        PlatformVpnOwnerLeaseObservation::Released => {}
+                        PlatformVpnOwnerLeaseObservation::HeldExact => {
+                            return Err(CoreError::msg(format!(
+                                "platform VPN attempt {attempt_id} is still owned by another Extension process"
+                            )))
+                        }
+                        PlatformVpnOwnerLeaseObservation::HeldOther => {
+                            return Err(CoreError::msg(format!(
+                                "cannot verify the exact previous Extension lease for attempt {attempt_id}"
+                            )))
+                        }
+                    }
+                    let lease = crate::platform_owner::acquire_owner_lease_exact(
+                        &extension_lease_path,
+                        extension_lease_record,
+                    )?;
+                    crate::platform_owner::rebind_attached_exact(
+                        &journal_path,
+                        attempt_id,
+                        journal.issuer.clone(),
+                        current_owner.clone(),
+                        extension_owner.clone(),
+                    )?;
+                    Some(lease)
+                }
+                _ => {
+                    return Err(CoreError::msg(format!(
+                        "platform VPN owner journal has an invalid phase for attempt {attempt_id}"
+                    )))
+                }
+            };
+            if let Some(lease) = acquired_extension_lease {
+                inner.platform_vpn_extension_lease = Some(lease);
+            }
+            // Stop publishes before racing Pending→Stopping. Re-read after
+            // the journal CAS so a stale pre-CAS frame cannot revive it.
+            self.sync_platform_locked(&mut inner);
+            if inner.platform_start_attempt_id != attempt_id {
+                return Err(CoreError::msg(format!(
+                    "platform VPN start attempt {attempt_id} was superseded after owner attachment"
+                )));
+            }
+        }
+
+        let owner_identity_changed = inner.platform_extension_owner_pid != extension_owner.pid
+            || inner.platform_extension_owner_start_time != extension_owner.start_time;
+        inner.platform_extension_owner_pid = extension_owner.pid;
+        inner.platform_extension_owner_start_time = extension_owner.start_time;
         if !inner.platform_extension_attached {
+            inner.platform_start_delivery_observed = true;
             inner.platform_extension_attached = true;
+            inner.platform_vpn_cleanup_complete = false;
+            inner.platform_watchdog_cleanup_recoverable = false;
             self.push_diag_locked(
                 &mut inner,
                 "info",
                 format!("platform VPN extension attached to {attempt_id}"),
             );
             self.persist_platform_locked(&mut inner)?;
+        } else if inner.platform_start_outcome == PlatformStartOutcome::Pending
+            && inner.platform_vpn_starting
+            && !inner.platform_vpn_running
+        {
+            inner.platform_start_delivery_observed = true;
+            self.persist_platform_locked(&mut inner)?;
+        } else if owner_identity_changed {
+            self.persist_platform_locked(&mut inner)?;
         }
-        Ok(())
+        Ok(if extension_owner.start_time > 0 {
+            format!("{}:{}", extension_owner.pid, extension_owner.start_time)
+        } else {
+            format!("{}:unavailable", extension_owner.pid)
+        })
     }
 
-    /// Wait briefly for the VPN Extension to accept the matching Want.
-    ///
-    /// Some HarmonyOS authorization dialogs start the Extension with a new,
-    /// parameter-free Want. Callers use this signal to decide whether the
-    /// original Want containing the shared-memory descriptors must be sent
-    /// again after authorization succeeds.
-    pub async fn await_platform_vpn_start_attachment(
-        &self,
-        attempt_id: &str,
-        timeout: Duration,
-    ) -> CoreResult<bool> {
-        if attempt_id.is_empty() {
-            return Err(CoreError::msg("platform VPN start attempt id is empty"));
+    /// Acknowledge that the exact HarmonyOS VpnConnection owner has finished
+    /// every native/platform operation and its destroy Promise has resolved.
+    pub fn complete_platform_vpn_cleanup(&self, attempt_id: &str) -> CoreResult<bool> {
+        let acknowledging_owner = crate::platform_owner::current_process_identity()?;
+        let mut inner = self.lock()?;
+        self.sync_platform_locked(&mut inner);
+        if attempt_id.is_empty() || inner.platform_start_attempt_id != attempt_id {
+            return Ok(false);
         }
-        let mut receiver = self.platform_start_tx.subscribe();
-        let deadline = tokio::time::Instant::now() + timeout;
-        loop {
-            let event = {
-                let mut inner = self.lock()?;
-                self.sync_platform_locked(&mut inner);
-                self.platform_start_event_locked(&inner)
-            };
-            if event.attempt_id != attempt_id || event.outcome != PlatformStartOutcome::Pending {
-                return Ok(event.attempt_id == attempt_id && event.extension_attached);
+        if inner.platform_vpn_running
+            || inner.platform_vpn_starting
+            || !matches!(
+                inner.platform_start_outcome,
+                PlatformStartOutcome::Failed | PlatformStartOutcome::Cancelled
+            )
+        {
+            return Ok(false);
+        }
+        if inner.platform_vpn_cleanup_complete {
+            return Ok(true);
+        }
+
+        {
+            if inner.platform_vpn_extension_lease.is_none() {
+                return Err(CoreError::msg(format!(
+                    "platform VPN Extension lease is missing before cleanup acknowledgement for {attempt_id}"
+                )));
             }
-            if event.extension_attached {
-                return Ok(true);
+            let journal_path = platform_owner_journal_path(&inner);
+            let journal = match crate::platform_owner::read(&journal_path)? {
+                JournalRead::Missing => {
+                    return Err(CoreError::msg(format!(
+                        "platform VPN owner journal is missing before cleanup acknowledgement for {attempt_id}"
+                    )))
+                }
+                JournalRead::Present(journal) if journal.attempt_id == attempt_id => journal,
+                JournalRead::Present(_) => return Ok(false),
+            };
+            let expected_extension = match (journal.phase, journal.extension) {
+                (PlatformVpnOwnerPhase::Attached, Some(extension))
+                    if extension == acknowledging_owner
+                        && extension.pid == inner.platform_extension_owner_pid
+                        && extension.start_time == inner.platform_extension_owner_start_time =>
+                {
+                    extension
+                }
+                _ => {
+                    return Err(CoreError::msg(format!(
+                        "platform VPN owner journal does not match the Extension acknowledging cleanup for {attempt_id}"
+                    )))
+                }
+            };
+            if !crate::platform_owner::delete_exact(
+                &journal_path,
+                attempt_id,
+                Some(expected_extension),
+            )? {
+                return Err(CoreError::msg(format!(
+                    "platform VPN owner journal changed before cleanup acknowledgement for {attempt_id}"
+                )));
             }
 
-            tokio::select! {
-                changed = receiver.changed() => {
-                    changed.map_err(|_| CoreError::msg(
-                        "platform VPN start coordinator closed"
-                    ))?;
+            inner.platform_vpn_cleanup_complete = true;
+            inner.platform_extension_attached = false;
+            inner.platform_stop_requested = true;
+            inner.platform_extension_owner_pid = 0;
+            inner.platform_extension_owner_start_time = 0;
+            inner.platform_watchdog_cleanup_recoverable = false;
+            self.push_diag_locked(
+                &mut inner,
+                "info",
+                format!("platform VPN connection cleanup completed for {attempt_id}"),
+            );
+            // Exact journal deletion is the cleanup linearization point. Once
+            // it succeeds, retaining either lease can self-deadlock the next
+            // same-process start.
+            inner.platform_vpn_issuer_lease = None;
+            inner.platform_vpn_extension_lease = None;
+            self.persist_platform_locked(&mut inner)?;
+            Ok(true)
+        }
+    }
+
+    /// Release a cleanup barrier only after HarmonyOS confirms that the
+    /// Extension Ability stopped and the exact owner lease was released.
+    pub async fn recover_platform_vpn_cleanup_after_confirmed_stop(
+        &self,
+        attempt_id: &str,
+    ) -> CoreResult<bool> {
+        if attempt_id.is_empty() {
+            return Ok(false);
+        }
+        let deadline = tokio::time::Instant::now() + PLATFORM_OS_STOP_RECOVERY_DEADLINE;
+        loop {
+            let (journal_path, issuer_lease_path, extension_lease_path, local_unattached_fence) = {
+                let mut inner = self.lock()?;
+                self.sync_platform_locked(&mut inner);
+                if inner.platform_start_attempt_id == attempt_id
+                    && inner.platform_vpn_cleanup_complete
+                {
+                    return Ok(true);
                 }
-                changed = self.wait_for_platform_change(Duration::from_secs(1)) => {
-                    changed?;
+                let local_unattached_fence = inner.platform_start_attempt_id == attempt_id
+                    && !inner.platform_extension_attached
+                    && inner.platform_stop_requested
+                    && matches!(
+                        inner.platform_start_outcome,
+                        PlatformStartOutcome::Failed | PlatformStartOutcome::Cancelled
+                    );
+                (
+                    platform_owner_journal_path(&inner),
+                    platform_owner_lease_path(&inner, PlatformVpnOwnerLeaseRole::Issuer),
+                    platform_owner_lease_path(&inner, PlatformVpnOwnerLeaseRole::Extension),
+                    local_unattached_fence,
+                )
+            };
+            let journal = match crate::platform_owner::read(&journal_path)? {
+                JournalRead::Missing => {
+                    let mut inner = self.lock()?;
+                    self.sync_platform_locked(&mut inner);
+                    if inner.platform_start_attempt_id == attempt_id
+                        && inner.platform_vpn_cleanup_complete
+                    {
+                        return Ok(true);
+                    }
+                    return Err(CoreError::msg(format!(
+                        "platform VPN owner journal disappeared before cleanup was confirmed for {attempt_id}"
+                    )));
                 }
-                _ = tokio::time::sleep_until(deadline) => return Ok(false),
+                JournalRead::Present(journal) if journal.attempt_id == attempt_id => journal,
+                JournalRead::Present(_) => return Ok(false),
+            };
+            let (expected_extension, proof, recovery_reason) =
+                match (journal.phase, journal.extension.as_ref()) {
+                    (PlatformVpnOwnerPhase::Stopping, None) => (
+                        None,
+                        CleanupRecoveryProof::Proven,
+                        "the exact pending owner was durably fenced before confirmed OS stop"
+                            .to_owned(),
+                    ),
+                    (PlatformVpnOwnerPhase::Pending, None) if local_unattached_fence => (
+                        None,
+                        CleanupRecoveryProof::Proven,
+                        "the exact local attempt was terminal before an Extension adopted it"
+                            .to_owned(),
+                    ),
+                    (PlatformVpnOwnerPhase::Pending, None) => {
+                        let expected = platform_owner_lease_record(
+                            attempt_id,
+                            journal.issuer.clone(),
+                            PlatformVpnOwnerLeaseRole::Issuer,
+                        );
+                        let proof = match crate::platform_owner::observe_owner_lease_exact(
+                            &issuer_lease_path,
+                            &expected,
+                        )? {
+                            PlatformVpnOwnerLeaseObservation::Released => {
+                                CleanupRecoveryProof::Proven
+                            }
+                            PlatformVpnOwnerLeaseObservation::HeldExact => {
+                                CleanupRecoveryProof::OwnerAlive
+                            }
+                            PlatformVpnOwnerLeaseObservation::HeldOther => {
+                                CleanupRecoveryProof::OwnerLivenessUnknown
+                            }
+                        };
+                        (
+                            None,
+                            proof,
+                            format!(
+                                "exact pending issuer lease {}:{} was released",
+                                journal.issuer.pid, journal.issuer.start_time
+                            ),
+                        )
+                    }
+                    (PlatformVpnOwnerPhase::Attached, Some(extension)) => {
+                        let expected = platform_owner_lease_record(
+                            attempt_id,
+                            extension.clone(),
+                            PlatformVpnOwnerLeaseRole::Extension,
+                        );
+                        let proof = match crate::platform_owner::observe_owner_lease_exact(
+                            &extension_lease_path,
+                            &expected,
+                        )? {
+                            PlatformVpnOwnerLeaseObservation::Released => {
+                                CleanupRecoveryProof::Proven
+                            }
+                            PlatformVpnOwnerLeaseObservation::HeldExact => {
+                                CleanupRecoveryProof::OwnerAlive
+                            }
+                            PlatformVpnOwnerLeaseObservation::HeldOther => {
+                                CleanupRecoveryProof::OwnerLivenessUnknown
+                            }
+                        };
+                        (
+                            Some(extension.clone()),
+                            proof,
+                            format!(
+                                "exact Extension owner lease {}:{} was released",
+                                extension.pid, extension.start_time
+                            ),
+                        )
+                    }
+                    _ => {
+                        return Err(CoreError::msg(format!(
+                            "platform VPN owner journal has an invalid phase for {attempt_id}"
+                        )))
+                    }
+                };
+            match proof {
+                CleanupRecoveryProof::Proven => {
+                    if !crate::platform_owner::delete_exact(
+                        &journal_path,
+                        attempt_id,
+                        expected_extension,
+                    )? {
+                        // Ownership changed between proof and delete. Re-read
+                        // the exact journal instead of clearing its replacement.
+                        continue;
+                    }
+                    let mut inner = self.lock()?;
+                    self.sync_platform_locked(&mut inner);
+                    if inner.platform_start_attempt_id == attempt_id {
+                        if inner.platform_vpn_cleanup_complete {
+                            return Ok(true);
+                        }
+                        inner.platform_vpn_starting = false;
+                        inner.platform_vpn_running = false;
+                        if inner.platform_start_outcome != PlatformStartOutcome::Failed {
+                            inner.platform_start_outcome = PlatformStartOutcome::Cancelled;
+                            self.set_lifecycle_locked(
+                                &mut inner,
+                                ConnectionLifecycle::Disconnected,
+                                None,
+                            );
+                        }
+                        inner.platform_vpn_cleanup_complete = true;
+                        inner.platform_extension_attached = false;
+                        inner.platform_stop_requested = true;
+                        inner.platform_extension_owner_pid = 0;
+                        inner.platform_extension_owner_start_time = 0;
+                        inner.platform_watchdog_cleanup_recoverable = false;
+                        self.push_diag_locked(
+                            &mut inner,
+                            "warn",
+                            format!(
+                                "released orphaned platform VPN cleanup barrier for {attempt_id} after confirmed OS stop: {recovery_reason}"
+                            ),
+                        );
+                        inner.platform_vpn_issuer_lease = None;
+                        inner.platform_vpn_extension_lease = None;
+                        self.persist_platform_locked(&mut inner)?;
+                    }
+                    return Ok(true);
+                }
+                CleanupRecoveryProof::OwnerAlive => {
+                    if tokio::time::Instant::now() >= deadline {
+                        return Ok(false);
+                    }
+                    tokio::time::sleep(PLATFORM_OS_STOP_RECOVERY_POLL_INTERVAL).await;
+                }
+                CleanupRecoveryProof::OwnerLivenessUnknown => {
+                    let identity = journal.extension.as_ref().unwrap_or(&journal.issuer);
+                    return Err(CoreError::msg(format!(
+                        "cannot verify the exact platform VPN ownership lease for {}:{}",
+                        identity.pid, identity.start_time,
+                    )));
+                }
             }
         }
     }
@@ -345,6 +973,46 @@ impl SessionEngine {
     ) -> CoreResult<PlatformStartOutcome> {
         self.await_platform_vpn_start_with_deadline(attempt_id, PLATFORM_VPN_START_DEADLINE)
             .await
+    }
+
+    pub async fn await_platform_vpn_stop(&self, attempt_id: &str) -> CoreResult<bool> {
+        if attempt_id.is_empty() {
+            return Ok(true);
+        }
+        let mut receiver = self.platform_start_tx.subscribe();
+        let deadline = tokio::time::Instant::now() + PLATFORM_VPN_START_DEADLINE;
+        loop {
+            let stopped = {
+                let mut inner = self.lock()?;
+                self.sync_platform_locked(&mut inner);
+                if inner.platform_start_attempt_id != attempt_id {
+                    return Ok(false);
+                }
+                !inner.platform_vpn_running
+                    && !inner.platform_vpn_starting
+                    && inner.platform_vpn_cleanup_complete
+                    && matches!(
+                        inner.platform_start_outcome,
+                        PlatformStartOutcome::Failed | PlatformStartOutcome::Cancelled
+                    )
+            };
+            if stopped {
+                return Ok(true);
+            }
+            tokio::select! {
+                changed = receiver.changed() => {
+                    changed.map_err(|_| CoreError::msg(
+                        "platform VPN stop coordinator closed"
+                    ))?;
+                }
+                _ = tokio::time::sleep(Duration::from_secs(1)) => {}
+                _ = tokio::time::sleep_until(deadline) => {
+                    return Err(CoreError::msg(format!(
+                        "platform VPN attempt {attempt_id} did not stop before the cleanup deadline"
+                    )));
+                }
+            }
+        }
     }
 
     pub(super) async fn await_platform_vpn_start_with_deadline(
@@ -448,33 +1116,35 @@ impl SessionEngine {
         error: String,
         require_unattached: bool,
     ) -> CoreResult<bool> {
-        #[cfg(feature = "native-anyconnect")]
-        let stop_native = {
-            let mut inner = self.lock()?;
-            self.sync_platform_locked(&mut inner);
-            if !self.platform_start_is_pending_locked(&inner, attempt_id)
-                || (require_unattached && inner.platform_extension_attached)
-            {
-                return Ok(false);
-            }
-            let stop = self.apply_platform_vpn_failed_locked(&mut inner, error)?;
-            inner.platform_start_outcome = PlatformStartOutcome::Failed;
-            self.persist_platform_locked(&mut inner)?;
-            stop
-        };
-        #[cfg(not(feature = "native-anyconnect"))]
+        let mut inner = self.lock()?;
+        self.sync_platform_locked(&mut inner);
+        if !self.platform_start_is_pending_locked(&inner, attempt_id)
+            || (require_unattached && inner.platform_extension_attached)
         {
-            let mut inner = self.lock()?;
-            self.sync_platform_locked(&mut inner);
-            if !self.platform_start_is_pending_locked(&inner, attempt_id)
-                || (require_unattached && inner.platform_extension_attached)
-            {
+            return Ok(false);
+        }
+        if require_unattached {
+            let journal_path = platform_owner_journal_path(&inner);
+            if !crate::platform_owner::delete_pending_exact(&journal_path, attempt_id)? {
+                // Attachment or a durable stop fence may have won before its
+                // shared-memory frame arrived. Do not waive their cleanup.
                 return Ok(false);
             }
-            self.apply_platform_vpn_failed_locked(&mut inner, error)?;
-            inner.platform_start_outcome = PlatformStartOutcome::Failed;
-            self.persist_platform_locked(&mut inner)?;
         }
+        #[cfg(feature = "native-anyconnect")]
+        let stop_native = self.apply_platform_vpn_failed_locked(&mut inner, error)?;
+        #[cfg(not(feature = "native-anyconnect"))]
+        self.apply_platform_vpn_failed_locked(&mut inner, error)?;
+        inner.platform_start_outcome = PlatformStartOutcome::Failed;
+        if require_unattached {
+            inner.platform_vpn_cleanup_complete = true;
+        }
+        if inner.platform_vpn_cleanup_complete {
+            inner.platform_vpn_issuer_lease = None;
+            inner.platform_vpn_extension_lease = None;
+        }
+        self.persist_platform_locked(&mut inner)?;
+        drop(inner);
         #[cfg(feature = "native-anyconnect")]
         if let Some(session) = stop_native {
             session.cancel();
@@ -509,6 +1179,167 @@ impl SessionEngine {
         Ok(true)
     }
 
+    /// Ask the exact attached Extension owner to tear down its native worker
+    /// and VpnConnection while its process is still alive.
+    pub fn request_platform_vpn_stop(&self, attempt_id: &str) -> CoreResult<bool> {
+        if attempt_id.is_empty() {
+            return Ok(false);
+        }
+        let mut inner = self.lock()?;
+        self.sync_platform_locked(&mut inner);
+        if inner.platform_start_attempt_id != attempt_id {
+            return Ok(false);
+        }
+        if inner.platform_vpn_cleanup_complete {
+            return Ok(true);
+        }
+        if !inner.platform_extension_attached {
+            return Ok(false);
+        }
+        if !inner.platform_stop_requested {
+            inner.platform_stop_requested = true;
+            self.push_diag_locked(
+                &mut inner,
+                "info",
+                format!("platform VPN cooperative stop requested for {attempt_id}"),
+            );
+            self.persist_platform_locked(&mut inner)?;
+        }
+        Ok(true)
+    }
+
+    /// Atomically fence and return the exact platform owner that still owes
+    /// cleanup. A Pending attempt becomes terminal before a late Want can
+    /// attach; an attached owner remains authoritative until real teardown.
+    pub fn claim_current_platform_vpn_stop(&self, intent_epoch: u64) -> CoreResult<String> {
+        let mut inner = self.lock()?;
+        if intent_epoch == 0 || inner.platform_vpn_intent_epoch != intent_epoch {
+            return Err(CoreError::msg(format!(
+                "platform VPN stop intent {intent_epoch} was superseded"
+            )));
+        }
+        if inner.platform_os_stop_in_flight {
+            return Err(CoreError::msg(format!(
+                "platform VPN OS stop for attempt {} is already in flight",
+                inner.platform_os_stop_attempt_id
+            )));
+        }
+        let retained_stop_attempt =
+            (inner.platform_os_stop_epoch != 0).then(|| inner.platform_os_stop_attempt_id.clone());
+        self.sync_platform_locked(&mut inner);
+        let journal_path = platform_owner_journal_path(&inner);
+        let journal = match crate::platform_owner::read(&journal_path)? {
+            JournalRead::Present(journal) => {
+                if retained_stop_attempt
+                    .as_ref()
+                    .is_some_and(|attempt| attempt != &journal.attempt_id)
+                {
+                    return Err(CoreError::msg(format!(
+                        "platform VPN OS stop fence owns {} while the owner journal owns {}",
+                        retained_stop_attempt.as_deref().unwrap_or_default(),
+                        journal.attempt_id
+                    )));
+                }
+                if !inner.platform_start_attempt_id.is_empty()
+                    && !inner.platform_vpn_cleanup_complete
+                    && inner.platform_start_attempt_id != journal.attempt_id
+                {
+                    return Err(CoreError::msg(format!(
+                        "platform VPN state owns {} while the owner journal owns {}",
+                        inner.platform_start_attempt_id, journal.attempt_id
+                    )));
+                }
+                journal
+            }
+            JournalRead::Missing => {
+                if !inner.platform_start_attempt_id.is_empty()
+                    && !inner.platform_vpn_cleanup_complete
+                {
+                    return Err(CoreError::msg(format!(
+                        "platform VPN owner journal is missing for active attempt {}",
+                        inner.platform_start_attempt_id
+                    )));
+                }
+                if let Some(attempt_id) = retained_stop_attempt {
+                    inner.platform_os_stop_epoch = intent_epoch;
+                    inner.platform_os_stop_attempt_id = attempt_id.clone();
+                    inner.platform_os_stop_in_flight = false;
+                    return Ok(attempt_id);
+                }
+                return Ok(String::new());
+            }
+        };
+        let attempt_id = journal.attempt_id.clone();
+        if inner.platform_start_attempt_id.is_empty() || inner.platform_vpn_cleanup_complete {
+            self.push_diag_locked(
+                &mut inner,
+                "info",
+                format!("platform VPN stop claimed cold owner journal {attempt_id}"),
+            );
+        } else {
+            if inner.platform_start_outcome == PlatformStartOutcome::Pending {
+                inner.platform_start_outcome = PlatformStartOutcome::Cancelled;
+                inner.platform_vpn_starting = false;
+                inner.platform_vpn_running = false;
+            }
+            inner.platform_stop_requested = true;
+            self.push_diag_locked(
+                &mut inner,
+                "info",
+                format!("platform VPN stop claimed exact owner {attempt_id}"),
+            );
+            // Make the stop state visible before Pending races Attached.
+            self.persist_platform_locked(&mut inner)?;
+        }
+        match (journal.phase, journal.extension.as_ref()) {
+            (PlatformVpnOwnerPhase::Stopping, None)
+            | (PlatformVpnOwnerPhase::Attached, Some(_)) => {}
+            (PlatformVpnOwnerPhase::Pending, None) => {
+                if crate::platform_owner::fence_pending_stop_exact(
+                    &journal_path,
+                    &attempt_id,
+                    journal.issuer.clone(),
+                )? {
+                    self.push_diag_locked(
+                        &mut inner,
+                        "info",
+                        format!("platform VPN pending owner durably fenced for stop {attempt_id}"),
+                    );
+                } else {
+                    match crate::platform_owner::read(&journal_path)? {
+                        JournalRead::Present(current)
+                            if current.attempt_id == attempt_id
+                                && matches!(
+                                    (current.phase, current.extension.as_ref()),
+                                    (PlatformVpnOwnerPhase::Stopping, None)
+                                        | (PlatformVpnOwnerPhase::Attached, Some(_))
+                                ) => {}
+                        JournalRead::Present(current) => {
+                            return Err(CoreError::msg(format!(
+                                "platform VPN owner changed from {attempt_id} to {} while claiming stop",
+                                current.attempt_id
+                            )))
+                        }
+                        JournalRead::Missing => {
+                            return Err(CoreError::msg(format!(
+                                "platform VPN owner journal disappeared while claiming stop for {attempt_id}"
+                            )))
+                        }
+                    }
+                }
+            }
+            _ => {
+                return Err(CoreError::msg(format!(
+                    "platform VPN owner journal has an invalid phase while claiming stop for {attempt_id}"
+                )))
+            }
+        }
+        inner.platform_os_stop_epoch = intent_epoch;
+        inner.platform_os_stop_attempt_id = attempt_id.clone();
+        inner.platform_os_stop_in_flight = false;
+        Ok(attempt_id)
+    }
+
     pub fn set_platform_vpn_starting(&self, starting: bool) -> CoreResult<()> {
         let mut inner = self.lock()?;
         self.sync_platform_locked(&mut inner);
@@ -524,6 +1355,28 @@ impl SessionEngine {
         }
         self.persist_platform_locked(&mut inner)?;
         Ok(())
+    }
+
+    pub fn set_platform_vpn_starting_for_attempt(
+        &self,
+        attempt_id: &str,
+        starting: bool,
+    ) -> CoreResult<bool> {
+        let mut inner = self.lock()?;
+        self.sync_platform_locked(&mut inner);
+        if !platform_attempt_accepts_updates(&inner, attempt_id) {
+            return Ok(false);
+        }
+        if starting && inner.platform_start_outcome != PlatformStartOutcome::Pending {
+            return Ok(false);
+        }
+        inner.platform_vpn_starting = starting;
+        if starting {
+            inner.platform_vpn_running = false;
+            self.set_lifecycle_locked(&mut inner, ConnectionLifecycle::Establishing, None);
+        }
+        self.persist_platform_locked(&mut inner)?;
+        Ok(true)
     }
 
     pub fn set_platform_vpn_running(&self, running: bool) -> CoreResult<()> {
@@ -572,6 +1425,73 @@ impl SessionEngine {
             let _ = session.join(Duration::from_secs(2));
         }
         Ok(())
+    }
+
+    pub fn set_platform_vpn_failed_for_attempt(
+        &self,
+        attempt_id: &str,
+        error: String,
+    ) -> CoreResult<bool> {
+        #[cfg(feature = "native-anyconnect")]
+        let stop_native = {
+            let mut inner = self.lock()?;
+            self.sync_platform_locked(&mut inner);
+            if !platform_attempt_accepts_updates(&inner, attempt_id) {
+                return Ok(false);
+            }
+            let stop = self.apply_platform_vpn_failed_locked(&mut inner, error)?;
+            self.persist_platform_locked(&mut inner)?;
+            stop
+        };
+        #[cfg(not(feature = "native-anyconnect"))]
+        {
+            let mut inner = self.lock()?;
+            self.sync_platform_locked(&mut inner);
+            if !platform_attempt_accepts_updates(&inner, attempt_id) {
+                return Ok(false);
+            }
+            self.apply_platform_vpn_failed_locked(&mut inner, error)?;
+            self.persist_platform_locked(&mut inner)?;
+        }
+        #[cfg(feature = "native-anyconnect")]
+        if let Some(session) = stop_native {
+            session.cancel();
+            let _ = session.join(Duration::from_secs(2));
+        }
+        Ok(true)
+    }
+
+    /// Publish an Extension heartbeat from the exact native owner lifecycle.
+    pub fn extension_tick(&self, attempt_id: &str) -> CoreResult<String> {
+        let snapshot = self.tick()?;
+        let inner = self.lock()?;
+        if inner.platform_start_attempt_id != attempt_id {
+            return Err(CoreError::msg(format!(
+                "stale platform VPN heartbeat for attempt {attempt_id}"
+            )));
+        }
+        if inner.platform_stop_requested {
+            return Ok("stopping".to_owned());
+        }
+        if matches!(
+            inner.platform_start_outcome,
+            PlatformStartOutcome::Failed | PlatformStartOutcome::Cancelled
+        ) {
+            return Ok(
+                if inner.platform_start_outcome == PlatformStartOutcome::Failed {
+                    "failed"
+                } else {
+                    "disconnected"
+                }
+                .to_owned(),
+            );
+        }
+        if !inner.platform_extension_attached {
+            return Err(CoreError::msg(format!(
+                "platform VPN heartbeat has no owner for attempt {attempt_id}"
+            )));
+        }
+        Ok(snapshot.lifecycle.as_str().to_owned())
     }
 
     #[cfg(feature = "native-anyconnect")]
@@ -719,6 +1639,55 @@ impl SessionEngine {
         Ok(true)
     }
 
+    pub(super) fn refresh_platform_vpn_owner_liveness_locked(
+        &self,
+        inner: &mut Inner,
+    ) -> CoreResult<()> {
+        if !inner.platform_extension_attached
+            || inner.platform_vpn_cleanup_complete
+            || !matches!(
+                inner.platform_start_outcome,
+                PlatformStartOutcome::Pending | PlatformStartOutcome::Connected
+            )
+        {
+            return Ok(());
+        }
+        let Some(_released_lease) = crate::platform_owner::lock_released_owner_lease(
+            &platform_owner_lease_path(inner, PlatformVpnOwnerLeaseRole::Extension),
+        )?
+        else {
+            return Ok(());
+        };
+        let JournalRead::Present(journal) =
+            crate::platform_owner::read(&platform_owner_journal_path(inner))?
+        else {
+            // Cooperative cleanup deletes the journal before releasing the
+            // lease. Its terminal IPC frame may still be on the way.
+            return Ok(());
+        };
+        if journal.attempt_id != inner.platform_start_attempt_id
+            || journal.phase != PlatformVpnOwnerPhase::Attached
+            || !journal.extension.as_ref().is_some_and(|owner| {
+                owner.pid == inner.platform_extension_owner_pid
+                    && owner.start_time == inner.platform_extension_owner_start_time
+            })
+        {
+            return Ok(());
+        }
+
+        const MESSAGE: &str = "VPN extension owner lease was released";
+        inner.platform_vpn_running = false;
+        inner.platform_vpn_starting = false;
+        inner.platform_start_outcome = PlatformStartOutcome::Failed;
+        inner.platform_remote_stale_since = None;
+        inner.connected_at = None;
+        self.set_lifecycle_locked(inner, ConnectionLifecycle::Failed, Some(MESSAGE.to_owned()));
+        self.push_diag_locked(inner, "error", MESSAGE);
+        // Keep the exact released-lease guard until the terminal ashmem frame
+        // is committed so a replacement cannot rewrite ownership mid-check.
+        self.persist_platform_locked(inner)
+    }
+
     /// Read the newest sibling-process frame from the opposite ashmem lane.
     pub(super) fn sync_platform_locked(&self, inner: &mut Inner) -> bool {
         self.sync_platform_locked_with_adoption(inner, None)
@@ -818,7 +1787,12 @@ impl SessionEngine {
             inner.generation = inner.generation.saturating_add(1);
             inner.platform_start_attempt_id = remote.start_attempt_id.clone();
             inner.platform_start_outcome = remote.start_outcome;
+            inner.platform_start_delivery_observed = remote.delivery_observed;
             inner.platform_extension_attached = remote.extension_attached;
+            inner.platform_stop_requested = remote.stop_requested;
+            inner.platform_extension_owner_pid = remote.extension_owner_pid;
+            inner.platform_extension_owner_start_time = remote.extension_owner_start_time;
+            inner.platform_vpn_cleanup_complete = remote.cleanup_complete;
             if remote.starting && remote.start_outcome == PlatformStartOutcome::Pending {
                 inner.platform_vpn_starting = true;
                 inner.platform_vpn_running = false;
@@ -828,7 +1802,8 @@ impl SessionEngine {
         }
 
         let now = Instant::now();
-        let remote_advanced = remote.updated_at != inner.platform_remote_state_updated_at;
+        // Older frames must not refresh liveness or reapply stale state.
+        let remote_advanced = remote.updated_at > inner.platform_remote_state_updated_at;
         if remote_advanced {
             inner.platform_remote_state_updated_at = remote.updated_at;
             inner.platform_remote_state_seen_at = Some(now);
@@ -871,6 +1846,7 @@ impl SessionEngine {
             inner.platform_vpn_starting = false;
             inner.platform_start_outcome = PlatformStartOutcome::Failed;
             inner.platform_remote_stale_since = None;
+            inner.platform_watchdog_cleanup_recoverable = true;
             self.set_lifecycle_locked(inner, ConnectionLifecycle::Failed, Some(MESSAGE.to_owned()));
             self.push_diag_locked(inner, "error", MESSAGE);
             // Publish the watchdog verdict to the UI lane immediately;
@@ -882,19 +1858,54 @@ impl SessionEngine {
         if !remote_advanced && !adopted_attempt {
             return browser_request_acknowledged;
         }
-        if remote_attempt_matches
-            && inner.platform_start_outcome == PlatformStartOutcome::Pending
+        if remote_attempt_matches {
+            // Stop intent is UI-owned and sticky for one exact attempt. The
+            // Extension owns worker/process proof and publishes it back.
+            inner.platform_stop_requested |= remote.stop_requested;
+            if is_ui {
+                inner.platform_extension_owner_pid = remote.extension_owner_pid;
+                inner.platform_extension_owner_start_time = remote.extension_owner_start_time;
+            }
+        }
+
+        let was_running = inner.platform_vpn_running;
+        let was_starting = inner.platform_vpn_starting;
+        let local_terminal = matches!(
+            inner.platform_start_outcome,
+            PlatformStartOutcome::Failed | PlatformStartOutcome::Cancelled
+        );
+        let remote_terminal = remote_attempt_matches
             && matches!(
                 remote.start_outcome,
-                PlatformStartOutcome::Connected
-                    | PlatformStartOutcome::Failed
-                    | PlatformStartOutcome::Cancelled
-            )
-        {
+                PlatformStartOutcome::Failed | PlatformStartOutcome::Cancelled
+            );
+        if remote_terminal {
             inner.platform_start_outcome = remote.start_outcome;
+            inner.platform_vpn_starting = false;
+            inner.platform_vpn_running = false;
+            inner.platform_vpn_cleanup_complete = remote.cleanup_complete;
+        } else if !local_terminal {
+            inner.platform_vpn_running = remote.running;
+            inner.platform_vpn_starting = !remote.running && remote.starting;
+            // Cleanup is meaningful only after a terminal owner transition.
+            // A malformed non-terminal frame cannot open the next-start
+            // barrier while the connection is still live.
+            inner.platform_vpn_cleanup_complete = false;
+            if remote.running && inner.platform_start_outcome == PlatformStartOutcome::Pending {
+                inner.platform_start_outcome = PlatformStartOutcome::Connected;
+            }
         }
-        if remote_attempt_matches && remote.extension_attached {
+        if remote_terminal {
+            inner.platform_extension_attached = remote.extension_attached;
+        } else if remote_attempt_matches && remote.extension_attached {
             inner.platform_extension_attached = true;
+        }
+        if remote_attempt_matches && remote.delivery_observed {
+            inner.platform_start_delivery_observed = true;
+        }
+        if inner.platform_vpn_cleanup_complete {
+            inner.platform_vpn_issuer_lease = None;
+            inner.platform_vpn_extension_lease = None;
         }
 
         #[cfg(feature = "native-anyconnect")]
@@ -905,46 +1916,9 @@ impl SessionEngine {
         #[cfg(not(feature = "native-anyconnect"))]
         let local_mainloop = false;
 
-        let was_running = inner.platform_vpn_running;
-        let was_starting = inner.platform_vpn_starting;
-        let remote_terminal = remote_attempt_matches
-            && !remote.running
-            && matches!(
-                remote.start_outcome,
-                PlatformStartOutcome::Failed | PlatformStartOutcome::Cancelled
-            );
-        let accept_remote_running = !is_ui
-            || (matches!(
-                inner.snapshot.lifecycle,
-                ConnectionLifecycle::Connecting
-                    | ConnectionLifecycle::Authenticating
-                    | ConnectionLifecycle::Establishing
-                    | ConnectionLifecycle::Connected
-            ) && !matches!(
-                inner.platform_start_outcome,
-                PlatformStartOutcome::Failed | PlatformStartOutcome::Cancelled
-            ));
-        let running =
-            !remote_terminal && (local_mainloop || (remote.running && accept_remote_running));
-        let accept_remote_starting = inner.platform_start_outcome == PlatformStartOutcome::Pending
-            && matches!(
-                inner.snapshot.lifecycle,
-                ConnectionLifecycle::Connecting
-                    | ConnectionLifecycle::Authenticating
-                    | ConnectionLifecycle::Establishing
-            );
-        let pending_attachment = is_ui
-            && remote_attempt_matches
-            && remote.extension_attached
-            && remote.start_outcome == PlatformStartOutcome::Pending
-            && was_starting;
-        let starting =
-            !running && ((remote.starting && accept_remote_starting) || pending_attachment);
-        inner.platform_vpn_starting = starting;
-        inner.platform_vpn_running = running;
-        if running && inner.platform_start_outcome == PlatformStartOutcome::Pending {
-            inner.platform_start_outcome = PlatformStartOutcome::Connected;
-        } else if !running
+        let running = !remote_terminal && (local_mainloop || inner.platform_vpn_running);
+        let starting = !running && inner.platform_vpn_starting;
+        if !running
             && inner.platform_start_outcome == PlatformStartOutcome::Pending
             && (matches!(remote.lifecycle, ConnectionLifecycle::Failed)
                 || remote.last_error.is_some())
@@ -1044,7 +2018,12 @@ impl SessionEngine {
         let state = PlatformVpnState {
             start_attempt_id: inner.platform_start_attempt_id.clone(),
             start_outcome: inner.platform_start_outcome,
+            delivery_observed: inner.platform_start_delivery_observed,
             extension_attached: inner.platform_extension_attached,
+            stop_requested: inner.platform_stop_requested,
+            extension_owner_pid: inner.platform_extension_owner_pid,
+            extension_owner_start_time: inner.platform_extension_owner_start_time,
+            cleanup_complete: inner.platform_vpn_cleanup_complete,
             starting: inner.platform_vpn_starting,
             running: inner.platform_vpn_running || {
                 #[cfg(feature = "native-anyconnect")]
@@ -1096,7 +2075,9 @@ impl SessionEngine {
         PlatformStartEvent {
             attempt_id: inner.platform_start_attempt_id.clone(),
             outcome: inner.platform_start_outcome,
+            delivery_observed: inner.platform_start_delivery_observed,
             extension_attached: inner.platform_extension_attached,
+            cleanup_complete: inner.platform_vpn_cleanup_complete,
             error: inner.snapshot.last_error.clone(),
         }
     }
@@ -1111,6 +2092,67 @@ impl SessionEngine {
             self.platform_start_tx.send_replace(event);
         }
     }
+}
+
+fn platform_owner_journal_path(inner: &Inner) -> PathBuf {
+    inner.home.join("runtime/platform-vpn-owner.json")
+}
+
+fn platform_owner_lease_path(inner: &Inner, role: PlatformVpnOwnerLeaseRole) -> PathBuf {
+    let file_name = match role {
+        PlatformVpnOwnerLeaseRole::Issuer => "platform-vpn-owner.issuer.lease",
+        PlatformVpnOwnerLeaseRole::Extension => "platform-vpn-owner.extension.lease",
+    };
+    inner.home.join("runtime").join(file_name)
+}
+
+fn platform_owner_lease_record(
+    attempt_id: &str,
+    identity: ProcessIdentity,
+    role: PlatformVpnOwnerLeaseRole,
+) -> PlatformVpnOwnerLeaseRecord {
+    PlatformVpnOwnerLeaseRecord {
+        attempt_id: attempt_id.to_owned(),
+        identity,
+        role,
+    }
+}
+
+fn platform_attempt_accepts_updates(inner: &Inner, attempt_id: &str) -> bool {
+    !attempt_id.is_empty()
+        && inner.platform_start_attempt_id == attempt_id
+        && inner.platform_extension_attached
+        && matches!(
+            inner.platform_start_outcome,
+            PlatformStartOutcome::Pending | PlatformStartOutcome::Connected
+        )
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CleanupRecoveryProof {
+    Proven,
+    OwnerAlive,
+    OwnerLivenessUnknown,
+}
+
+fn acknowledge_terminal_delivery_state(state: &mut PlatformVpnState, attempt_id: &str) -> bool {
+    if attempt_id.is_empty()
+        || state.start_attempt_id != attempt_id
+        || !matches!(
+            state.start_outcome,
+            PlatformStartOutcome::Failed | PlatformStartOutcome::Cancelled
+        )
+    {
+        return false;
+    }
+    state.delivery_observed = true;
+    // Delivery is not attachment, connection, or cleanup. Preserve the
+    // terminal UI owner and publish only the evidence needed for exact stop.
+    state.extension_attached = false;
+    state.starting = false;
+    state.running = false;
+    state.updated_at = PlatformVpnState::now_nanos().max(state.updated_at.saturating_add(1));
+    true
 }
 
 pub(super) fn validate_platform_start_envelope(

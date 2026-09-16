@@ -8,14 +8,11 @@ use crate::model::{AuthChallenge, AuthFieldKind};
 pub(crate) fn auth_challenge_overlay(state: Signal<State>, challenge: AuthChallenge) -> Element {
     let metrics = arkit::use_window_metrics();
     let viewport_height = metrics.content_rect.height as f32 / metrics.scale.max(1.0);
+    let bottom_inset = metrics.ime_area.bottom.max(0.0);
     // The portal panel sizes to its content, so a percentage height would
     // depend on that same content. Resolve against the window instead.
     let body_height = if viewport_height > 0.0 {
-        (viewport_height
-            - metrics.safe_area.top
-            - metrics.safe_area.bottom
-            - metrics.ime_area.bottom
-            - 72.0)
+        (viewport_height - metrics.safe_area.top - metrics.safe_area.bottom - bottom_inset - 72.0)
             .max(120.0)
             * 0.82
     } else {
@@ -47,6 +44,7 @@ pub(crate) fn auth_challenge_overlay(state: Signal<State>, challenge: AuthChalle
     rsx! {
         AuthSheet {
             title: translate_ui(locale, tr::challenge_required()),
+            bottom_inset,
             on_close: move |_| dispatch(state, Action::CancelChallenge),
             column {
                 width: "100%",

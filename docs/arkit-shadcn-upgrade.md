@@ -12,8 +12,9 @@
   Button、TabsList / TabsTrigger、Dialog。应用只保留动作语义映射。
 - 连接编辑器用 FieldGroup / Field / FieldLabel 替换已移除的
   Form / FormItem；草稿、验证、保存和认证字段映射仍由应用负责。
-- 认证界面使用 BottomSheet，按窗口、安全区及键盘遮挡计算内容高度，
-  避免自适应弹层内的百分比高度形成循环布局依赖。
+- 认证界面使用 BottomSheet，按窗口、安全区及键盘遮挡计算内容高度；
+  键盘显示时同时在 Portal 底部保留对应遮挡空间，将认证表单和操作按钮
+  抬到键盘上方，避免自适应弹层内的百分比高度形成循环布局依赖。
 - 弹层注册独立的返回键处理，优先关闭弹层；认证弹层关闭会取消当前认证。
 - 页面统一采用 shadcn 字号和圆角 token；主操作按 primary /
   primary_foreground 成对取色，修复深色主题中硬编码白色文字的问题。

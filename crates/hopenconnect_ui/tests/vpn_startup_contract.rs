@@ -17,23 +17,28 @@ fn section<'a>(source: &'a str, start: &str, end: &str) -> &'a str {
 
 #[test]
 fn first_authorization_start_is_coordinated_by_the_extension_terminal_state() {
-    assert!(NAPI_TYPES.contains("beginPlatformVpnStart(): string"));
-    assert!(NAPI_TYPES.contains("bindPlatformVpnStart(attemptId: string): void"));
-    assert!(NAPI_TYPES.contains("awaitPlatformVpnStartAttachment("));
+    assert!(NAPI_TYPES.contains("advancePlatformVpnIntent(): string"));
+    assert!(NAPI_TYPES.contains("beginPlatformVpnStartForIntent(intentEpoch: string): string"));
+    assert!(NAPI_TYPES.contains("bindPlatformVpnStart(attemptId: string): string"));
     assert!(NAPI_TYPES.contains("awaitPlatformVpnStart(attemptId: string): Promise<string>"));
     assert!(NAPI_TYPES.contains("failUnattachedPlatformVpnStart("));
+    assert!(NAPI_TYPES.contains("acknowledgeTerminalPlatformVpnStartDelivery("));
+    assert!(!NAPI_TYPES.contains("awaitPlatformVpnStartAttachment"));
+    assert!(!NAPI_TYPES.contains("setPlatformVpnRunning"));
+    assert!(!NAPI_TYPES.contains("expirePlatformVpnStart"));
 
     let request = section(
         VPN_PLUGIN,
-        "private dispatchVpnStart",
+        "private async requestStartVpnWithContext",
         "private async requestStopVpnWithContext",
     );
-    assert!(request.contains("beginPlatformVpnStart()"));
+    assert!(request.contains("advancePlatformVpnIntent()"));
+    assert!(request.contains("beginPlatformVpnStartForIntent(intentEpoch)"));
     assert!(request.contains("awaitPlatformVpnStart(attemptId)"));
     assert!(request.contains("failUnattachedPlatformVpnStart(attemptId, message)"));
     assert!(request.contains("buildVpnWant(optionsJson, this.platformSharedMemory, attemptId)"));
-    assert!(request.contains("awaitPlatformVpnStartAttachment"));
-    assert!(request.contains("redispatching attempt"));
+    assert!(!request.contains("awaitPlatformVpnStartAttachment"));
+    assert!(request.contains("await this.invokeVpnExtensionStart(optionsJson, attemptId)"));
     assert!(!request.contains("Promise.race"));
     assert!(!request.contains("15000"));
 
@@ -49,8 +54,8 @@ fn first_authorization_start_is_coordinated_by_the_extension_terminal_state() {
         .find("bindPlatformVpnStart")
         .expect("attempt binding");
     let running = extension
-        .find("setPlatformVpnRunning")
-        .expect("terminal state");
+        .find("extensionTick(attemptId)")
+        .expect("native lifecycle confirmation");
     assert!(attach < bind);
     assert!(bind < running);
 }
@@ -100,7 +105,7 @@ fn tick_observes_native_terminal_state_before_auto_reconnect_edge() {
 
 #[test]
 fn extension_rebinds_event_waiter_and_has_bounded_start_operations() {
-    assert!(NAPI_TYPES.contains("extensionTick(): string"));
+    assert!(NAPI_TYPES.contains("extensionTick(attemptId: string): string"));
     let handle = section(
         VPN_ABILITY,
         "private async handleRequest",
@@ -128,12 +133,21 @@ fn extension_rebinds_event_waiter_and_has_bounded_start_operations() {
     assert!(start.contains("PLATFORM_OPERATION_TIMEOUT_MS"));
     assert!(VPN_ABILITY.contains("setInterval"));
     assert!(VPN_ABILITY.contains("reconcileExtensionTerminal"));
+    assert!(VPN_ABILITY.contains("lifecycle !== 'stopping'"));
 }
 
 #[test]
 fn stale_wants_and_terminal_cleanup_are_attempt_scoped_before_mutation() {
     assert!(NAPI_TYPES.contains("validatePlatformVpnStartRequest("));
+    assert!(NAPI_TYPES
+        .contains("setPlatformVpnStarting(attemptId: string, starting: boolean): boolean"));
+    assert!(NAPI_TYPES.contains("setPlatformVpnFailed(attemptId: string, error: string): boolean"));
     assert!(NAPI_TYPES.contains("stopVpn(attemptId: string): Promise<boolean>"));
+    assert!(NAPI_TYPES.contains("completePlatformVpnCleanup(attemptId: string): boolean"));
+    assert!(NAPI_TYPES.contains("claimCurrentPlatformVpnStop(intentEpoch: string): string"));
+    assert!(NAPI_TYPES.contains(
+        "recoverPlatformVpnCleanupAfterConfirmedStop(attemptId: string): Promise<boolean>"
+    ));
 
     let start = section(
         VPN_ABILITY,
@@ -180,7 +194,28 @@ fn stale_wants_and_terminal_cleanup_are_attempt_scoped_before_mutation() {
         "private async waitForPendingCleanup",
     );
     assert!(cleanup.contains("hopenconnectUi.stopVpn(attemptId)"));
+    assert!(cleanup.contains("hopenconnectUi.completePlatformVpnCleanup(attemptId)"));
     assert!(!cleanup.contains("hopenconnectUi.stopVpn()"));
+
+    let perform_start = section(
+        VPN_ABILITY,
+        "private async performStart",
+        "private recordVpnFailureForAttempt",
+    );
+    assert!(perform_start.contains("setPlatformVpnStarting(attemptId, true)"));
+    assert!(VPN_ABILITY.contains("setPlatformVpnFailed(attemptId, message)"));
+    assert!(!VPN_ABILITY.contains("setPlatformVpnRunning("));
+
+    let stop = section(
+        VPN_PLUGIN,
+        "private async requestStopVpnWithContext",
+        "private async waitForCooperativeCleanup",
+    );
+    assert!(stop.contains("claimCurrentPlatformVpnStop(intentEpoch)"));
+    assert!(stop.contains("requestPlatformVpnStop(sessionId)"));
+    assert!(stop.contains("beginPlatformVpnOsStop(intentEpoch, sessionId)"));
+    assert!(stop.contains("completePlatformVpnOsStop(intentEpoch, sessionId)"));
+    assert!(stop.contains("recoverPlatformVpnCleanupAfterConfirmedStop(sessionId)"));
 }
 
 #[test]

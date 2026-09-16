@@ -77,6 +77,7 @@ export default class HOpenConnectVpnExtensionAbility extends VpnExtensionAbility
   private platformSubscriptionActive: boolean = false;
   private platformSubscriptionGeneration: number = 0;
   private requestGeneration: number = 0;
+  private inFlightAttemptId: string = '';
   private activeAttemptId: string = '';
   private heartbeatTimer: number = -1;
   private requestChain: Promise<void> = Promise.resolve();
@@ -101,11 +102,6 @@ export default class HOpenConnectVpnExtensionAbility extends VpnExtensionAbility
     this.requestGeneration += 1;
     this.stopHeartbeat();
     this.stopPlatformSubscription();
-    try {
-      hopenconnectUi.setPlatformVpnRunning(false);
-    } catch (_err) {
-      // ignore
-    }
     this.destroyVpn().catch((err: Error): void => {
       hilog.error(LOG_DOMAIN, LOG_TAG, 'onDestroy cleanup failed %{public}s', describeError(err));
     });
@@ -189,7 +185,11 @@ export default class HOpenConnectVpnExtensionAbility extends VpnExtensionAbility
     )) {
       return;
     }
+    if (attemptId === this.inFlightAttemptId || attemptId === this.activeAttemptId) {
+      return;
+    }
     const generation = ++this.requestGeneration;
+    this.inFlightAttemptId = attemptId;
     this.requestChain = this.requestChain.then(async (): Promise<void> => {
       await this.handleRequest(
         sharedMemory.ashmemFd,
@@ -199,18 +199,26 @@ export default class HOpenConnectVpnExtensionAbility extends VpnExtensionAbility
         generation,
       );
     }).catch(async (err: Error): Promise<void> => {
-      if (!this.isCurrentRequest(generation, attemptId)) {
-        hilog.info(LOG_DOMAIN, LOG_TAG, 'ignored stale VPN request completion');
+      if (generation !== this.requestGeneration || this.inFlightAttemptId !== attemptId) {
         return;
       }
       const message = describeError(err) || 'vpn start failed';
-      try {
-        hopenconnectUi.setPlatformVpnFailed(message);
-      } catch (_inner) {
-        // ignore
+      if (this.activeAttemptId === attemptId) {
+        this.recordVpnFailureForAttempt(attemptId, message);
+        await this.destroyVpn();
+      } else {
+        try {
+          hopenconnectUi.failUnattachedPlatformVpnStart(attemptId, message);
+        } catch (innerErr) {
+          hilog.error(LOG_DOMAIN, LOG_TAG, 'publish unattached VPN failure failed %{public}s',
+            describeError(innerErr));
+        }
       }
       hilog.error(LOG_DOMAIN, LOG_TAG, 'VPN start failed %{public}s', message);
-      await this.destroyVpn();
+    }).finally((): void => {
+      if (generation === this.requestGeneration && this.inFlightAttemptId === attemptId) {
+        this.inFlightAttemptId = '';
+      }
     });
   }
 
@@ -235,6 +243,7 @@ export default class HOpenConnectVpnExtensionAbility extends VpnExtensionAbility
     }
     if (this.activeAttemptId.length > 0 && this.activeAttemptId !== attemptId) {
       await this.destroyVpn();
+      await this.waitForPendingCleanup();
       if (generation !== this.requestGeneration) {
         return;
       }
@@ -244,28 +253,32 @@ export default class HOpenConnectVpnExtensionAbility extends VpnExtensionAbility
     // UI process's notification socket. Stop it before replacing the IPC pair.
     this.stopPlatformSubscription();
     hopenconnectUi.attachPlatformSharedMemory(ashmemFd, notificationFd);
-    hopenconnectUi.bindPlatformVpnStart(attemptId);
-    hilog.info(LOG_DOMAIN, LOG_TAG, 'bound VPN start attempt %{public}s', attemptId);
+    const ownerIdentity = hopenconnectUi.bindPlatformVpnStart(attemptId);
+    hilog.info(
+      LOG_DOMAIN,
+      LOG_TAG,
+      'bound VPN owner attempt %{public}s process %{public}s',
+      attemptId,
+      ownerIdentity,
+    );
     this.startPlatformSubscription();
     this.activeAttemptId = attemptId;
 
+    const boundLifecycle = this.extensionTick(attemptId);
+    if (boundLifecycle === 'failed' || boundLifecycle === 'disconnected' ||
+      boundLifecycle === 'stopping') {
+      await this.destroyVpn();
+      return;
+    }
+
     if (this.tunFd >= 0 && this.vpnConnection) {
-      const lifecycle = this.extensionTick();
-      if (lifecycle === 'connected') {
-        hopenconnectUi.setPlatformVpnRunning(true);
+      if (boundLifecycle === 'connected') {
         this.startHeartbeat(generation, attemptId);
         hilog.info(LOG_DOMAIN, LOG_TAG, 'healthy VPN rebound to shared memory');
         return;
       }
       await this.destroyVpn();
-      if (generation !== this.requestGeneration) {
-        return;
-      }
-      this.stopPlatformSubscription();
-      hopenconnectUi.attachPlatformSharedMemory(ashmemFd, notificationFd);
-      hopenconnectUi.bindPlatformVpnStart(attemptId);
-      this.startPlatformSubscription();
-      this.activeAttemptId = attemptId;
+      throw new Error('existing native VPN owner is no longer connected');
     }
 
     this.starting = true;
@@ -288,6 +301,27 @@ export default class HOpenConnectVpnExtensionAbility extends VpnExtensionAbility
       hopenconnectUi.validatePlatformVpnStartRequest(ashmemFd, notificationFd, attemptId);
       return true;
     } catch (err) {
+      try {
+        if (hopenconnectUi.acknowledgeTerminalPlatformVpnStartDelivery(
+          ashmemFd,
+          notificationFd,
+          attemptId,
+        )) {
+          hilog.info(
+            LOG_DOMAIN,
+            LOG_TAG,
+            'acknowledged delivery of terminal VPN request %{public}s',
+            attemptId,
+          );
+        }
+      } catch (ackErr) {
+        hilog.warn(
+          LOG_DOMAIN,
+          LOG_TAG,
+          'terminal VPN delivery acknowledgement failed %{public}s',
+          describeError(ackErr),
+        );
+      }
       hilog.warn(
         LOG_DOMAIN,
         LOG_TAG,
@@ -366,7 +400,9 @@ export default class HOpenConnectVpnExtensionAbility extends VpnExtensionAbility
     this.requireCurrentRequest(generation, attemptId);
     await this.waitForPendingCleanup();
     this.requireCurrentRequest(generation, attemptId);
-    hopenconnectUi.setPlatformVpnStarting(true);
+    if (!hopenconnectUi.setPlatformVpnStarting(attemptId, true)) {
+      throw new Error('platform VPN start attempt is no longer active');
+    }
 
     const connection = vpnExtension.createVpnConnection(this.context);
     this.vpnConnection = connection;
@@ -485,14 +521,26 @@ export default class HOpenConnectVpnExtensionAbility extends VpnExtensionAbility
     }
     this.requireCurrentRequest(generation, attemptId, connection);
     hilog.info(LOG_DOMAIN, LOG_TAG, 'native startVpn completed fd=%{public}d', fd);
+    const lifecycle = this.extensionTick(attemptId);
+    if (lifecycle !== 'connected') {
+      throw new Error(`native VPN worker entered ${lifecycle}`);
+    }
     this.startHeartbeat(generation, attemptId);
   }
 
-  private extensionTick(): string {
+  private recordVpnFailureForAttempt(attemptId: string, message: string): void {
+    try {
+      hopenconnectUi.setPlatformVpnFailed(attemptId, message);
+    } catch (err) {
+      hilog.error(LOG_DOMAIN, LOG_TAG, 'record VPN failure failed %{public}s', describeError(err));
+    }
+  }
+
+  private extensionTick(attemptId: string): string {
     if (typeof (hopenconnectUi as ESObject).extensionTick !== 'function') {
       throw new Error('native extension heartbeat is unavailable');
     }
-    return hopenconnectUi.extensionTick();
+    return hopenconnectUi.extensionTick(attemptId);
   }
 
   private startHeartbeat(generation: number, attemptId: string): void {
@@ -525,18 +573,14 @@ export default class HOpenConnectVpnExtensionAbility extends VpnExtensionAbility
     const attemptId = this.activeAttemptId;
     let lifecycle: string;
     try {
-      lifecycle = this.extensionTick();
+      lifecycle = this.extensionTick(attemptId);
     } catch (err) {
       const message = describeError(err) || 'extension heartbeat failed';
       hilog.error(LOG_DOMAIN, LOG_TAG, 'extension heartbeat failed %{public}s', message);
-      try {
-        hopenconnectUi.setPlatformVpnFailed(message);
-      } catch (_inner) {
-        // ignore
-      }
+      this.recordVpnFailureForAttempt(attemptId, message);
       lifecycle = 'failed';
     }
-    if (lifecycle !== 'disconnected' && lifecycle !== 'failed') {
+    if (lifecycle !== 'disconnected' && lifecycle !== 'failed' && lifecycle !== 'stopping') {
       return;
     }
     this.stopHeartbeat();
@@ -591,6 +635,15 @@ export default class HOpenConnectVpnExtensionAbility extends VpnExtensionAbility
           await connection.destroy();
         } catch (err) {
           errors.push(`VpnConnection.destroy: ${describeError(err)}`);
+        }
+      }
+      if (errors.length === 0 && attemptId.length > 0) {
+        try {
+          if (!hopenconnectUi.completePlatformVpnCleanup(attemptId)) {
+            errors.push('platform VPN cleanup acknowledgement rejected');
+          }
+        } catch (err) {
+          errors.push(`platform VPN cleanup acknowledgement: ${describeError(err)}`);
         }
       }
       return errors.join('; ');

@@ -74,10 +74,20 @@ pub struct PlatformVpnState {
     /// request after the system authorization flow has rebound the ability.
     pub start_attempt_id: String,
     pub start_outcome: PlatformStartOutcome,
+    /// The system start delivery was observed independently from Extension
+    /// ownership. This remains sticky for the exact attempt.
+    pub delivery_observed: bool,
     /// Set by the VPN Extension process after it has attached the shared-memory
     /// session and bound the matching Want. This distinguishes a dispatched
     /// request from one the extension has actually accepted.
     pub extension_attached: bool,
+    /// UI-owned cooperative stop intent for this exact attempt.
+    pub stop_requested: bool,
+    /// Extension process identity projected from the exact owner journal.
+    pub extension_owner_pid: u32,
+    pub extension_owner_start_time: u64,
+    /// Set only after native stop and VpnConnection.destroy have completed.
+    pub cleanup_complete: bool,
     pub starting: bool,
     pub running: bool,
     pub lifecycle: ConnectionLifecycle,

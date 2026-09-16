@@ -199,7 +199,12 @@ fn use_modal_back_handler(open: bool, on_close: EventHandler<()>) {
 }
 
 #[component]
-fn AuthSheet(title: String, on_close: EventHandler<()>, children: Element) -> Element {
+fn AuthSheet(
+    title: String,
+    bottom_inset: f32,
+    on_close: EventHandler<()>,
+    children: Element,
+) -> Element {
     use_modal_back_handler(true, on_close);
     rsx! {
         BottomSheet {
@@ -208,6 +213,15 @@ fn AuthSheet(title: String, on_close: EventHandler<()>, children: Element) -> El
             show_header: Some(false),
             on_close,
             {children}
+            if bottom_inset > 0.0 {
+                // BottomSheet's portal stays anchored to the physical viewport.
+                // Reserve the obscured part of that viewport so the actual form
+                // and its actions remain above the software keyboard.
+                row {
+                    width: "100%",
+                    height: bottom_inset,
+                }
+            }
         }
     }
 }

@@ -41,6 +41,28 @@ fn to_napi_error(err: impl std::fmt::Display) -> Error {
     Error::new(Status::GenericFailure, err.to_string())
 }
 
+fn parse_positive_u64(value: &str, label: &str) -> Result<u64> {
+    if value.is_empty() || !value.bytes().all(|byte| byte.is_ascii_digit()) {
+        return Err(Error::new(
+            Status::InvalidArg,
+            format!("{label} must be an unsigned decimal integer"),
+        ));
+    }
+    let parsed = value.parse::<u64>().map_err(|_| {
+        Error::new(
+            Status::InvalidArg,
+            format!("{label} is outside the supported range"),
+        )
+    })?;
+    if parsed == 0 {
+        return Err(Error::new(
+            Status::InvalidArg,
+            format!("{label} must be greater than zero"),
+        ));
+    }
+    Ok(parsed)
+}
+
 #[napi]
 pub fn configure_app_home(home_dir: String) -> Result<()> {
     std::env::set_var("HOPENCONNECT_HOME", &home_dir);
@@ -110,6 +132,17 @@ pub fn validate_platform_vpn_start_request(
         .map_err(to_napi_error)
 }
 
+#[napi]
+pub fn acknowledge_terminal_platform_vpn_start_delivery(
+    ashmem_fd: i32,
+    notification_fd: i32,
+    attempt_id: String,
+) -> Result<bool> {
+    shared_engine()
+        .acknowledge_terminal_platform_vpn_start_delivery(ashmem_fd, notification_fd, &attempt_id)
+        .map_err(to_napi_error)
+}
+
 /// Block until the peer process publishes a platform frame (or the wait is
 /// cancelled). Fully event driven: parks on the notification socket, never
 /// polls a timeout.
@@ -135,29 +168,107 @@ pub fn sync_platform_changes() -> Result<()> {
 }
 
 #[napi]
-pub fn begin_platform_vpn_start() -> Result<String> {
+pub fn advance_platform_vpn_intent() -> Result<String> {
     shared_engine()
-        .begin_platform_vpn_start()
+        .advance_platform_vpn_intent()
+        .map(|epoch| epoch.to_string())
         .map_err(to_napi_error)
 }
 
 #[napi]
-pub fn bind_platform_vpn_start(attempt_id: String) -> Result<()> {
+pub fn is_platform_vpn_intent_current(intent_epoch: String) -> Result<bool> {
+    shared_engine()
+        .is_platform_vpn_intent_current(parse_positive_u64(&intent_epoch, "VPN intent epoch")?)
+        .map_err(to_napi_error)
+}
+
+#[napi]
+pub fn is_platform_vpn_stop_current(intent_epoch: String, attempt_id: String) -> Result<bool> {
+    shared_engine()
+        .is_platform_vpn_stop_current(
+            parse_positive_u64(&intent_epoch, "VPN intent epoch")?,
+            &attempt_id,
+        )
+        .map_err(to_napi_error)
+}
+
+#[napi]
+pub fn begin_platform_vpn_os_stop(intent_epoch: String, attempt_id: String) -> Result<bool> {
+    shared_engine()
+        .begin_platform_vpn_os_stop(
+            parse_positive_u64(&intent_epoch, "VPN intent epoch")?,
+            &attempt_id,
+        )
+        .map_err(to_napi_error)
+}
+
+#[napi]
+pub fn complete_platform_vpn_os_stop(intent_epoch: String, attempt_id: String) -> Result<bool> {
+    shared_engine()
+        .complete_platform_vpn_os_stop(
+            parse_positive_u64(&intent_epoch, "VPN intent epoch")?,
+            &attempt_id,
+        )
+        .map_err(to_napi_error)
+}
+
+#[napi]
+pub fn fail_platform_vpn_os_stop(intent_epoch: String, attempt_id: String) -> Result<bool> {
+    shared_engine()
+        .fail_platform_vpn_os_stop(
+            parse_positive_u64(&intent_epoch, "VPN intent epoch")?,
+            &attempt_id,
+        )
+        .map_err(to_napi_error)
+}
+
+#[napi]
+pub fn begin_platform_vpn_start_for_intent(intent_epoch: String) -> Result<String> {
+    shared_engine()
+        .begin_platform_vpn_start_for_intent(parse_positive_u64(&intent_epoch, "VPN intent epoch")?)
+        .map_err(to_napi_error)
+}
+
+#[napi]
+pub fn claim_current_platform_vpn_stop(intent_epoch: String) -> Result<String> {
+    shared_engine()
+        .claim_current_platform_vpn_stop(parse_positive_u64(&intent_epoch, "VPN intent epoch")?)
+        .map_err(to_napi_error)
+}
+
+#[napi]
+pub fn request_platform_vpn_stop(attempt_id: String) -> Result<bool> {
+    shared_engine()
+        .request_platform_vpn_stop(&attempt_id)
+        .map_err(to_napi_error)
+}
+
+#[napi]
+pub fn bind_platform_vpn_start(attempt_id: String) -> Result<String> {
     shared_engine()
         .bind_platform_vpn_start(&attempt_id)
         .map_err(to_napi_error)
 }
 
 #[napi]
-pub async fn await_platform_vpn_start_attachment(
-    attempt_id: String,
-    timeout_ms: u32,
-) -> Result<bool> {
+pub fn complete_platform_vpn_cleanup(attempt_id: String) -> Result<bool> {
     shared_engine()
-        .await_platform_vpn_start_attachment(
-            &attempt_id,
-            std::time::Duration::from_millis(u64::from(timeout_ms)),
-        )
+        .complete_platform_vpn_cleanup(&attempt_id)
+        .map_err(to_napi_error)
+}
+
+#[napi]
+pub async fn await_platform_vpn_stop(attempt_id: String) -> Result<bool> {
+    shared_engine()
+        .await_platform_vpn_stop(&attempt_id)
+        .await
+        .map_err(to_napi_error)
+}
+
+#[napi]
+pub async fn recover_platform_vpn_cleanup_after_confirmed_stop(attempt_id: String) -> Result<bool> {
+    shared_engine()
+        .recover_platform_vpn_cleanup_after_confirmed_stop(&attempt_id)
         .await
         .map_err(to_napi_error)
 }
@@ -244,30 +355,16 @@ pub fn default_vpn_options() -> Result<String> {
 }
 
 #[napi]
-pub fn set_platform_vpn_running(running: bool) -> Result<()> {
+pub fn set_platform_vpn_starting(attempt_id: String, starting: bool) -> Result<bool> {
     shared_engine()
-        .set_platform_vpn_running(running)
+        .set_platform_vpn_starting_for_attempt(&attempt_id, starting)
         .map_err(to_napi_error)
 }
 
 #[napi]
-pub fn set_platform_vpn_starting(starting: bool) -> Result<()> {
+pub fn set_platform_vpn_failed(attempt_id: String, error: String) -> Result<bool> {
     shared_engine()
-        .set_platform_vpn_starting(starting)
-        .map_err(to_napi_error)
-}
-
-#[napi]
-pub fn set_platform_vpn_failed(error: String) -> Result<()> {
-    shared_engine()
-        .set_platform_vpn_failed(error)
-        .map_err(to_napi_error)
-}
-
-#[napi]
-pub fn expire_platform_vpn_start() -> Result<bool> {
-    shared_engine()
-        .expire_platform_vpn_start()
+        .set_platform_vpn_failed_for_attempt(&attempt_id, error)
         .map_err(to_napi_error)
 }
 
@@ -326,10 +423,9 @@ pub async fn start_vpn(fd: i32, options_json: String) -> Result<()> {
 /// VPN-extension heartbeat: reconcile cross-process terminal state, refresh
 /// native statistics, and publish a fresh Extension lane frame.
 #[napi]
-pub fn extension_tick() -> Result<String> {
+pub fn extension_tick(attempt_id: String) -> Result<String> {
     shared_engine()
-        .tick()
-        .map(|snapshot| snapshot.lifecycle.as_str().to_owned())
+        .extension_tick(&attempt_id)
         .map_err(to_napi_error)
 }
 
