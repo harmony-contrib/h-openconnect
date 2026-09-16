@@ -1106,7 +1106,7 @@ dependencies = [
 
 [[package]]
 name = "hopenconnect_core"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "anyconnect",
  "libc",
@@ -1124,7 +1124,7 @@ dependencies = [
 
 [[package]]
 name = "hopenconnect_ui"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "arkit",
  "dioxus",
