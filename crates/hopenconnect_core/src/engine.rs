@@ -6,6 +6,10 @@ use crate::model::{
     ConnectionProfile, DiagnosticEntry, NetworkSnapshot, SessionSnapshot, SessionStats, VpnOptions,
 };
 use crate::platform_ipc::{PlatformIpc, PlatformIpcError};
+use crate::platform_owner::{
+    JournalRead, PlatformVpnOwnerJournal, PlatformVpnOwnerLease, PlatformVpnOwnerLeaseObservation,
+    PlatformVpnOwnerLeaseRecord, PlatformVpnOwnerLeaseRole, PlatformVpnOwnerPhase, ProcessIdentity,
+};
 use crate::platform_state::{
     BrowserOpenRequest, PlatformStartOutcome, PlatformVpnState, SessionHandoff,
 };
@@ -33,6 +37,8 @@ use crate::native_session::{
 
 const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 const PLATFORM_VPN_START_DEADLINE: Duration = Duration::from_secs(120);
+const PLATFORM_OS_STOP_RECOVERY_DEADLINE: Duration = Duration::from_secs(30);
+const PLATFORM_OS_STOP_RECOVERY_POLL_INTERVAL: Duration = Duration::from_millis(100);
 const PLATFORM_HEARTBEAT_STALE_AFTER: Duration = Duration::from_secs(15);
 const PLATFORM_HEARTBEAT_WAKE_GRACE: Duration = Duration::from_secs(6);
 
@@ -68,9 +74,21 @@ struct Inner {
     platform_vpn_running: bool,
     platform_vpn_starting: bool,
     platform_start_sequence: u64,
+    platform_vpn_intent_epoch: u64,
+    platform_os_stop_epoch: u64,
+    platform_os_stop_attempt_id: String,
+    platform_os_stop_in_flight: bool,
     platform_start_attempt_id: String,
     platform_start_outcome: PlatformStartOutcome,
+    platform_start_delivery_observed: bool,
     platform_extension_attached: bool,
+    platform_stop_requested: bool,
+    platform_extension_owner_pid: u32,
+    platform_extension_owner_start_time: u64,
+    platform_vpn_cleanup_complete: bool,
+    platform_vpn_issuer_lease: Option<PlatformVpnOwnerLease>,
+    platform_vpn_extension_lease: Option<PlatformVpnOwnerLease>,
+    platform_watchdog_cleanup_recoverable: bool,
     platform_session_handoff: Option<SessionHandoff>,
     platform_browser_request: Option<BrowserOpenRequest>,
     platform_browser_request_sequence: u64,
@@ -108,7 +126,9 @@ pub struct PlatformSharedMemoryFds {
 struct PlatformStartEvent {
     attempt_id: String,
     outcome: PlatformStartOutcome,
+    delivery_observed: bool,
     extension_attached: bool,
+    cleanup_complete: bool,
     error: Option<String>,
 }
 
@@ -130,9 +150,21 @@ impl SessionEngine {
                 platform_vpn_running: false,
                 platform_vpn_starting: false,
                 platform_start_sequence: 0,
+                platform_vpn_intent_epoch: 0,
+                platform_os_stop_epoch: 0,
+                platform_os_stop_attempt_id: String::new(),
+                platform_os_stop_in_flight: false,
                 platform_start_attempt_id: String::new(),
                 platform_start_outcome: PlatformStartOutcome::Idle,
+                platform_start_delivery_observed: false,
                 platform_extension_attached: false,
+                platform_stop_requested: false,
+                platform_extension_owner_pid: 0,
+                platform_extension_owner_start_time: 0,
+                platform_vpn_cleanup_complete: false,
+                platform_vpn_issuer_lease: None,
+                platform_vpn_extension_lease: None,
+                platform_watchdog_cleanup_recoverable: false,
                 platform_session_handoff: None,
                 platform_browser_request: None,
                 platform_browser_request_sequence: 0,

@@ -19,9 +19,9 @@ const VPN_START_REQUEST_TYPE = 'hopenconnect.VpnStartRequest';
 const VPN_START_RESPONSE_TYPE = 'hopenconnect.VpnStartResponse';
 const VPN_STOP_REQUEST_TYPE = 'hopenconnect.VpnStopRequest';
 const VPN_STOP_RESPONSE_TYPE = 'hopenconnect.VpnStopResponse';
+const VPN_COOPERATIVE_STOP_TIMEOUT_MS: number = 3000;
 
-const VPN_EXTENSION_ATTACH_GRACE_MS: number = 350;
-const VPN_EXTENSION_REDISPATCH_ATTACH_TIMEOUT_MS: number = 5000;
+let vpnOperationChain: Promise<void> = Promise.resolve();
 
 interface VpnStartRequest {
   optionsJson: string;
@@ -37,7 +37,10 @@ export class VpnPlugin extends AsyncPluginBase {
   readonly requires: BridgeContextRequirement[] = ['ability'];
 
   private vpnStartRequest: Promise<void> | undefined = undefined;
+  private pendingVpnStartDispatches: Map<string, Promise<void>> = new Map();
   private activeVpnStartAttemptId: string = '';
+  private operationGeneration: number = 0;
+  private operationChain: Promise<void> = Promise.resolve();
   private platformSharedMemory?: HOpenPlatformSharedMemoryFds;
 
   onInstall(_context: BridgePluginHookContext): void {
@@ -103,10 +106,17 @@ export class VpnPlugin extends AsyncPluginBase {
     context: BridgePluginContext,
   ): Promise<void> {
     if (this.vpnStartRequest) {
-      hilog.info(LOG_DOMAIN, LOG_TAG, 'reusing pending VPN start request');
       return this.vpnStartRequest;
     }
-    const request = this.performStartVpn(optionsJson, context);
+    const intentEpoch = hopenconnectUi.advancePlatformVpnIntent();
+    const generation = ++this.operationGeneration;
+    const request = this.enqueueOperation(async (): Promise<void> => {
+      if (generation !== this.operationGeneration ||
+        !hopenconnectUi.isPlatformVpnIntentCurrent(intentEpoch)) {
+        throw new Error('VPN start request was superseded');
+      }
+      await this.performStartVpn(optionsJson, context, generation, intentEpoch);
+    });
     this.vpnStartRequest = request;
     try {
       await request;
@@ -117,8 +127,31 @@ export class VpnPlugin extends AsyncPluginBase {
     }
   }
 
-  private dispatchVpnStart(optionsJson: string, attemptId: string, context: BridgePluginContext): void {
-    this.runVpnStartDispatch(optionsJson, attemptId, context).catch((err: Error) => {
+  private enqueueOperation<T>(operation: () => Promise<T>): Promise<T> {
+    const localReady = this.operationChain.catch((_err: Error): void => {});
+    const request = vpnOperationChain
+      .catch((_err: Error): void => {})
+      .then((): Promise<void> => localReady)
+      .then(operation);
+    this.operationChain = request.then((_value: T): void => {}, (_err: Error): void => {});
+    vpnOperationChain = this.operationChain;
+    return request;
+  }
+
+  private dispatchVpnStart(
+    optionsJson: string,
+    attemptId: string,
+    context: BridgePluginContext,
+    generation: number,
+    intentEpoch: string,
+  ): void {
+    const dispatch = this.runVpnStartDispatch(
+      optionsJson,
+      attemptId,
+      context,
+      generation,
+      intentEpoch,
+    ).catch((err: Error) => {
       const message = describeError(err) || 'system rejected VPN start';
       try {
         hopenconnectUi.failUnattachedPlatformVpnStart(attemptId, message);
@@ -129,6 +162,12 @@ export class VpnPlugin extends AsyncPluginBase {
           'publish system VPN rejection failed %{public}s',
           describeError(innerErr),
         );
+      }
+    });
+    this.pendingVpnStartDispatches.set(attemptId, dispatch);
+    dispatch.finally((): void => {
+      if (this.pendingVpnStartDispatches.get(attemptId) === dispatch) {
+        this.pendingVpnStartDispatches.delete(attemptId);
       }
     });
   }
@@ -147,45 +186,53 @@ export class VpnPlugin extends AsyncPluginBase {
     optionsJson: string,
     attemptId: string,
     _context: BridgePluginContext,
+    generation: number,
+    intentEpoch: string,
   ): Promise<void> {
     await this.invokeVpnExtensionStart(optionsJson, attemptId);
-    hilog.info(LOG_DOMAIN, LOG_TAG, 'system acknowledged VPN start attempt %{public}s', attemptId);
-
-    if (await hopenconnectUi.awaitPlatformVpnStartAttachment(attemptId, VPN_EXTENSION_ATTACH_GRACE_MS)) {
+    if (generation !== this.operationGeneration ||
+      !hopenconnectUi.isPlatformVpnIntentCurrent(intentEpoch)) {
       return;
     }
 
     // The first-authorization dialog on some HarmonyOS builds starts the VPN
-    // Extension with a new Want containing only bundleName/abilityName. Once
-    // authorization succeeds, send the original payload again so the running
-    // Extension receives the ashmem descriptors and attempt id via onRequest.
-    hilog.warn(
-      LOG_DOMAIN,
-      LOG_TAG,
-      'VPN Extension did not receive the authorized Want; redispatching attempt %{public}s',
-      attemptId,
-    );
+    // Extension with a replacement Want containing only bundleName/abilityName.
+    // Redispatch the original payload unconditionally after the system Promise
+    // resolves. The Extension shared-memory terminal state owns completion.
     await this.invokeVpnExtensionStart(optionsJson, attemptId);
-    hilog.info(LOG_DOMAIN, LOG_TAG, 'redispatched VPN start attempt %{public}s', attemptId);
-
-    if (!(await hopenconnectUi.awaitPlatformVpnStartAttachment(
-      attemptId,
-      VPN_EXTENSION_REDISPATCH_ATTACH_TIMEOUT_MS,
-    ))) {
-      throw new Error('VPN Extension did not receive the shared-memory descriptors after authorization');
-    }
   }
 
-  private async performStartVpn(optionsJson: string, context: BridgePluginContext): Promise<void> {
+  private async performStartVpn(
+    optionsJson: string,
+    context: BridgePluginContext,
+    generation: number,
+    intentEpoch: string,
+  ): Promise<void> {
     let attemptId: string = '';
     try {
-      hilog.info(LOG_DOMAIN, LOG_TAG, 'request VPN start received');
-      attemptId = hopenconnectUi.beginPlatformVpnStart();
+      if (generation !== this.operationGeneration ||
+        !hopenconnectUi.isPlatformVpnIntentCurrent(intentEpoch)) {
+        throw new Error('VPN start request was superseded');
+      }
+      const recoverableSessionId = hopenconnectUi.claimCurrentPlatformVpnStop(intentEpoch);
+      if (recoverableSessionId.length > 0 ||
+        hopenconnectUi.isPlatformVpnStopCurrent(intentEpoch, recoverableSessionId)) {
+        await this.performStopVpn(recoverableSessionId, intentEpoch);
+        if (generation !== this.operationGeneration ||
+          !hopenconnectUi.isPlatformVpnIntentCurrent(intentEpoch)) {
+          throw new Error('VPN start request was superseded');
+        }
+      }
+      attemptId = hopenconnectUi.beginPlatformVpnStartForIntent(intentEpoch);
       this.activeVpnStartAttemptId = attemptId;
 
-      this.dispatchVpnStart(optionsJson, attemptId, context);
+      this.dispatchVpnStart(optionsJson, attemptId, context, generation, intentEpoch);
 
       const outcome = await hopenconnectUi.awaitPlatformVpnStart(attemptId);
+      if (generation !== this.operationGeneration ||
+        !hopenconnectUi.isPlatformVpnIntentCurrent(intentEpoch)) {
+        throw new Error('VPN start request was superseded');
+      }
       if (outcome !== 'connected') {
         throw new Error(`unexpected VPN start outcome: ${outcome}`);
       }
@@ -212,17 +259,94 @@ export class VpnPlugin extends AsyncPluginBase {
   }
 
   private async requestStopVpnWithContext(_context: BridgePluginContext): Promise<void> {
+    const intentEpoch = hopenconnectUi.advancePlatformVpnIntent();
+    ++this.operationGeneration;
+    const sessionId = hopenconnectUi.claimCurrentPlatformVpnStop(intentEpoch);
+    await this.enqueueOperation(async (): Promise<boolean> => {
+      return this.performStopVpn(sessionId, intentEpoch);
+    });
+  }
+
+  private async performStopVpn(sessionId: string, intentEpoch: string): Promise<boolean> {
     try {
-      hilog.info(LOG_DOMAIN, LOG_TAG, 'request VPN stop received');
-      if (this.activeVpnStartAttemptId.length > 0) {
-        hopenconnectUi.cancelPlatformVpnStart(this.activeVpnStartAttemptId);
+      this.pendingVpnStartDispatches.delete(sessionId);
+      if (!this.canDispatchPlatformVpnStop(intentEpoch, sessionId)) {
+        return false;
       }
-      await vpnExtension.stopVpnExtensionAbility(buildVpnWant());
-      hopenconnectUi.setPlatformVpnRunning(false);
-      hilog.info(LOG_DOMAIN, LOG_TAG, 'requested VPN stop');
+      let cleanupObservation: Promise<string> | undefined = undefined;
+      let cleanupCompleted = sessionId.length === 0;
+      if (sessionId.length > 0 && hopenconnectUi.requestPlatformVpnStop(sessionId)) {
+        cleanupObservation = hopenconnectUi.awaitPlatformVpnStop(sessionId).then(
+          (completed: boolean): string => completed ? 'complete' : 'superseded',
+          (err: Error): string => `error:${describeError(err) || 'platform cleanup wait failed'}`,
+        );
+        const cooperativeResult = await this.waitForCooperativeCleanup(cleanupObservation);
+        if (cooperativeResult === 'complete') {
+          cleanupCompleted = true;
+        } else if (cooperativeResult === 'superseded') {
+          return false;
+        } else if (cooperativeResult.startsWith('error:')) {
+          hilog.warn(
+            LOG_DOMAIN,
+            LOG_TAG,
+            'cooperative VPN cleanup wait failed %{public}s',
+            cooperativeResult.slice('error:'.length),
+          );
+        } else {
+          hilog.warn(
+            LOG_DOMAIN,
+            LOG_TAG,
+            'cooperative VPN cleanup still pending for %{public}s; requesting OS stop',
+            sessionId,
+          );
+        }
+      }
+      if (!this.canDispatchPlatformVpnStop(intentEpoch, sessionId) ||
+        !hopenconnectUi.beginPlatformVpnOsStop(intentEpoch, sessionId)) {
+        return false;
+      }
+      try {
+        await vpnExtension.stopVpnExtensionAbility(buildVpnWant());
+      } catch (err) {
+        if (!hopenconnectUi.failPlatformVpnOsStop(intentEpoch, sessionId)) {
+          hilog.error(LOG_DOMAIN, LOG_TAG,
+            'failed to retain exact VPN OS stop fence after system rejection');
+        }
+        throw new Error(describeError(err) || 'system rejected VPN stop');
+      }
+      if (!hopenconnectUi.completePlatformVpnOsStop(intentEpoch, sessionId)) {
+        throw new Error(`VPN OS stop confirmation did not match exact fence ${sessionId}`);
+      }
+      if (sessionId.length > 0 && !cleanupCompleted) {
+        cleanupCompleted =
+          await hopenconnectUi.recoverPlatformVpnCleanupAfterConfirmedStop(sessionId);
+        if (!cleanupCompleted) {
+          throw new Error(
+            `VPN cleanup owner ${sessionId} remained live or was superseded after confirmed OS stop`);
+        }
+      }
+      hilog.info(LOG_DOMAIN, LOG_TAG, 'VPN stop cleanup confirmed attempt %{public}s', sessionId);
+      return true;
     } catch (err) {
       hilog.error(LOG_DOMAIN, LOG_TAG, 'request VPN stop failed %{public}s', describeError(err));
       throw new Error(describeError(err) || 'request VPN stop failed');
     }
+  }
+
+  private async waitForCooperativeCleanup(cleanup: Promise<string>): Promise<string> {
+    let timeoutId: number = -1;
+    const timeout = new Promise<string>((resolve: (value: string) => void): void => {
+      timeoutId = setTimeout((): void => resolve('pending'), VPN_COOPERATIVE_STOP_TIMEOUT_MS);
+    });
+    const result = await Promise.race([cleanup, timeout]);
+    if (timeoutId >= 0) {
+      clearTimeout(timeoutId);
+    }
+    return result;
+  }
+
+  private canDispatchPlatformVpnStop(intentEpoch: string, sessionId: string): boolean {
+    return hopenconnectUi.isPlatformVpnStopCurrent(intentEpoch, sessionId) ||
+      (sessionId.length === 0 && hopenconnectUi.isPlatformVpnIntentCurrent(intentEpoch));
   }
 }

@@ -67,3 +67,74 @@ fn clearing_sensitive_payload_requires_both_local_slots_to_be_overwritten() {
         .windows(uri.len())
         .any(|window| window == uri.as_bytes()));
 }
+
+#[test]
+fn blocking_event_subscription_wakes_for_peer_publication() {
+    let (local, peer) = create_notification_pair().unwrap();
+    let subscription =
+        Arc::new(SocketNotification::new(None, NotificationAddress::new(0), Some(local)).unwrap());
+    let notifier = SocketNotification::new(None, NotificationAddress::new(0), Some(peer)).unwrap();
+    let waiter = {
+        let subscription = Arc::clone(&subscription);
+        std::thread::spawn(move || subscription.wait(None))
+    };
+
+    notifier.notify().unwrap();
+
+    assert!(waiter.join().unwrap().unwrap());
+}
+
+#[test]
+fn stream_notifications_coalesce_and_remain_bidirectional() {
+    let (local, peer) = create_notification_pair().unwrap();
+    let first = SocketNotification::new(None, NotificationAddress::new(0), Some(local)).unwrap();
+    let second = SocketNotification::new(None, NotificationAddress::new(0), Some(peer)).unwrap();
+
+    for _ in 0..100 {
+        first.notify().unwrap();
+    }
+    assert!(second.wait(Some(Duration::ZERO)).unwrap());
+    assert!(!second.wait(Some(Duration::ZERO)).unwrap());
+    second.notify().unwrap();
+    assert!(first.wait(Some(Duration::ZERO)).unwrap());
+}
+
+#[test]
+fn stream_peer_close_terminates_the_wait() {
+    let (local, peer) = create_notification_pair().unwrap();
+    let subscription =
+        SocketNotification::new(None, NotificationAddress::new(0), Some(local)).unwrap();
+    drop(peer);
+
+    assert!(subscription.wait_event_cancellable().is_err());
+    assert!(subscription.notify().is_err());
+}
+
+#[test]
+fn cancellable_wait_keeps_a_pre_registration_wakeup() {
+    let (local, _peer) = create_notification_pair().unwrap();
+    let subscription =
+        SocketNotification::new(None, NotificationAddress::new(0), Some(local)).unwrap();
+
+    subscription.cancel_waits();
+
+    assert!(!subscription.wait_event_cancellable().unwrap());
+}
+
+#[test]
+fn cancellation_is_scoped_to_one_ipc_binding() {
+    let (first_local, _first_peer) = create_notification_pair().unwrap();
+    let first =
+        SocketNotification::new(None, NotificationAddress::new(0), Some(first_local)).unwrap();
+    let (second_local, second_peer) = create_notification_pair().unwrap();
+    let second =
+        SocketNotification::new(None, NotificationAddress::new(0), Some(second_local)).unwrap();
+    let notifier =
+        SocketNotification::new(None, NotificationAddress::new(0), Some(second_peer)).unwrap();
+
+    first.cancel_waits();
+    notifier.notify().unwrap();
+
+    assert!(!first.wait_event_cancellable().unwrap());
+    assert!(second.wait_event_cancellable().unwrap());
+}

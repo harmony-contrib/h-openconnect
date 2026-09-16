@@ -16,6 +16,7 @@ mod model;
 mod native_session;
 mod platform_browser;
 mod platform_ipc;
+mod platform_owner;
 mod platform_protect;
 mod platform_state;
 mod private_fs;

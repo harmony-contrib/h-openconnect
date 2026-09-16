@@ -132,15 +132,21 @@ export interface VpnStopResponse {
 
 }
 
+export declare function acknowledgeTerminalPlatformVpnStartDelivery(ashmemFd: number, notificationFd: number, attemptId: string): boolean
+
+export declare function advancePlatformVpnIntent(): string
+
 export declare function attachPlatformSharedMemory(ashmemFd: number, notificationFd: number): void
 
 export declare function awaitPlatformVpnStart(attemptId: string): Promise<string>
 
-export declare function awaitPlatformVpnStartAttachment(attemptId: string, timeoutMs: number): Promise<boolean>
+export declare function awaitPlatformVpnStop(attemptId: string): Promise<boolean>
 
-export declare function beginPlatformVpnStart(): string
+export declare function beginPlatformVpnOsStop(intentEpoch: string, attemptId: string): boolean
 
-export declare function bindPlatformVpnStart(attemptId: string): void
+export declare function beginPlatformVpnStartForIntent(intentEpoch: string): string
+
+export declare function bindPlatformVpnStart(attemptId: string): string
 
 export declare function cancelAuthChallenge(): void
 
@@ -149,7 +155,13 @@ export declare function cancelPlatformChangeWait(): void
 
 export declare function cancelPlatformVpnStart(attemptId: string): boolean
 
+export declare function claimCurrentPlatformVpnStop(intentEpoch: string): string
+
 export declare function clearSocketProtect(): void
+
+export declare function completePlatformVpnCleanup(attemptId: string): boolean
+
+export declare function completePlatformVpnOsStop(intentEpoch: string, attemptId: string): boolean
 
 export declare function configureAppHome(homeDir: string): void
 
@@ -177,13 +189,13 @@ export declare function disposeBridge(bridgeOwner: string): void
 
 export declare function disposeRender(renderOwner: string): void
 
-export declare function expirePlatformVpnStart(): boolean
-
 /**
   * VPN-extension heartbeat: reconcile cross-process terminal state, refresh
   * native statistics, and publish a fresh Extension lane frame.
   */
-export declare function extensionTick(): string
+export declare function extensionTick(attemptId: string): string
+
+export declare function failPlatformVpnOsStop(intentEpoch: string, attemptId: string): boolean
 
 export declare function failPlatformVpnStart(attemptId: string, error: string): boolean
 
@@ -192,6 +204,10 @@ export declare function failUnattachedPlatformVpnStart(attemptId: string, error:
 export declare function init(bindings: object, bridgeOwner: string, context?: AbilityInitContext): ApplicationLifecycle
 
 export declare function initializePlatformSharedMemory(): string
+
+export declare function isPlatformVpnIntentCurrent(intentEpoch: string): boolean
+
+export declare function isPlatformVpnStopCurrent(intentEpoch: string, attemptId: string): boolean
 
 export declare function onBackPressIntercept(): boolean
 
@@ -218,6 +234,8 @@ export declare function prepareVpnInExtension(optionsJson: string): Promise<stri
 
 export declare function querySession(): string
 
+export declare function recoverPlatformVpnCleanupAfterConfirmedStop(attemptId: string): Promise<boolean>
+
 /**
   * Register ics-style per-fd protect: OpenConnect → `vpnConnection.protect(fd)`.
   *
@@ -228,13 +246,13 @@ export declare function registerSocketProtect(callbacks: object): void
 
 export declare function render(slot: NodeContent, renderOwner: string): void
 
+export declare function requestPlatformVpnStop(attemptId: string): boolean
+
 export declare function securePrivateFile(path: string): void
 
-export declare function setPlatformVpnFailed(error: string): void
+export declare function setPlatformVpnFailed(attemptId: string, error: string): boolean
 
-export declare function setPlatformVpnRunning(running: boolean): void
-
-export declare function setPlatformVpnStarting(starting: boolean): void
+export declare function setPlatformVpnStarting(attemptId: string, starting: boolean): boolean
 
 export declare function startVpn(fd: number, optionsJson: string): Promise<void>
 

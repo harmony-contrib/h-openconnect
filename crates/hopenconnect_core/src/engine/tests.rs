@@ -2,6 +2,58 @@ use super::*;
 use crate::model::ProtocolKind;
 use tempfile::tempdir;
 
+fn begin_platform_vpn_start(engine: &SessionEngine) -> String {
+    let (attempt_id, home, issuer) = {
+        let mut inner = engine.lock().unwrap();
+        let sequence = inner.platform_start_sequence.saturating_add(1);
+        let attempt_id = format!("test-attempt-{sequence}");
+        let issuer = ProcessIdentity {
+            boot_id: "test-boot".to_owned(),
+            pid: 1000 + sequence as u32,
+            start_time: 2000 + sequence,
+        };
+        inner.platform_vpn_intent_epoch = inner.platform_vpn_intent_epoch.saturating_add(1);
+        (attempt_id, inner.home.clone(), issuer)
+    };
+    let lease = crate::platform_owner::acquire_owner_lease_exact(
+        &home.join("runtime/platform-vpn-owner.issuer.lease"),
+        PlatformVpnOwnerLeaseRecord {
+            attempt_id: attempt_id.clone(),
+            identity: issuer.clone(),
+            role: PlatformVpnOwnerLeaseRole::Issuer,
+        },
+    )
+    .unwrap();
+    crate::platform_owner::create_pending_exact(
+        &home.join("runtime/platform-vpn-owner.json"),
+        PlatformVpnOwnerJournal {
+            attempt_id: attempt_id.clone(),
+            issuer,
+            extension: None,
+            phase: PlatformVpnOwnerPhase::Pending,
+        },
+    )
+    .unwrap();
+    let mut inner = engine.lock().unwrap();
+    inner.platform_vpn_issuer_lease = Some(lease);
+    inner.platform_start_sequence = inner.platform_start_sequence.saturating_add(1);
+    inner.platform_start_attempt_id = attempt_id.clone();
+    inner.platform_start_outcome = PlatformStartOutcome::Pending;
+    inner.platform_start_delivery_observed = false;
+    inner.platform_extension_attached = false;
+    inner.platform_stop_requested = false;
+    inner.platform_extension_owner_pid = 0;
+    inner.platform_extension_owner_start_time = 0;
+    inner.platform_vpn_cleanup_complete = false;
+    inner.platform_vpn_starting = true;
+    inner.platform_vpn_running = false;
+    if let Some(handoff) = inner.platform_session_handoff.as_mut() {
+        handoff.attempt_id = attempt_id.clone();
+        handoff.updated_at = PlatformVpnState::now_nanos();
+    }
+    attempt_id
+}
+
 #[tokio::test]
 async fn dry_run_prepare_connect_succeeds() {
     let engine = SessionEngine::new();
@@ -45,7 +97,9 @@ async fn dry_run_invalid_server_fails() {
 #[tokio::test]
 async fn platform_start_completes_only_on_matching_connected_terminal() {
     let engine = SessionEngine::new();
-    let attempt_id = engine.begin_platform_vpn_start().unwrap();
+    let dir = tempdir().unwrap();
+    engine.configure_home(dir.path()).unwrap();
+    let attempt_id = begin_platform_vpn_start(&engine);
 
     assert!(!engine
         .fail_platform_vpn_start("older-attempt", "late rejection".to_owned())
@@ -64,7 +118,9 @@ async fn platform_start_completes_only_on_matching_connected_terminal() {
 #[tokio::test]
 async fn platform_start_failure_is_exactly_once() {
     let engine = SessionEngine::new();
-    let attempt_id = engine.begin_platform_vpn_start().unwrap();
+    let dir = tempdir().unwrap();
+    engine.configure_home(dir.path()).unwrap();
+    let attempt_id = begin_platform_vpn_start(&engine);
 
     assert!(engine
         .fail_platform_vpn_start(&attempt_id, "system rejected".to_owned())
@@ -77,32 +133,18 @@ async fn platform_start_failure_is_exactly_once() {
     assert!(error.to_string().contains("system rejected"));
 }
 
-#[tokio::test]
-async fn platform_start_attachment_wait_distinguishes_authorization_bootstrap() {
-    let engine = SessionEngine::new();
-    let attempt_id = engine.begin_platform_vpn_start().unwrap();
-
-    assert!(!engine
-        .await_platform_vpn_start_attachment(&attempt_id, Duration::from_millis(10))
-        .await
-        .unwrap());
-    engine.bind_platform_vpn_start(&attempt_id).unwrap();
-    assert!(engine
-        .await_platform_vpn_start_attachment(&attempt_id, Duration::from_millis(10))
-        .await
-        .unwrap());
-}
-
 #[test]
 fn system_rejection_only_fails_before_extension_attachment() {
     let engine = SessionEngine::new();
-    let unattached = engine.begin_platform_vpn_start().unwrap();
+    let dir = tempdir().unwrap();
+    engine.configure_home(dir.path()).unwrap();
+    let unattached = begin_platform_vpn_start(&engine);
     assert!(engine
         .fail_unattached_platform_vpn_start(&unattached, "system rejected".to_owned(),)
         .unwrap());
 
-    let attached = engine.begin_platform_vpn_start().unwrap();
-    engine.bind_platform_vpn_start(&attached).unwrap();
+    let attached = begin_platform_vpn_start(&engine);
+    engine.lock().unwrap().platform_extension_attached = true;
     assert!(!engine
         .fail_unattached_platform_vpn_start(&attached, "late system rejection".to_owned(),)
         .unwrap());
@@ -115,7 +157,9 @@ fn system_rejection_only_fails_before_extension_attachment() {
 #[tokio::test]
 async fn platform_start_deadline_produces_one_failed_terminal() {
     let engine = SessionEngine::new();
-    let attempt_id = engine.begin_platform_vpn_start().unwrap();
+    let dir = tempdir().unwrap();
+    engine.configure_home(dir.path()).unwrap();
+    let attempt_id = begin_platform_vpn_start(&engine);
 
     let error = engine
         .await_platform_vpn_start_with_deadline(&attempt_id, Duration::from_millis(10))
@@ -195,6 +239,132 @@ fn current_native_exit_publishes_a_terminal_state() {
 }
 
 #[test]
+fn connected_native_clean_exit_is_still_a_failure() {
+    let engine = SessionEngine::new();
+    {
+        let mut inner = engine.lock().unwrap();
+        inner.generation = 7;
+        inner.platform_vpn_running = true;
+        inner.platform_start_outcome = PlatformStartOutcome::Connected;
+        engine.set_lifecycle_locked(&mut inner, ConnectionLifecycle::Connected, None);
+    }
+
+    engine.on_native_session_ended(7, None).unwrap();
+
+    let snapshot = engine.snapshot().unwrap();
+    assert_eq!(snapshot.lifecycle, ConnectionLifecycle::Failed);
+    assert_eq!(
+        snapshot.last_error.as_deref(),
+        Some("native VPN worker is not running")
+    );
+}
+
+#[test]
+fn released_extension_owner_lease_publishes_failure_immediately() {
+    let root = tempfile::tempdir().unwrap();
+    let engine = SessionEngine::new();
+    engine.configure_home(root.path()).unwrap();
+    let identity = ProcessIdentity {
+        boot_id: "ohos-test-boot".to_owned(),
+        pid: 4242,
+        start_time: 77,
+    };
+    let issuer = ProcessIdentity {
+        boot_id: "ohos-test-boot".to_owned(),
+        pid: 4141,
+        start_time: 66,
+    };
+    let issuer_record = PlatformVpnOwnerLeaseRecord {
+        attempt_id: "attempt-owner-exit".to_owned(),
+        identity: issuer.clone(),
+        role: PlatformVpnOwnerLeaseRole::Issuer,
+    };
+    let extension_record = PlatformVpnOwnerLeaseRecord {
+        attempt_id: "attempt-owner-exit".to_owned(),
+        identity: identity.clone(),
+        role: PlatformVpnOwnerLeaseRole::Extension,
+    };
+    let _issuer_lease = crate::platform_owner::acquire_owner_lease_exact(
+        &root.path().join("runtime/platform-vpn-owner.issuer.lease"),
+        issuer_record,
+    )
+    .unwrap();
+    let lease = crate::platform_owner::acquire_owner_lease_exact(
+        &root
+            .path()
+            .join("runtime/platform-vpn-owner.extension.lease"),
+        extension_record,
+    )
+    .unwrap();
+    let journal_path = root.path().join("runtime/platform-vpn-owner.json");
+    crate::platform_owner::create_pending_exact(
+        &journal_path,
+        PlatformVpnOwnerJournal {
+            attempt_id: "attempt-owner-exit".to_owned(),
+            issuer: issuer.clone(),
+            extension: None,
+            phase: PlatformVpnOwnerPhase::Pending,
+        },
+    )
+    .unwrap();
+    crate::platform_owner::upgrade_attached_exact(
+        &journal_path,
+        "attempt-owner-exit",
+        issuer,
+        identity.clone(),
+    )
+    .unwrap();
+    {
+        let mut inner = engine.lock().unwrap();
+        inner.platform_start_attempt_id = "attempt-owner-exit".to_owned();
+        inner.platform_start_outcome = PlatformStartOutcome::Connected;
+        inner.platform_start_delivery_observed = true;
+        inner.platform_extension_attached = true;
+        inner.platform_extension_owner_pid = identity.pid;
+        inner.platform_extension_owner_start_time = identity.start_time;
+        inner.platform_vpn_cleanup_complete = false;
+        inner.platform_vpn_running = true;
+        engine.set_lifecycle_locked(&mut inner, ConnectionLifecycle::Connected, None);
+        engine
+            .refresh_platform_vpn_owner_liveness_locked(&mut inner)
+            .unwrap();
+        assert_eq!(inner.snapshot.lifecycle, ConnectionLifecycle::Connected);
+    }
+
+    drop(lease);
+    let mut inner = engine.lock().unwrap();
+    engine
+        .refresh_platform_vpn_owner_liveness_locked(&mut inner)
+        .unwrap();
+    assert_eq!(inner.snapshot.lifecycle, ConnectionLifecycle::Failed);
+    assert_eq!(
+        inner.snapshot.last_error.as_deref(),
+        Some("VPN extension owner lease was released")
+    );
+    assert!(!inner.platform_vpn_running);
+    assert!(!inner.platform_vpn_cleanup_complete);
+
+    let late_owner_frame = crate::platform_ipc::PlatformEnvelope {
+        state: Some(PlatformVpnState {
+            start_attempt_id: "attempt-owner-exit".to_owned(),
+            start_outcome: PlatformStartOutcome::Connected,
+            delivery_observed: true,
+            extension_attached: true,
+            extension_owner_pid: identity.pid,
+            extension_owner_start_time: identity.start_time,
+            running: true,
+            lifecycle: ConnectionLifecycle::Connected,
+            updated_at: 2,
+            ..PlatformVpnState::default()
+        }),
+        ..crate::platform_ipc::PlatformEnvelope::default()
+    };
+    engine.apply_platform_envelope_locked(&mut inner, true, None, late_owner_frame);
+    assert_eq!(inner.snapshot.lifecycle, ConnectionLifecycle::Failed);
+    assert!(!inner.platform_vpn_running);
+}
+
+#[test]
 fn delayed_starting_ipc_frame_cannot_revive_a_cancelled_attempt() {
     let engine = SessionEngine::new();
     let mut inner = engine.lock().unwrap();
@@ -242,7 +412,8 @@ fn pending_attachment_frame_does_not_cancel_start_before_extension_runs() {
             start_attempt_id: "attempt-starting".to_owned(),
             start_outcome: PlatformStartOutcome::Pending,
             extension_attached: true,
-            lifecycle: ConnectionLifecycle::Disconnected,
+            starting: true,
+            lifecycle: ConnectionLifecycle::Establishing,
             updated_at: 20,
             ..PlatformVpnState::default()
         }),
@@ -623,6 +794,8 @@ fn log_recording_is_opt_in_and_archives_the_enabled_session() {
 #[test]
 fn authenticated_handoff_is_attempt_scoped_in_ashmem() {
     let ui = SessionEngine::new();
+    let dir = tempdir().unwrap();
+    ui.configure_home(dir.path()).unwrap();
     {
         let mut inner = ui.lock().unwrap();
         inner.platform_session_handoff = Some(SessionHandoff {
@@ -635,7 +808,7 @@ fn authenticated_handoff_is_attempt_scoped_in_ashmem() {
             updated_at: PlatformVpnState::now_nanos(),
         });
     }
-    let attempt_id = ui.begin_platform_vpn_start().unwrap();
+    let attempt_id = begin_platform_vpn_start(&ui);
 
     let handoff = ui.lock().unwrap().platform_session_handoff.clone().unwrap();
     assert!(handoff.is_valid_for(&attempt_id));
@@ -648,7 +821,9 @@ fn authenticated_handoff_is_attempt_scoped_in_ashmem() {
 #[test]
 fn browser_open_request_is_attempt_scoped_and_consumed_once() {
     let ui = SessionEngine::new();
-    let attempt_id = ui.begin_platform_vpn_start().unwrap();
+    let dir = tempdir().unwrap();
+    ui.configure_home(dir.path()).unwrap();
+    let attempt_id = begin_platform_vpn_start(&ui);
     let request = BrowserOpenRequest {
         request_id: "browser-1".to_owned(),
         attempt_id: attempt_id.clone(),

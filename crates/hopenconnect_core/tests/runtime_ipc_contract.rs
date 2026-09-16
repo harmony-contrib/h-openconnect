@@ -35,7 +35,7 @@ fn runtime_cross_process_payloads_never_use_json_files() {
 
 #[test]
 fn ashmem_protocol_carries_attempt_scoped_handoff_and_browser_requests() {
-    assert!(PLATFORM_IPC.contains("const PROTOCOL_VERSION: u32 = 2"));
+    assert!(PLATFORM_IPC.contains("const PROTOCOL_VERSION: u32 = 3"));
     assert!(PLATFORM_IPC.contains("session_handoff: Option<SessionHandoff>"));
     assert!(PLATFORM_IPC.contains("browser_request: Option<BrowserOpenRequest>"));
     assert!(PLATFORM_IPC.contains("browser_request_ack: Option<String>"));
