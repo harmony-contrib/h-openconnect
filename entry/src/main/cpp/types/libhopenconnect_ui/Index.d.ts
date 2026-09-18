@@ -224,6 +224,8 @@ export declare function onBridgeSyncEvent(pluginId: string, event: string, reque
 
 export declare function pendingAuthChallenge(): string
 
+export declare function preparePlatformVpnHandoff(attemptId: string): string
+
 export declare function prepareVpn(): Promise<string>
 
 /**
@@ -233,6 +235,13 @@ export declare function prepareVpn(): Promise<string>
 export declare function prepareVpnInExtension(optionsJson: string): Promise<string>
 
 export declare function querySession(): string
+
+/**
+  * Receive the one-time kernel FD transfer in the VPN process, verify it
+  * against the durable owner journal and ashmem transaction, then install the
+  * shared IPC binding before returning the non-secret request metadata.
+  */
+export declare function receiveAndAttachPlatformVpnHandoff(token: string): Promise<string>
 
 export declare function recoverPlatformVpnCleanupAfterConfirmedStop(attemptId: string): Promise<boolean>
 
@@ -249,6 +258,8 @@ export declare function render(slot: NodeContent, renderOwner: string): void
 export declare function requestPlatformVpnStop(attemptId: string): boolean
 
 export declare function securePrivateFile(path: string): void
+
+export declare function sendPlatformVpnHandoff(ashmemFd: number, notificationFd: number, attemptId: string, optionsJson: string): Promise<void>
 
 export declare function setPlatformVpnFailed(attemptId: string, error: string): boolean
 

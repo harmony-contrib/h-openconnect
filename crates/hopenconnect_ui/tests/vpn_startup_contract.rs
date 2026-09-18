@@ -1,9 +1,12 @@
-const ENTRY_ABILITY: &str =
-    include_str!("../../../entry/src/main/ets/entryability/EntryAbility.ets");
 const VPN_PLUGIN: &str = include_str!("../../../entry/src/main/ets/plugins/VpnPlugin.ets");
 const VPN_ABILITY: &str =
     include_str!("../../../entry/src/main/ets/vpnability/HOpenConnectVpnExtensionAbility.ets");
 const VPN_CONFIG: &str = include_str!("../../../entry/src/main/ets/vpnability/VpnConfig.ets");
+const VPN_LAUNCHER: &str =
+    include_str!("../../../entry/src/main/ets/vpnability/VpnExtensionLauncher.ets");
+const VPN_EMULATOR_COMPATIBILITY: &str =
+    include_str!("../../../entry/src/main/ets/vpnability/VpnEmulatorCompatibility.ets");
+const VPN_HANDOFF: &str = include_str!("../src/vpn_handoff.rs");
 const NAPI_TYPES: &str =
     include_str!("../../../entry/src/main/cpp/types/libhopenconnect_ui/Index.d.ts");
 const UI_STATE: &str = include_str!("../src/state.rs");
@@ -16,7 +19,7 @@ fn section<'a>(source: &'a str, start: &str, end: &str) -> &'a str {
 }
 
 #[test]
-fn first_authorization_start_is_coordinated_by_the_extension_terminal_state() {
+fn standard_start_bootstraps_without_descriptors_then_hands_off_the_session() {
     assert!(NAPI_TYPES.contains("advancePlatformVpnIntent(): string"));
     assert!(NAPI_TYPES.contains("beginPlatformVpnStartForIntent(intentEpoch: string): string"));
     assert!(NAPI_TYPES.contains("bindPlatformVpnStart(attemptId: string): string"));
@@ -35,12 +38,33 @@ fn first_authorization_start_is_coordinated_by_the_extension_terminal_state() {
     assert!(request.contains("advancePlatformVpnIntent()"));
     assert!(request.contains("beginPlatformVpnStartForIntent(intentEpoch)"));
     assert!(request.contains("awaitPlatformVpnStart(attemptId)"));
-    assert!(request.contains("failUnattachedPlatformVpnStart(attemptId, message)"));
-    assert!(request.contains("buildVpnWant(optionsJson, this.platformSharedMemory, attemptId)"));
+    assert!(VPN_ABILITY.contains("failUnattachedPlatformVpnStart(attemptId, message)"));
+    assert!(request.contains("startVpnExtensionWithHandoff(optionsJson, attemptId, sharedMemory)"));
+    assert!(VPN_LAUNCHER.contains("preparePlatformVpnHandoff(attemptId)"));
+    assert!(VPN_LAUNCHER.contains("buildVpnBootstrapWant(attemptId, handoffToken)"));
+    assert!(VPN_LAUNCHER.contains("sendPlatformVpnHandoff("));
+    assert_eq!(
+        VPN_LAUNCHER.matches("startVpnExtensionAbility(").count(),
+        1,
+        "one user action must issue exactly one descriptor-free system VPN start"
+    );
+    assert!(!request.contains("buildVpnWant(optionsJson, this.platformSharedMemory, attemptId)"));
     assert!(!request.contains("awaitPlatformVpnStartAttachment"));
-    assert!(request.contains("await this.invokeVpnExtensionStart(optionsJson, attemptId)"));
     assert!(!request.contains("Promise.race"));
     assert!(!request.contains("15000"));
+
+    let install = section(VPN_PLUGIN, "onInstall(", "async invokeAsync(");
+    assert!(install.contains("authorizeVpnForEmulatorDebug()"));
+    assert!(install.contains("prepareVpnForEmulatorDebug()"));
+    assert!(request.contains("await this.startupVpnPreparation"));
+    assert!(VPN_EMULATOR_COMPATIBILITY.contains("updateVpnAuthorizedState"));
+    assert!(VPN_EMULATOR_COMPATIBILITY.contains("BuildProfile.DEBUG"));
+    let perform_start = section(
+        VPN_PLUGIN,
+        "private async performStartVpn",
+        "private async requestStopVpnWithContext",
+    );
+    assert!(!perform_start.contains("claimCurrentPlatformVpnStop(intentEpoch)"));
 
     let extension = section(
         VPN_ABILITY,
@@ -73,9 +97,12 @@ fn descriptor_free_authorization_bootstrap_waits_for_the_rebound_want() {
         "let attemptId: string",
     );
 
-    assert!(bootstrap.contains("authorization bootstrap"));
-    assert!(bootstrap.contains("waiting for rebound request"));
+    assert!(bootstrap.contains("readPlatformHandoffToken(want)"));
+    assert!(bootstrap.contains("receivePlatformHandoff(attemptId, handoffToken)"));
     assert!(!bootstrap.contains("setPlatformVpnFailed"));
+    assert!(VPN_HANDOFF.contains("libc::SCM_RIGHTS"));
+    assert!(VPN_HANDOFF.contains("OwnedFd::from_raw_fd"));
+    assert!(VPN_HANDOFF.contains("random_token()"));
 }
 
 #[test]
@@ -208,14 +235,19 @@ fn stale_wants_and_terminal_cleanup_are_attempt_scoped_before_mutation() {
 
     let stop = section(
         VPN_PLUGIN,
-        "private async requestStopVpnWithContext",
+        "private async prepareVpnForEmulatorDebug",
         "private async waitForCooperativeCleanup",
     );
     assert!(stop.contains("claimCurrentPlatformVpnStop(intentEpoch)"));
+    assert!(stop.contains("performStopVpn(recoverableSessionId, intentEpoch, true)"));
+    assert!(stop.contains("performStopVpn(sessionId, intentEpoch, false)"));
     assert!(stop.contains("requestPlatformVpnStop(sessionId)"));
     assert!(stop.contains("beginPlatformVpnOsStop(intentEpoch, sessionId)"));
     assert!(stop.contains("completePlatformVpnOsStop(intentEpoch, sessionId)"));
     assert!(stop.contains("recoverPlatformVpnCleanupAfterConfirmedStop(sessionId)"));
+    assert!(stop.contains("canRecoverRejectedEmulatorStop("));
+    assert!(VPN_EMULATOR_COMPATIBILITY.contains("recoverUnattachedDebugOwner"));
+    assert!(VPN_EMULATOR_COMPATIBILITY.contains("!cooperativeStopRequested"));
 }
 
 #[test]

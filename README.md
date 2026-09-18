@@ -11,8 +11,10 @@ packet loop inside the VPN extension process.
 
 > H-OpenConnect is under active development. Validate routing, DNS, application
 > binding, and reconnect behavior on a physical device or a VPN-enabled
-> OpenHarmony QEMU image. A DevEco simulator can validate UI and profile flows,
-> but does not prove that a system TUN was created or that traffic traversed it.
+> OpenHarmony QEMU image. Supported DevEco emulator images can create a real
+> system TUN with the debug-only compatibility path documented in
+> [HarmonyOS emulator VPN integration](docs/harmonyos-emulator-vpn.md); the
+> process, TUN, and application-UID traffic checks remain mandatory.
 
 ## Architecture
 
@@ -42,8 +44,8 @@ The connection lifecycle is intentionally split across two application
 processes:
 
 1. The UI process calls `obtain_cookie`, handles group selection and all
-   interactive authentication forms, then writes a short-lived private session
-   handoff.
+   interactive authentication forms, then publishes a short-lived session in
+   ashmem.
 2. The VPN extension resumes the authenticated cookie, establishes CSTP, and
    reads the assigned addresses, routes, DNS servers, search domains, and MTU.
 3. ArkTS maps that headend configuration directly to HarmonyOS `VpnConfig` and
@@ -52,6 +54,13 @@ processes:
    the packet mainloop.
 5. The UI observes extension-owned lifecycle and traffic statistics through
    checksummed, double-buffered ashmem frames with socket change notifications.
+
+The VPN Extension is bootstrapped with one descriptor-free system Want. A
+one-time authenticated Unix-domain handoff then transfers the existing ashmem
+descriptors with `SCM_RIGHTS`; both processes continue to observe the same
+memory instead of copying live VPN state. See the
+[emulator VPN standard](docs/harmonyos-emulator-vpn.md) for rationale and
+acceptance criteria.
 
 Missing or malformed headend network configuration fails the connection. The
 app does not synthesize fallback tunnel addresses, public DNS servers, or

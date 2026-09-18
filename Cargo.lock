@@ -1129,6 +1129,7 @@ dependencies = [
  "arkit",
  "dioxus",
  "hopenconnect_core",
+ "libc",
  "napi-build-ohos",
  "napi-derive-ohos",
  "napi-ohos",
