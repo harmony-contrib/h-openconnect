@@ -111,7 +111,8 @@ HOPEN_E2E_PASSWORD='***' \
 
 缺少 VPN 授权弹窗、或会静默丢弃首个 FD Want 的 DevEco 镜像，必须使用
 [HarmonyOS 模拟器 VPN 接入标准](harmonyos-emulator-vpn.md)中的 debug 授权、无 FD
-bootstrap、内核 FD handoff 和验收步骤；不要修改系统镜像或复制系统私有库。
+bootstrap、内核 FD handoff 和验收步骤。当前验证基线预置了 `userdata` SettingsData
+授权；不要把它误写成“纯净模拟器”，也不要修改 `system` 镜像或复制系统私有库。
 
 ```bash
 : "${DEVECO_STUDIO_HOME:?请先设置 DevEco Studio 的 Contents 目录}"

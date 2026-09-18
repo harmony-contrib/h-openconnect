@@ -54,13 +54,48 @@ com.richerfu.h_openconnect_100=1
 
 这两条记录位于模拟器 `userdata`，表示当前 bundle 及 user 100 已获得 VPN 授权。调试
 期间曾通过离线更新 SettingsData 的方式写入；当前 App 启动时调用的
-`updateVpnAuthorizedState()` 会更新同一类授权状态。因此，本次结果证明的是“授权状态
-已经写入后，真实 VPN Extension/TUN 链路可以工作”，不能据此宣称未经初始化的全新
-模拟器快照也能直接启动 VPN。
+`updateVpnAuthorizedState()` 意图更新同一类授权状态，但尚未在空记录上验证首次建档。
+因此，本次结果证明的是“授权状态已经写入后，真实 VPN Extension/TUN 链路可以工作”，
+不能据此宣称未经初始化的全新模拟器快照也能直接启动 VPN。
 
 如果需要证明 App 能独立完成初始化，必须在恢复出厂或新建的模拟器实例上重新安装
 debug HAP，并确认首次启动就出现系统 `UpdateVpnAuthorize result. ret = 0`，随后真实
 连接成功。现有跑通记录不能代替这项冷启动验证。
+
+### 模拟器数据修改账本
+
+当前排查和最终验证涉及的模拟器侧数据如下。后续判断是否为“纯净镜像”必须同时检查
+`system`、`sys_prod` 和 `userdata`，不能只检查 `system.img`。
+
+| 数据 | 实际修改 | 当前是否依赖 | 结论 |
+| --- | --- | --- | --- |
+| `userdata` SettingsData | 在主库和 slave 库的 `SETTINGSDATA` 表写入 bundle 授权记录 | 是 | 当前已验证方案的授权前置条件 |
+| App 启动授权 | debug 启动时调用 `updateVpnAuthorizedState(bundleName)` | 已执行，但首次建档能力未单独验证 | 作为自动初始化候选方案保留 |
+| `system` VPN 白名单 | 修改 `allow_connect_vpn.json` | 否 | 会触发镜像校验问题，已撤销 |
+| `system` 参数文件 | 排查期间实验过 `ollie.para` | 否 | 不进入标准方案 |
+| HAP 私有系统库 | 曾尝试复制/链接 VPN 系统 `.so` | 否 | 命名空间、依赖和跨进程状态均不成立 |
+
+SettingsData 位于 `userdata` 文件系统中的：
+
+```text
+/app/el1/0/database/com.ohos.settingsdata/entry/rdb/settingsdata.db
+/app/el1/0/database/com.ohos.settingsdata/entry/rdb/settingsdata_slave.db
+```
+
+两份数据库的 `SETTINGSDATA` 表均写入：
+
+```sql
+INSERT INTO SETTINGSDATA(KEYWORD, VALUE)
+VALUES ('com.richerfu.h_openconnect', '1')
+ON CONFLICT(KEYWORD) DO UPDATE SET VALUE = excluded.VALUE;
+
+INSERT INTO SETTINGSDATA(KEYWORD, VALUE)
+VALUES ('com.richerfu.h_openconnect_100', '1')
+ON CONFLICT(KEYWORD) DO UPDATE SET VALUE = excluded.VALUE;
+```
+
+第一条是 bundle 授权，第二条是 bundle 与 user 100 的授权。不能把 `100` 固定套用到
+其他用户实例；必须以目标模拟器实际 user ID 为准。
 
 ### `system` 分区白名单不是当前生效项
 
@@ -118,14 +153,22 @@ UI 进程                               VPN Extension 进程
 
 ## 模拟器授权策略
 
+模拟器必须先具备上述持久化授权状态，再执行无 FD 的 VPN Extension 启动。授权有两种
+实现方案；二者解决的只是授权，不替代后续 Extension 启动、FD handoff、TUN 创建和
+OpenConnect 数据面。
+
+### 方案 A：debug App 调用系统授权接口
+
 系统授权弹窗缺失时，debug HAP 在插件安装阶段调用：
 
 ```text
 updateVpnAuthorizedState(<current bundle name>)
 ```
 
-该调用不是纯内存开关：它会更新模拟器的持久化 VPN 授权配置，作用等价于为当前 bundle
-建立上述 SettingsData 授权状态。这是当前方案明确允许且依赖的模拟器侧修改。
+该接口的目标是更新当前 bundle 的 VPN 授权状态，不是单纯的进程内开关。当前实例中
+可以确认调用返回 `true`，系统日志为 `UpdateVpnAuthorize result. ret = 0`；但调用发生
+前 SettingsData 记录已经由方案 B 写入，因此尚未证明它能在全新 `userdata` 上首次创建
+授权记录。
 
 实现必须同时满足：
 
@@ -138,6 +181,131 @@ updateVpnAuthorizedState(<current bundle name>)
 相关代码集中在
 `entry/src/main/ets/vpnability/VpnEmulatorCompatibility.ets`，隐藏 API 的本地声明位于
 `entry/src/main/ets/types/vpnExtensionDebug.d.ts`。不得把这段逻辑扩展到 release。
+
+方案 A 的验收必须从全新的模拟器实例开始：安装前确认两条 bundle 记录不存在，首次
+启动 App 后确认记录出现，再完成一次真实隧道连接。在完成这项验证前，不能把方案 A
+标记为可替代方案 B 的独立初始化方案。
+
+### 方案 B：离线预置 userdata 授权
+
+这是当前真实连接已经验证过的模拟器初始化方式，适合固定的开发或 CI 模拟器基线。
+它修改的是实例自己的 `userdata.img.qcow2`，不修改 SDK 中的基础镜像。
+
+操作顺序：
+
+1. 创建并启动一次模拟器，安装目标 debug HAP，确保 SettingsData 数据库已经生成。
+2. 正常关闭模拟器；禁止在 QEMU 仍持有镜像时修改 `userdata.img.qcow2`。
+3. 备份整个实例的 `userdata.img.qcow2`，备份名称应包含修改前时间。
+4. 使用 `qemu-img convert -O raw` 合并 qcow2 与 backing file，得到临时 raw 镜像。
+5. 使用 `debugfs` 从上述 `rdb` 目录导出 `settingsdata.db` 和
+   `settingsdata_slave.db`，并保存原文件的 uid、gid、mode、ACL、`user.security` 和
+   `security.selinux` 扩展属性。
+6. 对两份数据库执行上面的 SQL，并分别执行 `PRAGMA integrity_check`。
+7. 清除镜像内旧的 `-wal`、`-shm` 和 `-dwr` 文件，把两份数据库写回原路径，恢复原始
+   文件属性。当前验证镜像中的属性为 mode `0660`、uid/gid `20003`、
+   `user.security=s1`、`security.selinux=u:object_r:appdat:s0`；其他版本必须以原文件为准。
+8. 把修改后的 raw 镜像转换回 qcow2，保留原 `userdata.img` backing file，然后运行
+   `qemu-img check`。
+9. 替换实例镜像后冷启动，查询两份数据库并检查真实 VPN 日志与 `vpn-tun`。
+
+导出数据库和原始扩展属性的命令形式如下。`debugfs` 在 Homebrew e2fsprogs 中通常不在
+默认 `PATH`，应显式设置其路径：
+
+```bash
+DEBUGFS="$(brew --prefix e2fsprogs)/sbin/debugfs"
+RDB_PATH=/app/el1/0/database/com.ohos.settingsdata/entry/rdb
+
+"$DEBUGFS" -R \
+  "dump $RDB_PATH/settingsdata.db $WORK_DIR/settingsdata.db" \
+  "$WORK_DIR/userdata.raw"
+"$DEBUGFS" -R \
+  "dump $RDB_PATH/settingsdata_slave.db $WORK_DIR/settingsdata_slave.db" \
+  "$WORK_DIR/userdata.raw"
+
+"$DEBUGFS" -R \
+  "ea_get -f $WORK_DIR/main.acl $RDB_PATH/settingsdata.db system.posix_acl_access" \
+  "$WORK_DIR/userdata.raw"
+"$DEBUGFS" -R \
+  "ea_get -f $WORK_DIR/main.user_security $RDB_PATH/settingsdata.db user.security" \
+  "$WORK_DIR/userdata.raw"
+"$DEBUGFS" -R \
+  "ea_get -f $WORK_DIR/main.selinux $RDB_PATH/settingsdata.db security.selinux" \
+  "$WORK_DIR/userdata.raw"
+```
+
+对 slave 文件重复保存 `system.posix_acl_access`、`user.security` 和
+`security.selinux`。写回时使用 `debugfs -w -f <command-file>`；命令文件必须先删除对应
+数据库的 `-wal`、`-shm`、`-dwr` 和旧数据库，再依次执行 `write`、`sif` 与
+`ea_set -f`。实际验证使用的主库写回结构如下，slave 使用其自己的文件和属性副本：
+
+```text
+rm /app/el1/0/database/com.ohos.settingsdata/entry/rdb/settingsdata.db-wal
+rm /app/el1/0/database/com.ohos.settingsdata/entry/rdb/settingsdata.db-shm
+rm /app/el1/0/database/com.ohos.settingsdata/entry/rdb/settingsdata.db-dwr
+rm /app/el1/0/database/com.ohos.settingsdata/entry/rdb/settingsdata.db
+write <WORK_DIR>/settingsdata.db /app/el1/0/database/com.ohos.settingsdata/entry/rdb/settingsdata.db
+sif /app/el1/0/database/com.ohos.settingsdata/entry/rdb/settingsdata.db mode 0100660
+sif /app/el1/0/database/com.ohos.settingsdata/entry/rdb/settingsdata.db uid 20003
+sif /app/el1/0/database/com.ohos.settingsdata/entry/rdb/settingsdata.db gid 20003
+ea_set -f <WORK_DIR>/main.acl /app/el1/0/database/com.ohos.settingsdata/entry/rdb/settingsdata.db system.posix_acl_access
+ea_set -f <WORK_DIR>/main.user_security /app/el1/0/database/com.ohos.settingsdata/entry/rdb/settingsdata.db user.security
+ea_set -f <WORK_DIR>/main.selinux /app/el1/0/database/com.ohos.settingsdata/entry/rdb/settingsdata.db security.selinux
+```
+
+`<WORK_DIR>` 必须在生成命令文件时替换为绝对路径；`debugfs` 不展开 shell 变量。uid、
+gid 和 mode 也必须来自修改前的 `debugfs stat`，上面的数值只代表本次验证镜像。
+
+主库和 slave 库必须保持一致，示例核对 SQL 为：
+
+```sql
+SELECT KEYWORD, VALUE
+FROM SETTINGSDATA
+WHERE KEYWORD IN (
+  'com.richerfu.h_openconnect',
+  'com.richerfu.h_openconnect_100'
+);
+```
+
+预期两份数据库都返回两行且值均为 `1`。只修改主库、遗留 WAL，或者写回时丢失 ACL、
+SELinux 标签，都可能导致 SettingsData 恢复旧值、拒绝访问或在冷启动后重建数据库。
+
+建议使用以下目录变量组织离线操作，避免误改 SDK 基础镜像：
+
+```bash
+EMU_DIR="<DevEco 模拟器实例目录>"
+USERDATA_QCOW="$EMU_DIR/userdata.img.qcow2"
+WORK_DIR="$(mktemp -d /private/tmp/hvpn-userdata.XXXXXX)"
+
+cp "$USERDATA_QCOW" \
+  "$EMU_DIR/userdata.img.qcow2.before-vpn-auth-$(date +%Y%m%d%H%M%S)"
+qemu-img convert -O raw "$USERDATA_QCOW" "$WORK_DIR/userdata.raw"
+```
+
+数据库写回和 qcow2 替换必须在模拟器完全停止后执行。`BASE_USERDATA` 应取
+`qemu-img info --backing-chain "$USERDATA_QCOW"` 显示的原 backing file：
+
+```bash
+qemu-img convert -f raw -O qcow2 \
+  -B "$BASE_USERDATA" -F raw \
+  "$WORK_DIR/userdata.raw" "$WORK_DIR/userdata.patched.qcow2"
+qemu-img check "$WORK_DIR/userdata.patched.qcow2"
+```
+
+检查成功后才能用 `userdata.patched.qcow2` 替换实例文件。不得把 SDK 目录中的基础
+`userdata.img` 作为写入目标，也不得在未验证备份可用前删除原实例文件。
+
+### 方案选择
+
+- 当前确定可工作的基线：方案 B 预置授权 + 标准无 FD 启动与 FD handoff。
+- 目标方案：方案 A 在 debug App 中自动授权；需要补做全新 `userdata` 的首次启动验证。
+- release HAP 和真机：均不使用 A/B，由系统授权 UI 管理。
+- 无论选择 A 还是 B，都不能恢复已撤销的 `system` 白名单补丁或复制系统私有库。
+
+### 回滚 userdata 修改
+
+先关闭模拟器，再恢复修改前备份的 `userdata.img.qcow2`；或者删除该模拟器实例并重新
+创建。恢复整个 userdata 会同时回退已安装应用、应用数据和系统用户设置，因此不要只
+凭文件名覆盖，必须核对实例目录和备份时间。回滚后用全新安装流程重新验证。
 
 ## 代码职责
 
