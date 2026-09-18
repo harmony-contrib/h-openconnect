@@ -4,6 +4,7 @@ use arkit::prelude::Element;
 use hopenconnect_core::{shared_engine, ConnectRequest};
 use napi_derive_ohos::napi;
 use napi_ohos::{bindgen_prelude::Object, Error, Result, Status};
+use std::os::fd::AsRawFd;
 
 mod bridge;
 mod i18n;
@@ -15,6 +16,7 @@ mod state;
 mod time_format;
 mod view;
 mod virtual_identity;
+mod vpn_handoff;
 
 #[entry(plugins = [
     bridge::HOpenUrlBridgePlugin,
@@ -117,6 +119,50 @@ pub fn attach_platform_shared_memory(ashmem_fd: i32, notification_fd: i32) -> Re
     shared_engine()
         .attach_platform_shared_memory(ashmem_fd, notification_fd)
         .map_err(to_napi_error)
+}
+
+#[napi]
+pub fn prepare_platform_vpn_handoff(attempt_id: String) -> Result<String> {
+    vpn_handoff::prepare(&attempt_id).map_err(to_napi_error)
+}
+
+#[napi]
+pub async fn send_platform_vpn_handoff(
+    ashmem_fd: i32,
+    notification_fd: i32,
+    attempt_id: String,
+    options_json: String,
+) -> Result<()> {
+    tokio::task::spawn_blocking(move || {
+        vpn_handoff::send(ashmem_fd, notification_fd, attempt_id, options_json)
+    })
+    .await
+    .map_err(to_napi_error)?
+    .map_err(to_napi_error)
+}
+
+/// Receive the one-time kernel FD transfer in the VPN process, verify it
+/// against the durable owner journal and ashmem transaction, then install the
+/// shared IPC binding before returning the non-secret request metadata.
+#[napi]
+pub async fn receive_and_attach_platform_vpn_handoff(token: String) -> Result<String> {
+    let received = tokio::task::spawn_blocking(move || vpn_handoff::receive(&token))
+        .await
+        .map_err(to_napi_error)?
+        .map_err(to_napi_error)?;
+    let ashmem_fd = received.ashmem.as_raw_fd();
+    let notification_fd = received.notification.as_raw_fd();
+    shared_engine()
+        .validate_platform_vpn_start_request(
+            ashmem_fd,
+            notification_fd,
+            &received.payload.attempt_id,
+        )
+        .map_err(to_napi_error)?;
+    shared_engine()
+        .attach_platform_shared_memory(ashmem_fd, notification_fd)
+        .map_err(to_napi_error)?;
+    serde_json::to_string(&received.payload).map_err(to_napi_error)
 }
 
 /// Check that a Want still names the current UI transaction without changing

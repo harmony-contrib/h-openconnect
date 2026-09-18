@@ -222,6 +222,7 @@ export function readOptionsJson(want?: Want): string {
 const HOPEN_ASHMEM_FD_KEY = 'hopenconnectPlatformAshmem';
 const HOPEN_NOTIFICATION_FD_KEY = 'hopenconnectPlatformNotification';
 const HOPEN_START_ATTEMPT_ID_KEY = 'hopenconnectStartAttemptId';
+const HOPEN_HANDOFF_TOKEN_KEY = 'hopenconnectHandoffToken';
 
 export interface HOpenPlatformSharedMemoryFds {
   ashmemFd: number;
@@ -239,6 +240,11 @@ class HOpenWantFileDescriptor {
 
 interface HOpenVpnWantParameters extends Record<string, Object> {
   optionsJson: string;
+}
+
+interface HOpenVpnBootstrapParameters extends Record<string, Object> {
+  hopenconnectStartAttemptId: string;
+  hopenconnectHandoffToken: string;
 }
 
 export function buildVpnWant(
@@ -265,12 +271,42 @@ export function buildVpnWant(
   };
 }
 
+/**
+ * Start the system VPN Extension without application payload first.
+ *
+ * Some emulator images accept an FD-bearing VPN Want but drop it before
+ * AbilityManager creates the Extension process.  A descriptor-free bootstrap
+ * follows the platform start contract and lets the already-running Extension
+ * receive the session through the one-time native FD handoff channel.
+ */
+export function buildVpnBootstrapWant(startAttemptId: string, handoffToken: string): Want {
+  const parameters: HOpenVpnBootstrapParameters = {
+    hopenconnectStartAttemptId: startAttemptId,
+    hopenconnectHandoffToken: handoffToken,
+  };
+  return {
+    deviceId: '',
+    bundleName: currentHOpenBundleName(),
+    moduleName: HOPEN_MODULE_NAME,
+    abilityName: HOPEN_VPN_ABILITY,
+    parameters,
+  };
+}
+
 export function readPlatformStartAttemptId(want?: Want): string {
   const value = readVpnParameters(want)?.[HOPEN_START_ATTEMPT_ID_KEY];
   if (typeof value === 'string' && value.length > 0) {
     return value;
   }
   throw new Error('VPN extension request is missing start attempt id');
+}
+
+export function readPlatformHandoffToken(want?: Want): string {
+  const value = readVpnParameters(want)?.[HOPEN_HANDOFF_TOKEN_KEY];
+  if (typeof value === 'string' && value.length > 0) {
+    return value;
+  }
+  throw new Error('VPN extension request is missing handoff token');
 }
 
 export function readPlatformSharedMemoryFds(want: Want): HOpenPlatformSharedMemoryFds | undefined {

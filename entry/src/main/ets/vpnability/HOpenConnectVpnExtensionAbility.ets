@@ -16,8 +16,10 @@ import hopenconnectUi from 'libhopenconnect_ui.so';
 import { configureNativePlatformIdentity } from '../common/PlatformIdentity';
 import {
   buildVpnConfig,
+  HOpenPlatformSharedMemoryFds,
   parseOptions,
   readPlatformSharedMemoryFds,
+  readPlatformHandoffToken,
   readPlatformStartAttemptId,
   readOptionsJson,
   setHOpenBundleName,
@@ -27,6 +29,11 @@ const LOG_DOMAIN: number = 0x0000;
 const LOG_TAG: string = 'HOpenConnectVpn';
 const PREPARE_TIMEOUT_MS: number = 120000;
 const PLATFORM_OPERATION_TIMEOUT_MS: number = 30000;
+
+interface PlatformVpnHandoffPayload {
+  attemptId: string;
+  optionsJson: string;
+}
 
 function withTimeout<T>(operation: Promise<T>, timeoutMs: number, label: string): Promise<T> {
   return new Promise<T>((resolve: (value: T) => void, reject: (reason?: Object | string) => void): void => {
@@ -78,6 +85,7 @@ export default class HOpenConnectVpnExtensionAbility extends VpnExtensionAbility
   private platformSubscriptionGeneration: number = 0;
   private requestGeneration: number = 0;
   private inFlightAttemptId: string = '';
+  private pendingHandoffAttemptId: string = '';
   private activeAttemptId: string = '';
   private heartbeatTimer: number = -1;
   private requestChain: Promise<void> = Promise.resolve();
@@ -100,6 +108,7 @@ export default class HOpenConnectVpnExtensionAbility extends VpnExtensionAbility
   public onDestroy(): void {
     hilog.info(LOG_DOMAIN, LOG_TAG, 'onDestroy');
     this.requestGeneration += 1;
+    this.pendingHandoffAttemptId = '';
     this.stopHeartbeat();
     this.stopPlatformSubscription();
     this.destroyVpn().catch((err: Error): void => {
@@ -157,15 +166,14 @@ export default class HOpenConnectVpnExtensionAbility extends VpnExtensionAbility
     }
     const sharedMemory = readPlatformSharedMemoryFds(want);
     if (!sharedMemory) {
-      // The first-authorization system dialog may bootstrap the Extension with
-      // a replacement Want that contains no application parameters. Keep the
-      // Extension idle until EntryAbility redispatches the original Want via
-      // onRequest; it owns the bounded failure if that rebound never arrives.
-      hilog.warn(
-        LOG_DOMAIN,
-        LOG_TAG,
-        'VPN authorization bootstrap has no shared-memory descriptors; waiting for rebound request',
-      );
+      try {
+        const attemptId = readPlatformStartAttemptId(want);
+        const handoffToken = readPlatformHandoffToken(want);
+        this.receivePlatformHandoff(attemptId, handoffToken);
+      } catch (err) {
+        hilog.error(LOG_DOMAIN, LOG_TAG,
+          'descriptor-free VPN bootstrap rejected %{public}s', describeError(err));
+      }
       return;
     }
     let attemptId: string;
@@ -178,7 +186,43 @@ export default class HOpenConnectVpnExtensionAbility extends VpnExtensionAbility
       hilog.error(LOG_DOMAIN, LOG_TAG, 'VPN request rejected %{public}s', message);
       return;
     }
-    if (!this.isLatestWant(
+    this.queueRequest(attemptId, optionsJson, sharedMemory);
+  }
+
+  private receivePlatformHandoff(attemptId: string, handoffToken: string): void {
+    if (attemptId === this.pendingHandoffAttemptId || attemptId === this.inFlightAttemptId ||
+      attemptId === this.activeAttemptId) {
+      return;
+    }
+    this.pendingHandoffAttemptId = attemptId;
+    hilog.info(LOG_DOMAIN, LOG_TAG,
+      'waiting for VPN session FD handoff attempt %{public}s', attemptId);
+    hopenconnectUi.receiveAndAttachPlatformVpnHandoff(handoffToken).then(
+      (payloadJson: string): void => {
+        const payload = JSON.parse(payloadJson) as PlatformVpnHandoffPayload;
+        if (payload.attemptId !== attemptId || typeof payload.optionsJson !== 'string') {
+          throw new Error('VPN session FD handoff payload does not match the bootstrap attempt');
+        }
+        hilog.info(LOG_DOMAIN, LOG_TAG,
+          'received and attached VPN session FD handoff attempt %{public}s', attemptId);
+        this.queueRequest(attemptId, payload.optionsJson);
+      },
+    ).catch((err: Error): void => {
+      hilog.error(LOG_DOMAIN, LOG_TAG,
+        'VPN session FD handoff failed %{public}s', describeError(err));
+    }).finally((): void => {
+      if (this.pendingHandoffAttemptId === attemptId) {
+        this.pendingHandoffAttemptId = '';
+      }
+    });
+  }
+
+  private queueRequest(
+    attemptId: string,
+    optionsJson: string,
+    sharedMemory?: HOpenPlatformSharedMemoryFds,
+  ): void {
+    if (sharedMemory && !this.isLatestWant(
       sharedMemory.ashmemFd,
       sharedMemory.notificationFd,
       attemptId,
@@ -192,11 +236,10 @@ export default class HOpenConnectVpnExtensionAbility extends VpnExtensionAbility
     this.inFlightAttemptId = attemptId;
     this.requestChain = this.requestChain.then(async (): Promise<void> => {
       await this.handleRequest(
-        sharedMemory.ashmemFd,
-        sharedMemory.notificationFd,
         attemptId,
         optionsJson,
         generation,
+        sharedMemory,
       );
     }).catch(async (err: Error): Promise<void> => {
       if (generation !== this.requestGeneration || this.inFlightAttemptId !== attemptId) {
@@ -223,11 +266,10 @@ export default class HOpenConnectVpnExtensionAbility extends VpnExtensionAbility
   }
 
   private async handleRequest(
-    ashmemFd: number,
-    notificationFd: number,
     attemptId: string,
     optionsJson: string,
     generation: number,
+    sharedMemory?: HOpenPlatformSharedMemoryFds,
   ): Promise<void> {
     if (generation !== this.requestGeneration) {
       return;
@@ -238,8 +280,17 @@ export default class HOpenConnectVpnExtensionAbility extends VpnExtensionAbility
     }
     // The UI can supersede a queued request while an older cleanup barrier is
     // settling. Revalidate immediately before any destroy or IPC replacement.
-    if (!this.isLatestWant(ashmemFd, notificationFd, attemptId)) {
-      return;
+    if (sharedMemory) {
+      if (!this.isLatestWant(sharedMemory.ashmemFd, sharedMemory.notificationFd, attemptId)) {
+        return;
+      }
+      // A reused extension may still have an event waiter parked on the previous
+      // UI process's notification socket. Stop it before replacing the IPC pair.
+      this.stopPlatformSubscription();
+      hopenconnectUi.attachPlatformSharedMemory(
+        sharedMemory.ashmemFd,
+        sharedMemory.notificationFd,
+      );
     }
     if (this.activeAttemptId.length > 0 && this.activeAttemptId !== attemptId) {
       await this.destroyVpn();
@@ -249,10 +300,6 @@ export default class HOpenConnectVpnExtensionAbility extends VpnExtensionAbility
       }
     }
 
-    // A reused extension may still have an event waiter parked on the previous
-    // UI process's notification socket. Stop it before replacing the IPC pair.
-    this.stopPlatformSubscription();
-    hopenconnectUi.attachPlatformSharedMemory(ashmemFd, notificationFd);
     const ownerIdentity = hopenconnectUi.bindPlatformVpnStart(attemptId);
     hilog.info(
       LOG_DOMAIN,

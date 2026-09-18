@@ -11,6 +11,12 @@ import { hilog } from '@kit.PerformanceAnalysisKit';
 import hopenconnectUi from 'libhopenconnect_ui.so';
 import { describeError } from '../common/Errors';
 import { buildVpnWant, HOpenPlatformSharedMemoryFds } from '../vpnability/VpnConfig';
+import {
+  authorizeVpnForEmulatorDebug,
+  canRecoverRejectedEmulatorStop,
+  isVpnEmulatorCompatibilityEnabled,
+} from '../vpnability/VpnEmulatorCompatibility';
+import { startVpnExtensionWithHandoff } from '../vpnability/VpnExtensionLauncher';
 
 const LOG_DOMAIN: number = 0x0000;
 const LOG_TAG: string = 'HOpenConnectVpn';
@@ -37,14 +43,16 @@ export class VpnPlugin extends AsyncPluginBase {
   readonly requires: BridgeContextRequirement[] = ['ability'];
 
   private vpnStartRequest: Promise<void> | undefined = undefined;
-  private pendingVpnStartDispatches: Map<string, Promise<void>> = new Map();
   private activeVpnStartAttemptId: string = '';
   private operationGeneration: number = 0;
   private operationChain: Promise<void> = Promise.resolve();
+  private startupVpnPreparation: Promise<void> = Promise.resolve();
   private platformSharedMemory?: HOpenPlatformSharedMemoryFds;
 
   onInstall(_context: BridgePluginHookContext): void {
     this.initializePlatformSharedMemory();
+    authorizeVpnForEmulatorDebug();
+    this.startupVpnPreparation = this.prepareVpnForEmulatorDebug();
   }
 
   async invokeAsync(
@@ -105,6 +113,7 @@ export class VpnPlugin extends AsyncPluginBase {
     optionsJson: string,
     context: BridgePluginContext,
   ): Promise<void> {
+    await this.startupVpnPreparation;
     if (this.vpnStartRequest) {
       return this.vpnStartRequest;
     }
@@ -138,73 +147,36 @@ export class VpnPlugin extends AsyncPluginBase {
     return request;
   }
 
-  private dispatchVpnStart(
-    optionsJson: string,
-    attemptId: string,
-    context: BridgePluginContext,
-    generation: number,
-    intentEpoch: string,
-  ): void {
-    const dispatch = this.runVpnStartDispatch(
-      optionsJson,
-      attemptId,
-      context,
-      generation,
-      intentEpoch,
-    ).catch((err: Error) => {
-      const message = describeError(err) || 'system rejected VPN start';
-      try {
-        hopenconnectUi.failUnattachedPlatformVpnStart(attemptId, message);
-      } catch (innerErr) {
-        hilog.error(
-          LOG_DOMAIN,
-          LOG_TAG,
-          'publish system VPN rejection failed %{public}s',
-          describeError(innerErr),
-        );
-      }
-    });
-    this.pendingVpnStartDispatches.set(attemptId, dispatch);
-    dispatch.finally((): void => {
-      if (this.pendingVpnStartDispatches.get(attemptId) === dispatch) {
-        this.pendingVpnStartDispatches.delete(attemptId);
-      }
-    });
-  }
-
-  private async invokeVpnExtensionStart(optionsJson: string, attemptId: string): Promise<void> {
-    try {
-      await vpnExtension.startVpnExtensionAbility(
-        buildVpnWant(optionsJson, this.platformSharedMemory, attemptId),
-      );
-    } catch (err) {
-      throw new Error(describeError(err) || 'system rejected VPN start');
-    }
-  }
-
-  private async runVpnStartDispatch(
-    optionsJson: string,
-    attemptId: string,
-    _context: BridgePluginContext,
-    generation: number,
-    intentEpoch: string,
-  ): Promise<void> {
-    await this.invokeVpnExtensionStart(optionsJson, attemptId);
-    if (generation !== this.operationGeneration ||
-      !hopenconnectUi.isPlatformVpnIntentCurrent(intentEpoch)) {
+  private async prepareVpnForEmulatorDebug(): Promise<void> {
+    if (!isVpnEmulatorCompatibilityEnabled()) {
       return;
     }
-
-    // The first-authorization dialog on some HarmonyOS builds starts the VPN
-    // Extension with a replacement Want containing only bundleName/abilityName.
-    // Redispatch the original payload unconditionally after the system Promise
-    // resolves. The Extension shared-memory terminal state owns completion.
-    await this.invokeVpnExtensionStart(optionsJson, attemptId);
+    try {
+      const intentEpoch = hopenconnectUi.advancePlatformVpnIntent();
+      await this.enqueueOperation(async (): Promise<void> => {
+        if (!hopenconnectUi.isPlatformVpnIntentCurrent(intentEpoch)) {
+          return;
+        }
+        const recoverableSessionId = hopenconnectUi.claimCurrentPlatformVpnStop(intentEpoch);
+        if (recoverableSessionId.length === 0) {
+          hilog.info(LOG_DOMAIN, LOG_TAG, 'debug startup VPN state is already clean');
+          return;
+        }
+        await this.performStopVpn(recoverableSessionId, intentEpoch, true);
+        hilog.info(LOG_DOMAIN, LOG_TAG,
+          'debug startup VPN cleanup completed for attempt %{public}s', recoverableSessionId);
+      });
+    } catch (err) {
+      // Keep app startup usable and surface a precise failure. A later start
+      // will fail on the still-owned journal instead of silently replacing it.
+      hilog.error(LOG_DOMAIN, LOG_TAG,
+        'debug startup VPN preparation failed %{public}s', describeError(err));
+    }
   }
 
   private async performStartVpn(
     optionsJson: string,
-    context: BridgePluginContext,
+    _context: BridgePluginContext,
     generation: number,
     intentEpoch: string,
   ): Promise<void> {
@@ -214,19 +186,23 @@ export class VpnPlugin extends AsyncPluginBase {
         !hopenconnectUi.isPlatformVpnIntentCurrent(intentEpoch)) {
         throw new Error('VPN start request was superseded');
       }
-      const recoverableSessionId = hopenconnectUi.claimCurrentPlatformVpnStop(intentEpoch);
-      if (recoverableSessionId.length > 0 ||
-        hopenconnectUi.isPlatformVpnStopCurrent(intentEpoch, recoverableSessionId)) {
-        await this.performStopVpn(recoverableSessionId, intentEpoch);
-        if (generation !== this.operationGeneration ||
-          !hopenconnectUi.isPlatformVpnIntentCurrent(intentEpoch)) {
-          throw new Error('VPN start request was superseded');
-        }
-      }
       attemptId = hopenconnectUi.beginPlatformVpnStartForIntent(intentEpoch);
       this.activeVpnStartAttemptId = attemptId;
+      const sharedMemory = this.platformSharedMemory;
+      if (!sharedMemory) {
+        throw new Error('platform shared memory is unavailable');
+      }
 
-      this.dispatchVpnStart(optionsJson, attemptId, context, generation, intentEpoch);
+      // The emulator drops an FD-bearing first VPN Want before it creates the
+      // Extension process. Bootstrap the real system VPN Extension without
+      // descriptors, then deliver the existing shared-memory session to that
+      // live instance. This remains one logical start attempt and never mocks
+      // the VPN lifecycle or tunnel.
+      await startVpnExtensionWithHandoff(optionsJson, attemptId, sharedMemory);
+      if (generation !== this.operationGeneration ||
+        !hopenconnectUi.isPlatformVpnIntentCurrent(intentEpoch)) {
+        throw new Error('VPN start request was superseded');
+      }
 
       const outcome = await hopenconnectUi.awaitPlatformVpnStart(attemptId);
       if (generation !== this.operationGeneration ||
@@ -259,23 +235,29 @@ export class VpnPlugin extends AsyncPluginBase {
   }
 
   private async requestStopVpnWithContext(_context: BridgePluginContext): Promise<void> {
+    await this.startupVpnPreparation;
     const intentEpoch = hopenconnectUi.advancePlatformVpnIntent();
     ++this.operationGeneration;
     const sessionId = hopenconnectUi.claimCurrentPlatformVpnStop(intentEpoch);
     await this.enqueueOperation(async (): Promise<boolean> => {
-      return this.performStopVpn(sessionId, intentEpoch);
+      return this.performStopVpn(sessionId, intentEpoch, false);
     });
   }
 
-  private async performStopVpn(sessionId: string, intentEpoch: string): Promise<boolean> {
+  private async performStopVpn(
+    sessionId: string,
+    intentEpoch: string,
+    recoverUnattachedDebugOwner: boolean,
+  ): Promise<boolean> {
     try {
-      this.pendingVpnStartDispatches.delete(sessionId);
       if (!this.canDispatchPlatformVpnStop(intentEpoch, sessionId)) {
         return false;
       }
       let cleanupObservation: Promise<string> | undefined = undefined;
       let cleanupCompleted = sessionId.length === 0;
-      if (sessionId.length > 0 && hopenconnectUi.requestPlatformVpnStop(sessionId)) {
+      const cooperativeStopRequested = sessionId.length > 0 &&
+        hopenconnectUi.requestPlatformVpnStop(sessionId);
+      if (cooperativeStopRequested) {
         cleanupObservation = hopenconnectUi.awaitPlatformVpnStop(sessionId).then(
           (completed: boolean): string => completed ? 'complete' : 'superseded',
           (err: Error): string => `error:${describeError(err) || 'platform cleanup wait failed'}`,
@@ -308,11 +290,27 @@ export class VpnPlugin extends AsyncPluginBase {
       try {
         await vpnExtension.stopVpnExtensionAbility(buildVpnWant());
       } catch (err) {
-        if (!hopenconnectUi.failPlatformVpnOsStop(intentEpoch, sessionId)) {
-          hilog.error(LOG_DOMAIN, LOG_TAG,
-            'failed to retain exact VPN OS stop fence after system rejection');
+        // The emulator can retain our durable Pending/Stopping owner after a
+        // failed attempt while SettingsData has no active VPN row. In that
+        // exact unattached debug-only case, StopVpnExtensionAbility rejects
+        // without an error payload even though there is nothing left to stop.
+        // Treat that response as an already-stopped confirmation so the exact
+        // stale owner can be released before starting the replacement.
+        const recoverAsAlreadyStopped = canRecoverRejectedEmulatorStop(
+          recoverUnattachedDebugOwner,
+          sessionId,
+          cooperativeStopRequested,
+        );
+        if (!recoverAsAlreadyStopped) {
+          if (!hopenconnectUi.failPlatformVpnOsStop(intentEpoch, sessionId)) {
+            hilog.error(LOG_DOMAIN, LOG_TAG,
+              'failed to retain exact VPN OS stop fence after system rejection');
+          }
+          throw new Error(describeError(err) || 'system rejected VPN stop');
         }
-        throw new Error(describeError(err) || 'system rejected VPN stop');
+        hilog.warn(LOG_DOMAIN, LOG_TAG,
+          'debug startup cleanup found no attached VPN for stale attempt %{public}s; ' +
+          'treating rejected OS stop as already stopped', sessionId);
       }
       if (!hopenconnectUi.completePlatformVpnOsStop(intentEpoch, sessionId)) {
         throw new Error(`VPN OS stop confirmation did not match exact fence ${sessionId}`);
