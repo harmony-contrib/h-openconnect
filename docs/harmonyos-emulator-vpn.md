@@ -2,7 +2,9 @@
 
 本文定义 H-OpenConnect 在 DevEco HarmonyOS 模拟器上启动真实
 `VpnExtensionAbility`、创建系统 TUN 并同步应用状态的标准实现和验收方法。该方案不
-修改系统镜像、不复制系统私有 `.so`、不 mock VPN，也不以单元测试代替真实隧道。
+修改只读 `system` 分区、不复制系统私有 `.so`、不 mock VPN，也不以单元测试代替真实
+隧道；但它会为 debug HAP 更新模拟器 `userdata` 中的 VPN 授权状态，不能描述为“完全
+不修改模拟器配置”。
 
 ## 适用范围
 
@@ -41,14 +43,45 @@ connectAbility failed 2097152
 因此不能把 ashmem FD 或通知 FD 放入用于创建 VPN Extension 的第一个 Want，也不能
 用“延迟后再次调用 VPN start”作为补偿。
 
-### 系统镜像不能直接修改
+### 当前验证环境并非原始 userdata
 
-直接修改镜像中的白名单、系统配置或系统应用会破坏镜像文件校验。复制系统内部
-依赖库到 HAP 还会引入命名空间和 ABI 问题，例如 `libzuri.z.so`、
+最终跑通真实隧道时，模拟器 SettingsData 中已经存在以下授权记录：
+
+```text
+com.richerfu.h_openconnect=1
+com.richerfu.h_openconnect_100=1
+```
+
+这两条记录位于模拟器 `userdata`，表示当前 bundle 及 user 100 已获得 VPN 授权。调试
+期间曾通过离线更新 SettingsData 的方式写入；当前 App 启动时调用的
+`updateVpnAuthorizedState()` 会更新同一类授权状态。因此，本次结果证明的是“授权状态
+已经写入后，真实 VPN Extension/TUN 链路可以工作”，不能据此宣称未经初始化的全新
+模拟器快照也能直接启动 VPN。
+
+如果需要证明 App 能独立完成初始化，必须在恢复出厂或新建的模拟器实例上重新安装
+debug HAP，并确认首次启动就出现系统 `UpdateVpnAuthorize result. ret = 0`，随后真实
+连接成功。现有跑通记录不能代替这项冷启动验证。
+
+### `system` 分区白名单不是当前生效项
+
+排查期间曾修改：
+
+```text
+/system/etc/communication/netmanager_enhanced/vpn/allow_connect_vpn.json
+```
+
+实验内容包括把 `com.richerfu.h_openconnect` 加入 `allowConnectVpnBundleName` 或
+`allowVpnStartWithoutCheckPermissions`。该修改会触发镜像文件校验问题，随后已从当前
+启动链路撤销。当前运行实例的 `system.img.qcow2` 没有已分配的数据区块，仍直接读取
+DevEco 原始 `system.img`；所以最终成功不能归因于这份白名单补丁。
+
+直接修改只读系统镜像中的白名单、系统配置或系统应用会破坏镜像文件校验。复制系统
+内部依赖库到 HAP 还会引入命名空间和 ABI 问题，例如 `libzuri.z.so`、
 `libnet_data_share.z.so` 或 `libc++.so` 的级联加载失败；即使加载成功，也不能因此获得
 系统服务进程中的同一份状态。
 
-这些方式不属于本项目的支持方案。
+这些 `system` 分区修改方式不属于本项目的标准方案；`userdata` 授权初始化则是当前
+模拟器兼容流程的一部分。
 
 ## 标准启动流程
 
@@ -90,6 +123,9 @@ UI 进程                               VPN Extension 进程
 ```text
 updateVpnAuthorizedState(<current bundle name>)
 ```
+
+该调用不是纯内存开关：它会更新模拟器的持久化 VPN 授权配置，作用等价于为当前 bundle
+建立上述 SettingsData 授权状态。这是当前方案明确允许且依赖的模拟器侧修改。
 
 实现必须同时满足：
 
