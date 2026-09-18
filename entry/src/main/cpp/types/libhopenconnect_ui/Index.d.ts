@@ -98,6 +98,15 @@ export interface ColorModeResponse {
 
 }
 
+export interface ExportImageRequest {
+  suggestedName: string
+  pngBase64: string
+}
+
+export interface ExportImageResponse {
+
+}
+
 export interface ExportTextRequest {
   suggestedName: string
   content: string
@@ -105,6 +114,15 @@ export interface ExportTextRequest {
 
 export interface ExportTextResponse {
 
+}
+
+export interface ScanRequest {
+
+}
+
+export interface ScanResponse {
+  /** Empty when the user cancels the system scanner. */
+  content: string
 }
 
 export interface UrlOpenRequest {

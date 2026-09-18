@@ -12,6 +12,7 @@ import { CertFilePlugin } from '../plugins/CertFilePlugin';
 import { ColorModePlugin } from '../plugins/ColorModePlugin';
 import { ExportPlugin } from '../plugins/ExportPlugin';
 import { SafeAreaPlugin } from '../plugins/SafeAreaPlugin';
+import { ScanPlugin } from '../plugins/ScanPlugin';
 import { VpnPlugin } from '../plugins/VpnPlugin';
 
 const LOG_DOMAIN: number = 0x0000;
@@ -37,6 +38,7 @@ export default class EntryAbility extends NativeAbility {
     new LazyPlugin(() => this.createVpnPlugin()),
     new LazyPlugin(() => new ColorModePlugin()),
     new LazyPlugin(() => new ExportPlugin()),
+    new LazyPlugin(() => new ScanPlugin()),
     new LazyPlugin(() => new CertFilePlugin()),
     new LazyPlugin(() => this.createSafeAreaPlugin()),
   ];

@@ -12,7 +12,8 @@ rust-version = "1.89"
 
 [workspace.dependencies]
 hopenconnect_core = { path = "crates/hopenconnect_core", default-features = false }
-arkit = { git = "https://github.com/richerfu/arkit.git", rev = "1d4163f2168a49aba1a6fd8ea6ca81406212c4e9", features = ["router", "shadcn"] }
+arkit = { git = "https://github.com/richerfu/arkit.git", rev = "1d4163f2168a49aba1a6fd8ea6ca81406212c4e9", features = ["router", "shadcn", "barcode"] }
+base64 = "0.23"
 dioxus = { version = "0.7.10", default-features = false, features = ["signals", "hooks", "macro"] }
 napi-build-ohos = "1.2.0"
 napi-derive-ohos = "1.2.0"

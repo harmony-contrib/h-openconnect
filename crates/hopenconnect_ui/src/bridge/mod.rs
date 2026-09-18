@@ -12,6 +12,7 @@ mod cert_file;
 mod color_mode;
 mod export;
 mod safe_area;
+mod scan;
 mod url;
 mod vpn;
 
@@ -24,8 +25,12 @@ pub(crate) use self::cert_file::{CertFileRequest, CertFileResponse, HOpenCertFil
 pub(crate) use self::color_mode::{
     ColorModeRequest, ColorModeResponse, HOpenColorModeBridgePlugin,
 };
-pub(crate) use self::export::{ExportTextRequest, ExportTextResponse, HOpenExportBridgePlugin};
+pub(crate) use self::export::{
+    ExportImageRequest, ExportImageResponse, ExportTextRequest, ExportTextResponse,
+    HOpenExportBridgePlugin,
+};
 pub(crate) use self::safe_area::{initial_safe_area, HOpenSafeAreaBridgePlugin, InitialSafeArea};
+pub(crate) use self::scan::{HOpenScanBridgePlugin, ScanRequest, ScanResponse};
 pub(crate) use self::url::{HOpenUrlBridgePlugin, UrlOpenRequest, UrlOpenResponse};
 pub(crate) use self::vpn::{
     HOpenVpnBridgePlugin, VpnStartRequest, VpnStartResponse, VpnStopRequest, VpnStopResponse,
@@ -230,6 +235,30 @@ pub(crate) async fn export_log(
     )
     .await?;
     Ok(())
+}
+
+pub(crate) async fn export_connection_qr(
+    suggested_name: String,
+    png_bytes: Vec<u8>,
+) -> std::result::Result<(), String> {
+    use base64::Engine as _;
+    let png_base64 = base64::engine::general_purpose::STANDARD.encode(png_bytes);
+    call_async::<HOpenExportBridgePlugin, ExportImageRequest, ExportImageResponse>(
+        "export-image",
+        ExportImageRequest {
+            suggested_name,
+            png_base64,
+        },
+    )
+    .await?;
+    Ok(())
+}
+
+pub(crate) async fn scan_connection_code() -> std::result::Result<String, String> {
+    let response =
+        call_async::<HOpenScanBridgePlugin, ScanRequest, ScanResponse>("scan-qr", ScanRequest {})
+            .await?;
+    Ok(response.content)
 }
 
 /// Ask ArkTS to open the system document picker, copy the selected certificate

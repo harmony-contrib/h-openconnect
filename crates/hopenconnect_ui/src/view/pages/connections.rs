@@ -1,21 +1,37 @@
 use super::super::*;
+use crate::connection_qr::encode_connection_qr;
+use arkit::barcode::{use_barcode, BarcodeOptions, BarcodePhase};
 
 pub(crate) fn connections_page(state: Signal<State>) -> Element {
     let current = state.read().clone();
     let navigator = use_navigator();
+    let export_connection_id = use_signal(|| None::<String>);
     let active_id = current.snapshot.active_connection_id.clone();
     let lifecycle = current.snapshot.lifecycle;
     let connections = current.snapshot.connections.clone();
     let empty = connections.is_empty();
 
     let actions = rsx! {
-        FlatButton {
-            variant: FlatButtonVariant::Ghost,
-            size: ButtonSize::Icon,
-            onclick: move |_| {
-                navigator.push(Route::ConnectionEditor { id: String::new() });
-            },
-            {arkit::icon("plus", 20.0, text_color())}
+        row {
+            FlatButton {
+                variant: FlatButtonVariant::Ghost,
+                size: ButtonSize::Sm,
+                disabled: Some(current.qr_scan_pending),
+                onclick: move |_| dispatch(state, Action::ScanConnectionQr),
+                row {
+                    align_items: "center",
+                    {arkit::icon("scan-qr-code", 17.0, text_color())}
+                    text { content: translate_ui(current.locale, tr::conn_qr_scan()), margin_left: 5.0, font_size: typography::SM, font_color: text_color() }
+                }
+            }
+            FlatButton {
+                variant: FlatButtonVariant::Ghost,
+                size: ButtonSize::Icon,
+                onclick: move |_| {
+                    navigator.push(Route::ConnectionEditor { id: String::new() });
+                },
+                {arkit::icon("plus", 20.0, text_color())}
+            }
         }
     };
 
@@ -55,9 +71,21 @@ pub(crate) fn connections_page(state: Signal<State>) -> Element {
                             selected,
                             is_live,
                             locked,
+                            export_connection_id,
                         }
                     }
                 })}
+            }
+            if let Some(connection) = current.snapshot.connections.iter()
+                .find(|connection| export_connection_id().as_deref() == Some(connection.id.as_str()))
+                .cloned()
+            {
+                ConnectionQrDialog {
+                    key: "{connection.id}",
+                    state,
+                    connection,
+                    export_connection_id,
+                }
             }
         }
     };
@@ -73,12 +101,14 @@ fn ConnectionCard(
     selected: bool,
     is_live: bool,
     locked: bool,
+    mut export_connection_id: Signal<Option<String>>,
 ) -> Element {
     let navigator = use_navigator();
     let id = connection.id.clone();
     let id_for_edit = connection.id.clone();
     let id_for_delete = connection.id.clone();
     let id_for_favorite = connection.id.clone();
+    let id_for_export = connection.id.clone();
     let name = connection.name.clone();
     let server = connection.server.clone();
     let group = if connection.group.is_empty() {
@@ -178,6 +208,12 @@ fn ConnectionCard(
                 FlatButton {
                     variant: FlatButtonVariant::Ghost,
                     size: ButtonSize::Icon,
+                    onclick: move |_| export_connection_id.set(Some(id_for_export.clone())),
+                    {arkit::icon("scan-qr-code", 18.0, text_color())}
+                }
+                FlatButton {
+                    variant: FlatButtonVariant::Ghost,
+                    size: ButtonSize::Icon,
                     disabled: Some(locked),
                     onclick: move |_| {
                         navigator.push(Route::ConnectionEditor { id: id_for_edit.clone() });
@@ -190,6 +226,102 @@ fn ConnectionCard(
                     disabled: Some(locked),
                     onclick: move |_| dispatch(state, Action::DeleteConnection(id_for_delete.clone())),
                     {arkit::icon("trash-2", 18.0, danger())}
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn ConnectionQrDialog(
+    state: Signal<State>,
+    connection: VpnConnection,
+    mut export_connection_id: Signal<Option<String>>,
+) -> Element {
+    let locale = state.read().locale;
+    let encoded = encode_connection_qr(&connection);
+    let payload = encoded.clone().unwrap_or_default();
+    let payload_signal = use_signal(move || payload);
+    let options = use_signal(|| BarcodeOptions::qr(1024));
+    let mut image_export_pending = use_signal(|| false);
+    let code = use_barcode(payload_signal, options);
+    let phase = code.phase();
+    let image_source = code.image();
+    let name = connection.name.clone();
+
+    rsx! {
+        FlatDialog {
+            open: true,
+            on_close: move |_| export_connection_id.set(None),
+            DialogHeader {
+                title: translate_ui(locale, tr::conn_qr_export()),
+                description: Some(connection.name.clone()),
+            }
+            row { height: spacing::MD }
+            text {
+                content: translate_ui(locale, tr::conn_qr_sensitive_hint()),
+                font_size: typography::XS,
+                font_color: subtle(),
+                text_align: "center",
+            }
+            row { height: spacing::MD }
+            column {
+                width: "100%",
+                align_items: "center",
+                if let Some(image_source) = image_source {
+                    image {
+                        src: arkit::dioxus_core::AttributeValue::any_value(image_source),
+                        width: 288.0,
+                        height: 288.0,
+                        object_fit: "contain",
+                    }
+                } else if matches!(&phase, BarcodePhase::Encoding) {
+                    Spinner { size: 28.0, color: Some(text_color()) }
+                } else if encoded.is_err() {
+                    text {
+                        content: translate_ui(locale, tr::conn_qr_export_invalid()),
+                        font_size: typography::SM,
+                        font_color: danger(),
+                        text_align: "center",
+                    }
+                } else if let BarcodePhase::Error(error) = &phase {
+                    text {
+                        content: format!("{} {}", translate_ui(locale, tr::conn_qr_too_large()), error.message()),
+                        font_size: typography::SM,
+                        font_color: danger(),
+                        text_align: "center",
+                    }
+                }
+            }
+            row { height: spacing::MD }
+            row {
+                width: "100%",
+                FlatButton {
+                    variant: FlatButtonVariant::Outline,
+                    onclick: move |_| export_connection_id.set(None),
+                    text { content: translate_ui(locale, tr::cancel()), font_size: typography::SM, font_color: text_color() }
+                }
+                row { layout_weight: 1.0 }
+                FlatButton {
+                    variant: FlatButtonVariant::Primary,
+                    disabled: Some(image_export_pending() || state.read().qr_export_pending || !matches!(&phase, BarcodePhase::Ready(_))),
+                    onclick: move |_| {
+                        image_export_pending.set(true);
+                        let save_name = name.clone();
+                        code.png_bytes_async(move |result| {
+                            image_export_pending.set(false);
+                            match result {
+                                Ok(bytes) => dispatch(state, Action::ExportConnectionQr {
+                                    name: save_name,
+                                    png_bytes: bytes,
+                                }),
+                                Err(error) => dispatch(state, Action::ConnectionQrExported(
+                                    Err(error.message().to_owned())
+                                )),
+                            }
+                        });
+                    },
+                    text { content: translate_ui(locale, tr::conn_qr_save()), font_size: typography::SM, font_color: primary_text() }
                 }
             }
         }

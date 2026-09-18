@@ -1,6 +1,5 @@
-//! `hopenconnect.export` bridge plugin: export text (log archive) to a
-//! user-chosen file through the system document picker with a pre-filled
-//! suggested file name.
+//! `hopenconnect.export` bridge plugin: save log text or a connection QR PNG
+//! through the system document picker with a suggested file name.
 
 use arkit::napi_derive_ohos::napi;
 use arkit::openharmony_ability::{
@@ -31,6 +30,21 @@ impl_bridge_napi_type!(ExportTextRequest, "hopenconnect.ExportTextRequest");
 pub struct ExportTextResponse {}
 
 impl_bridge_napi_type!(ExportTextResponse, "hopenconnect.ExportTextResponse");
+
+#[napi(object)]
+#[derive(Clone, Debug)]
+pub struct ExportImageRequest {
+    pub suggested_name: String,
+    pub png_base64: String,
+}
+
+impl_bridge_napi_type!(ExportImageRequest, "hopenconnect.ExportImageRequest");
+
+#[napi(object)]
+#[derive(Clone, Debug)]
+pub struct ExportImageResponse {}
+
+impl_bridge_napi_type!(ExportImageResponse, "hopenconnect.ExportImageResponse");
 
 #[cfg(test)]
 mod tests {
