@@ -20,6 +20,7 @@ native-anyconnect = ["hopenconnect_core/native-anyconnect"]
 
 [dependencies]
 arkit.workspace = true
+base64.workspace = true
 dioxus.workspace = true
 hopenconnect_core.workspace = true
 libc = "0.2"

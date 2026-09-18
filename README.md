@@ -110,6 +110,8 @@ default routes.
   - Native ArkUI interface for phone, tablet, and 2-in-1 targets.
   - Connection profiles, favorites, live status, traffic statistics,
     diagnostics, and light/dark appearance.
+  - Export a connection as a QR code or PNG image; scan a code to add a new
+    connection with its settings and saved credentials.
   - Opt-in diagnostic recording with bounded live history, UTC daily archives,
     system document export, and protected deletion of inactive archives.
   - English and Simplified Chinese UI.
@@ -119,6 +121,11 @@ Profile data is stored in the application-private directory with restricted
 permissions and is excluded from HarmonyOS backup. Production abilities do not
 accept credentials, trust overrides, or auto-connect instructions through
 `Want` parameters.
+
+A connection QR code contains saved credentials and token secrets in readable
+form. Share it only with a trusted recipient. Certificate file paths are
+included as settings, but certificate files must be selected again on another
+device.
 
 ## Open source
 

@@ -1,4 +1,5 @@
 use crate::bridge;
+use crate::connection_qr::decode_connection_qr;
 use crate::i18n::{tr, translate_ui};
 use crate::locale::UiLocale;
 use crate::model::{
@@ -183,6 +184,13 @@ pub(crate) enum Action {
         result: Result<String, String>,
     },
     SaveDraft,
+    ScanConnectionQr,
+    ConnectionQrScanned(Result<String, String>),
+    ExportConnectionQr {
+        name: String,
+        png_bytes: Vec<u8>,
+    },
+    ConnectionQrExported(Result<(), String>),
     DeleteConnection(String),
     ToggleFavorite(String),
     OpenExternalUrl(String),
@@ -243,6 +251,8 @@ pub(crate) struct State {
     /// Uncommon connection options (hidden unless toggled).
     pub editor_show_advanced: bool,
     pub draft: VpnConnection,
+    pub qr_scan_pending: bool,
+    pub qr_export_pending: bool,
     /// Authentication groups fetched from the draft server's initial form.
     pub group_choices: Vec<AuthFieldChoice>,
     pub group_discovery_loading: bool,
@@ -313,6 +323,8 @@ impl State {
             editor_open: false,
             editor_show_advanced: false,
             draft: VpnConnection::new_draft(),
+            qr_scan_pending: false,
+            qr_export_pending: false,
             group_choices: Vec::new(),
             group_discovery_loading: false,
             group_discovery_error: None,
@@ -945,6 +957,65 @@ pub(crate) fn reduce(state: &mut State, action: Action) -> Command<Action> {
             }
             Command::none()
         }
+        Action::ScanConnectionQr => {
+            if state.qr_scan_pending {
+                return Command::none();
+            }
+            state.qr_scan_pending = true;
+            Command::perform(bridge::scan_connection_code(), Action::ConnectionQrScanned)
+        }
+        Action::ConnectionQrScanned(result) => {
+            state.qr_scan_pending = false;
+            match result {
+                Ok(content) if content.is_empty() => {}
+                Ok(content) => match decode_connection_qr(&content) {
+                    Ok(mut profile) => {
+                        profile.id = new_imported_connection_id(&state.snapshot.connections);
+                        let name = profile.name.clone();
+                        match shared_engine().upsert_profile(profile) {
+                            Ok(()) => {
+                                state.sync_engine();
+                                state.push_toast(format!(
+                                    "{} {}",
+                                    translate_ui(state.locale, tr::conn_qr_added_prefix()),
+                                    name
+                                ));
+                            }
+                            Err(error) => state.push_toast(error.to_string()),
+                        }
+                    }
+                    Err(_) => state.push_toast(translate_ui(state.locale, tr::conn_qr_invalid())),
+                },
+                Err(error) => state.push_toast(format!(
+                    "{} {}",
+                    translate_ui(state.locale, tr::conn_qr_scan_failed_prefix()),
+                    error
+                )),
+            }
+            Command::none()
+        }
+        Action::ExportConnectionQr { name, png_bytes } => {
+            if state.qr_export_pending {
+                return Command::none();
+            }
+            state.qr_export_pending = true;
+            Command::perform(
+                bridge::export_connection_qr(name, png_bytes),
+                Action::ConnectionQrExported,
+            )
+        }
+        Action::ConnectionQrExported(result) => {
+            state.qr_export_pending = false;
+            match result {
+                Ok(()) => state.push_toast(translate_ui(state.locale, tr::conn_qr_saved())),
+                Err(error) => state.push_toast(format!(
+                    "{} {}",
+                    translate_ui(state.locale, tr::conn_qr_save_failed_prefix()),
+                    error
+                )),
+            }
+            Command::none()
+        }
         Action::DeleteConnection(id) => {
             match shared_engine().delete_profile(&id) {
                 Ok(()) => {
@@ -1068,6 +1139,21 @@ pub(crate) fn reduce(state: &mut State, action: Action) -> Command<Action> {
             state.toasts.retain(|toast| toast.id != id);
             Command::none()
         }
+    }
+}
+
+fn new_imported_connection_id(existing: &[VpnConnection]) -> String {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or(0);
+    let mut suffix = 0_u32;
+    loop {
+        let candidate = format!("conn-qr-{nanos}-{suffix}");
+        if !existing.iter().any(|profile| profile.id == candidate) {
+            return candidate;
+        }
+        suffix = suffix.saturating_add(1);
     }
 }
 

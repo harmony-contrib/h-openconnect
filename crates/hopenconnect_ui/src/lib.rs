@@ -7,6 +7,7 @@ use napi_ohos::{bindgen_prelude::Object, Error, Result, Status};
 use std::os::fd::AsRawFd;
 
 mod bridge;
+mod connection_qr;
 mod i18n;
 mod locale;
 mod log_filter;
@@ -23,6 +24,7 @@ mod vpn_handoff;
     bridge::HOpenVpnBridgePlugin,
     bridge::HOpenColorModeBridgePlugin,
     bridge::HOpenExportBridgePlugin,
+    bridge::HOpenScanBridgePlugin,
     bridge::HOpenCertFileBridgePlugin,
     bridge::HOpenSafeAreaBridgePlugin,
 ])]

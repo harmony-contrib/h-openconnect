@@ -17,6 +17,7 @@
 | Home | 连接 | `prepare_connect` → 发布 attempt-scoped ashmem handoff → `requestStartVpn` → 扩展 `prepareVpnInExtension` + `startVpn(fd)` |
 | Home | 断开 | `requestStopVpn` → 扩展 destroy + `Command::Cancel` / platform state clear |
 | Connections | 保存 | `ProfileStore`（密码持久化在禁止备份、权限收紧的应用私有目录） |
+| Connections | 二维码导出、扫码添加 | Arkit 生成二维码并可保存 PNG；ScanKit 扫码后校验版本化配置，分配新 ID 后写入 `ProfileStore`。二维码明文包含已保存凭据，证书文件不会随码转移。 |
 | Statistics | 刷新 | `tick` + 共享 platform state 流量 |
 | More / Logs | 与 Paws 一致的当前/历史分段、关键词与等级筛选、点击查看全文、开始/停止记录、导出/删除历史 | 默认关闭；当前日志与历史归档使用 Arkit RSX 虚拟列表，开启后内存保留 256 条、突发队列最多 4096 条，按 UTC 日期写入应用私有目录；活动归档停止记录后才可删除，导出走系统文档选择器 |
 | More / About | 开源组件、许可、隐私与源码链接 | 展示应用/引擎版本、MIT OR Apache-2.0 双许可、OpenConnect LGPL-2.1-only 归属、主要组件源码入口及本地数据处理说明 |
