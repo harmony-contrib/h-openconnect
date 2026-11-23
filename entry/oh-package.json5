@@ -6,8 +6,8 @@
   "author": "harmony-contrib",
   "license": "MIT OR Apache-2.0",
   "dependencies": {
-    "@ohos-rs/ability": "1.0.0-beta.2",
-    "@ohos-rs/ability-plugin-url": "1.0.0-beta.1",
-    "libhopenconnect_ui.so": "file:./src/main/cpp/types/libhopenconnect_ui"
+    "@nsh/harmonyos": "file:../target/ohos/arkts-deps/nsh",
+    "libhopenconnect_ui.so": "file:./src/main/cpp/types/libhopenconnect_ui",
+    "libnsh_platform_harmonyos.so": "file:./src/main/cpp/types/libnsh_platform_harmonyos"
   }
 }
