@@ -15,6 +15,14 @@
     {
       "name": "grant_internet",
       "value": "H-OpenConnect needs network access to establish secure tunnels."
+    },
+    {
+      "name": "surface_load_failed",
+      "value": "Unable to load interface"
+    },
+    {
+      "name": "surface_retry",
+      "value": "Retry"
     }
   ]
 }
