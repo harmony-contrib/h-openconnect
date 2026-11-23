@@ -2,276 +2,275 @@
 /* eslint-disable */
 
 export interface AvoidArea {
-  visible: boolean;
-  leftRect: AvoidRect;
-  topRect: AvoidRect;
-  rightRect: AvoidRect;
-  bottomRect: AvoidRect;
+  visible: boolean
+  leftRect: AvoidRect
+  topRect: AvoidRect
+  rightRect: AvoidRect
+  bottomRect: AvoidRect
 }
 
 export interface AvoidRect {
-  left: number;
-  top: number;
-  width: number;
-  height: number;
+  left: number
+  top: number
+  width: number
+  height: number
 }
 
 export interface Batch {
-  editors: Array<EditorSettings>;
-  commands: Array<EditorCommand>;
-  removeEditors: Array<number>;
-  views: Array<ViewOptions>;
-  removeViews: Array<number>;
-  webs: Array<WebSettings>;
-  webCommands: Array<WebCommand>;
-  removeWebs: Array<number>;
+  editors: Array<EditorSettings>
+  commands: Array<EditorCommand>
+  removeEditors: Array<number>
+  views: Array<ViewOptions>
+  removeViews: Array<number>
+  webs: Array<WebSettings>
+  webCommands: Array<WebCommand>
+  removeWebs: Array<number>
 }
 
 export interface EditorAccessibility {
-  label: string;
-  hint: string;
-  hidden: boolean;
-  accessible?: boolean;
-  disabled: boolean;
+  label: string
+  hint: string
+  hidden: boolean
+  accessible?: boolean
+  disabled: boolean
 }
 
 /** Focus, selection and scrolling operations ordered after this batch's state updates. */
 export interface EditorCommand {
-  targetId: number;
-  kind: string;
-  start: number;
-  end: number;
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-  animated: boolean;
-  text?: string;
-  actions?: Array<string>;
+  targetId: number
+  kind: string
+  start: number
+  end: number
+  x: number
+  y: number
+  width: number
+  height: number
+  animated: boolean
+  text?: string
+  actions?: Array<string>
 }
 
 export interface EditorEvent {
-  kind: string;
-  x: number;
-  y: number;
-  text: string;
-  count: number;
-  start: number;
-  end: number;
-  width: number;
-  height: number;
-  html?: string;
-  files?: string;
-  image?: string;
+  kind: string
+  x: number
+  y: number
+  text: string
+  count: number
+  start: number
+  end: number
+  width: number
+  height: number
+  html?: string
+  files?: string
+  image?: string
 }
 
 export interface EditorKeyEvent {
-  action: number;
-  keyCode: number;
-  keyText: string;
-  unicode: number;
-  ctrl: boolean;
-  alt: boolean;
-  shift: boolean;
-  cmd: boolean;
-  timestamp: number;
+  action: number
+  keyCode: number
+  keyText: string
+  unicode: number
+  ctrl: boolean
+  alt: boolean
+  shift: boolean
+  cmd: boolean
+  timestamp: number
 }
 
 export interface EditorReceipt {
-  accepted: boolean;
-  count: number;
+  accepted: boolean
+  count: number
 }
 
 export interface EditorSettings {
-  belowViewport: boolean;
-  targetId: number;
-  multiline: boolean;
-  secure: boolean;
-  text: string;
-  count: number;
-  width: number;
-  height: number;
-  placeholder: string;
-  fontSize: number;
-  fontWeight: number;
-  fontFamily?: string;
-  italic: boolean;
-  color: number;
-  placeholderColor: number;
-  caretColor: number;
-  selectionColor: number;
-  editable: boolean;
-  autoCorrect: boolean;
-  reportPaste: boolean;
-  editActions?: boolean;
-  scrollbarVisible: boolean;
-  hitTest: number;
-  align: number;
-  rtl: boolean;
-  capitalize: number;
-  keyboard: string;
-  enterKey: string;
-  blurOnSubmit: boolean;
-  maxLength?: number;
-  autoFill: boolean;
-  contentType?: string;
-  autoFocus: boolean;
-  accessibility?: EditorAccessibility;
+  belowViewport: boolean
+  targetId: number
+  multiline: boolean
+  secure: boolean
+  text: string
+  count: number
+  width: number
+  height: number
+  placeholder: string
+  fontSize: number
+  fontWeight: number
+  fontFamily?: string
+  italic: boolean
+  color: number
+  placeholderColor: number
+  caretColor: number
+  selectionColor: number
+  editable: boolean
+  autoCorrect: boolean
+  reportPaste: boolean
+  editActions?: boolean
+  scrollbarVisible: boolean
+  hitTest: number
+  align: number
+  rtl: boolean
+  capitalize: number
+  keyboard: string
+  enterKey: string
+  blurOnSubmit: boolean
+  maxLength?: number
+  autoFill: boolean
+  contentType?: string
+  autoFocus: boolean
+  accessibility?: EditorAccessibility
 }
 
 export interface HostCommand {
-  system?: SystemCommand;
-  kind: string;
-  enabled?: boolean;
-  lightContent?: boolean;
-  animated?: boolean;
-  text?: string;
-  assertive?: boolean;
-  announcement?: string;
-  elementId?: number;
-  windowId?: number;
-  openId?: number;
-  limit?: number;
-  filters?: Array<string>;
-  url?: string;
+  system?: SystemCommand
+  kind: string
+  enabled?: boolean
+  lightContent?: boolean
+  animated?: boolean
+  text?: string
+  announcement?: string
+  elementId?: number
+  windowId?: number
+  openId?: number
+  limit?: number
+  filters?: Array<string>
+  url?: string
 }
 
 export interface HostInit {
-  speechAvailable: boolean;
-  shareAvailable?: boolean;
-  sdkApiVersion: number;
-  deviceType: string;
-  cacheDir: string;
-  filesDir: string;
-  pixelRatio: number;
-  maxRefreshRate?: number;
-  rtl: boolean;
-  lifecycle: string;
-  colorMode: number;
-  fontSizeScale: number;
-  language: string;
-  languages?: Array<string>;
-  timeZone?: string;
-  regionalLocale?: string;
-  is24HourClock?: boolean;
-  screenReader: boolean;
-  reduceMotion?: boolean;
+  speechAvailable: boolean
+  shareAvailable?: boolean
+  sdkApiVersion: number
+  deviceType: string
+  cacheDir: string
+  filesDir: string
+  pixelRatio: number
+  maxRefreshRate?: number
+  rtl: boolean
+  lifecycle: string
+  colorMode: number
+  fontSizeScale: number
+  language: string
+  languages?: Array<string>
+  timeZone?: string
+  regionalLocale?: string
+  is24HourClock?: boolean
+  screenReader: boolean
+  reduceMotion?: boolean
 }
 
 export interface Menu {
-  generation: number;
-  visible: boolean;
-  x: number;
-  y: number;
-  items: Array<MenuItem>;
+  generation: number
+  visible: boolean
+  x: number
+  y: number
+  items: Array<MenuItem>
 }
 
 export interface MenuAction {
-  targetId: number;
-  action: string;
-  kind?: string;
-  generation?: number;
+  targetId: number
+  action: string
+  kind?: string
+  generation?: number
 }
 
 export interface MenuItem {
-  name: string;
-  label: string;
-  kind: string;
+  name: string
+  label: string
+  kind: string
 }
 
 /**
- * Disk caches use the host's cache directory unless a directory or `disabled`
- * is supplied. Each app keeps its own directory under the cache root.
- */
+  * Disk caches use the host's cache directory unless a directory or `disabled`
+  * is supplied. Each app keeps its own directory under the cache root.
+  */
 export interface NshCacheOptions {
   /** Absolute cache root; omitted follows the host's cache directory. */
-  directory?: string;
+  directory?: string
   /** Disable disk caching. Default false. */
-  disabled?: boolean;
+  disabled?: boolean
   /** Maximum downloaded image size per app, in MiB; zero disables image caching. */
-  imagesMaxMegabytes?: number;
+  imagesMaxMegabytes?: number
 }
 
 /** Capabilities available to the embedding host on this runtime. */
 export interface NshCapabilities {
   /** Actual system API level, independent of surface environment overrides. */
-  apiLevel: number;
+  apiLevel: number
   /** Native Shell's minimum supported system API level. */
-  minimumApiLevel: number;
+  minimumApiLevel: number
   /** API-23 support was included in this library. */
-  compiledApi23: boolean;
+  compiledApi23: boolean
   /** API-26 support was included in this library. */
-  compiledApi26: boolean;
+  compiledApi26: boolean
   /** API-23 enhancements may be used on this runtime. */
-  api23: boolean;
+  api23: boolean
   /** API-26 enhancements may be used on this runtime. */
-  api26: boolean;
+  api26: boolean
 }
 
 /**
- * Environment changes observed by the embedding host. Omitted fields keep
- * their current values. Insets and keyboard height are relative to the surface in vp.
- */
+  * Environment changes observed by the embedding host. Omitted fields keep
+  * their current values. Insets and keyboard height are relative to the surface in vp.
+  */
 export interface NshEnvironment {
   /** Physical pixels per vp (0.25 through 8). */
-  pixelRatio?: number;
+  pixelRatio?: number
   /** Safe inset at the top, in vp. */
-  safeTop?: number;
+  safeTop?: number
   /** Safe inset at the right, in vp. */
-  safeRight?: number;
+  safeRight?: number
   /** Safe inset at the bottom, in vp. */
-  safeBottom?: number;
+  safeBottom?: number
   /** Safe inset at the left, in vp. */
-  safeLeft?: number;
+  safeLeft?: number
   /** Keyboard overlap in vp; zero when hidden. */
-  keyboardHeight?: number;
+  keyboardHeight?: number
   /** Keyboard animation duration in milliseconds. */
-  keyboardDuration?: number;
+  keyboardDuration?: number
   /** Preferred text scale (0.25 through 8). */
-  fontScale?: number;
+  fontScale?: number
   /** System appearance: `light` or `dark`. */
-  colorScheme?: string;
+  colorScheme?: string
   /** BCP 47 locale tag. */
-  locale?: string;
+  locale?: string
   /** Preferred BCP 47 language tags, most preferred first. */
-  languages?: Array<string>;
+  languages?: Array<string>
   /** IANA time zone name (e.g. `Asia/Shanghai`, `UTC`). */
-  timeZone?: string;
+  timeZone?: string
   /** Regional locale identifier or BCP 47 tag with `-u-` extension keywords. */
-  regionalLocale?: string;
+  regionalLocale?: string
   /** Hour cycle preference (`h11`, `h12`, `h23`, `h24`). */
-  hourCycle?: string;
+  hourCycle?: string
   /** First day of week (ISO 8601: 1 for Monday through 7 for Sunday). */
-  firstDayOfWeek?: number;
+  firstDayOfWeek?: number
   /** Measurement system (`metric`, `us`, `uk`). */
-  measurementSystem?: string;
+  measurementSystem?: string
   /** Temperature unit (`celsius`, `fahrenheit`). */
-  temperatureUnit?: string;
+  temperatureUnit?: string
   /** System layout direction. */
-  rtl?: boolean;
+  rtl?: boolean
   /** Reduced motion preference. */
-  reduceMotion?: boolean;
+  reduceMotion?: boolean
   /** Screen reader state. */
-  screenReader?: boolean;
+  screenReader?: boolean
   /** Device category: `phone`, `pad`, `desktop` or `tv`. */
-  idiom?: string;
+  idiom?: string
   /** Window lifecycle: `active`, `inactive` or `background`. */
-  lifecycle?: string;
+  lifecycle?: string
   /** OHOS API level. */
-  apiLevel?: number;
+  apiLevel?: number
 }
 
 /**
- * One changed property of a host native component. A component receives
- * one array per batch; values cross Node-API directly without JSON strings.
- */
+  * One changed property of a host native component. A component receives
+  * one array per batch; values cross Node-API directly without JSON strings.
+  */
 export interface NshNativeProperty {
   /** Property name. */
-  name: string;
+  name: string
   /** Property value; `removed` distinguishes a removed property from null. */
-  value: string | number | boolean | object | null;
+  value: string | number | boolean | object | null
   /** The property was removed. */
-  removed: boolean;
+  removed: boolean
 }
 
 /** Per-surface resources and VM limits selected by the embedding host. */
@@ -280,591 +279,460 @@ export interface NshOptions {
    * Directory containing the build's `assets/` contents.
    * Setting it also disables downloaded-package updates.
    */
-  assetDirectory?: string;
+  assetDirectory?: string
   /** Override this app's storage directory, from the next load. */
-  storageDirectory?: string;
+  storageDirectory?: string
   /** Disk cache policy, from the next load. */
-  cacheOptions?: NshCacheOptions;
+  cacheOptions?: NshCacheOptions
   /** Allow explicit status-bar and fullscreen-video requests to manage window bars. Default true. */
-  managesStatusBar?: boolean;
+  managesStatusBar?: boolean
   /** System observations available before the app starts. */
-  environment?: NshEnvironment;
+  environment?: NshEnvironment
   /** Interpreter stack ceiling in bytes (64 KiB through 4 MiB). */
-  stackBytes?: number;
+  stackBytes?: number
   /** Maximum queued operation values. */
-  maxOpValues?: number;
+  maxOpValues?: number
   /** Maximum operations recorded in one canvas drawing. */
-  maxCanvasOps?: number;
+  maxCanvasOps?: number
   /** Host capability grants, using the `nsh.json` capabilities JSON schema. */
-  capabilities?: string;
+  capabilities?: string
   /** QuickJS heap limit in bytes (at least 1 MiB). */
-  memoryBytes?: number;
+  memoryBytes?: number
   /** Maximum number of shadow nodes (at least one). */
-  maxNodes?: number;
+  maxNodes?: number
   /** Per-call JS time limit in milliseconds (at least one). */
-  callBudgetMs?: number;
+  callBudgetMs?: number
   /** Initial evaluation time limit in milliseconds (at least one). */
-  loadBudgetMs?: number;
+  loadBudgetMs?: number
 }
 
 /** Verified package metadata. Build numbers are decimal strings to preserve u64 precision. */
 export interface NshPackageInfo {
   /** Signed application identifier. */
-  id: string;
+  id: string
   /** Signed display name. */
-  name: string;
+  name: string
   /** Signed version. */
-  version: string;
+  version: string
   /** Signed build number, as decimal text. */
-  build: string;
+  build: string
 }
 
 export interface PickedDescriptor {
-  fd: number;
-  name: string;
+  fd: number
+  name: string
 }
 
 export interface Request {
-  enabled: boolean;
-  close: boolean;
-  min: number;
-  max: number;
-  expected: number;
+  enabled: boolean
+  close: boolean
+  min: number
+  max: number
+  expected: number
 }
 
 /** Typed SDK request; fields cross N-API directly without a JSON envelope. */
 export interface SystemCommand {
-  op: string;
-  paths?: Array<string>;
-  html?: string;
-  text?: string;
-  uri?: string;
-  asset?: string;
-  hasOnly?: boolean;
-  name?: string;
-  title?: string;
-  body?: string;
-  silent?: boolean;
-  count?: number;
-  ask?: boolean;
-  lang?: string;
-  interim?: boolean;
-  volume?: number;
-  rate?: number;
-  looped?: boolean;
-  positionMs?: number;
-  durationMs?: number;
-  ephemeral?: boolean;
+  op: string
+  paths?: Array<string>
+  text?: string
+  uri?: string
+  name?: string
+  title?: string
+  body?: string
+  silent?: boolean
+  count?: number
+  ask?: boolean
+  lang?: string
+  interim?: boolean
+  ephemeral?: boolean
 }
 
 /** Typed completion shared by clipboard, notification and speech services. */
 export interface SystemEvent {
-  permission?: string;
-  shown?: boolean;
-  pressed?: string;
-  has?: boolean;
-  text?: string;
-  html?: string;
-  uri?: string;
-  width?: number;
-  height?: number;
-  tooLarge?: number;
-  files?: string;
-  error?: string;
-  code?: string;
-  phase?: string;
-  final?: boolean;
-  durationMs?: number;
-  positionMs?: number;
-  bytes?: number;
-  truncated?: boolean;
-  buffering?: boolean;
+  permission?: string
+  shown?: boolean
+  pressed?: string
+  has?: boolean
+  text?: string
+  html?: string
+  uri?: string
+  width?: number
+  height?: number
+  tooLarge?: number
+  files?: string
+  error?: string
+  code?: string
+  phase?: string
+  final?: boolean
 }
 
 export interface TextureInsets {
-  left: number;
-  top: number;
-  right: number;
-  bottom: number;
+  left: number
+  top: number
+  right: number
+  bottom: number
 }
 
 export interface ViewOptions {
-  targetId: number;
-  width: number;
-  height: number;
-  hue: number;
-  textureInsets?: TextureInsets;
-  textureSurface?: string;
-  testId?: string;
-  semantic: boolean;
-  clickable: boolean;
-  disabled: boolean;
-  accessible?: boolean;
-  hidden: boolean;
-  label: string;
-  hint: string;
-  value: string;
-  role: string;
-  checked?: boolean;
-  selected: boolean;
-  api23: boolean;
-  api26: boolean;
-  actions: Array<MenuItem>;
-  menu?: Menu;
+  targetId: number
+  width: number
+  height: number
+  textureInsets?: TextureInsets
+  textureSurface?: string
+  testId?: string
+  semantic: boolean
+  clickable: boolean
+  keyFocusable: boolean
+  focusCommandGen: number
+  focusCommandFocus: boolean
+  disabled: boolean
+  accessible?: boolean
+  hidden: boolean
+  label: string
+  hint: string
+  value: string
+  role: string
+  checked?: boolean
+  selected: boolean
+  api23: boolean
+  api26: boolean
+  actions: Array<MenuItem>
+  menu?: Menu
 }
 
 export interface WebCommand {
-  targetId: number;
-  kind: string;
-  url?: string;
-  headers?: Array<WebHeader>;
-  script?: string;
-  x?: number;
-  y?: number;
-  requestId?: string;
-  downloadId?: string;
-  path?: string;
+  targetId: number
+  kind: string
+  url?: string
+  headers?: Array<WebHeader>
+  script?: string
+  x?: number
+  y?: number
+  requestId?: string
+  downloadId?: string
+  path?: string
 }
 
 export interface WebDownload {
-  state: string;
-  id: string;
-  filename: string;
-  path: string;
-  bytes: number;
-  mimeType?: string;
-  method?: string;
-  requestId?: string;
-  ok?: boolean;
-  errorCode?: string;
+  state: string
+  id: string
+  filename: string
+  path: string
+  bytes: number
+  mimeType?: string
+  method?: string
+  requestId?: string
+  ok?: boolean
+  errorCode?: string
 }
 
 export interface WebEvent {
-  targetId: number;
-  phase: string;
-  url: string;
-  title: string;
-  loading: boolean;
-  canGoBack: boolean;
-  canGoForward: boolean;
-  message?: string;
-  code?: number;
-  download?: WebDownload;
+  targetId: number
+  phase: string
+  url: string
+  title: string
+  loading: boolean
+  canGoBack: boolean
+  canGoForward: boolean
+  message?: string
+  code?: number
+  download?: WebDownload
 }
 
 export interface WebHeader {
-  headerKey: string;
-  headerValue: string;
+  headerKey: string
+  headerValue: string
 }
 
 export interface WebSettings {
-  sharedCookies: boolean;
-  clearCookies: boolean;
-  targetId: number;
-  url?: string;
-  html?: string;
-  htmlBaseUrl?: string;
-  loadGeneration: number;
-  javaScriptEnabled: boolean;
-  scrollEnabled: boolean;
-  userAgent?: string;
-  injectedJavascript?: string;
-  documentStartScript: string;
-  downloadDirectory: string;
+  sharedCookies: boolean
+  clearCookies: boolean
+  targetId: number
+  url?: string
+  html?: string
+  htmlBaseUrl?: string
+  loadGeneration: number
+  javaScriptEnabled: boolean
+  scrollEnabled: boolean
+  userAgent?: string
+  injectedJavascript?: string
+  documentStartScript: string
+  urlSchemes: Array<string>
 }
 
 /** Returns compiled enhancements intersected with the running system API level. */
-export declare function getCapabilities(): NshCapabilities;
+export declare function getCapabilities(): NshCapabilities
 
 /** Installs the optional HiLog logger for a development host. */
-export declare function initLogging(): void;
+export declare function initLogging(): void
 
-export declare function nshAttachNativeNode(
-  targetId: number,
-  content: FrameNode,
-): void;
+export declare function nshAttachNativeNode(targetId: number, content: FrameNode): void
 
-export declare function nshAttachNativeSubtree(
-  targetId: number,
-  content: FrameNode,
-  slot: NodeContent,
-): void;
+export declare function nshAttachNativeSubtree(targetId: number, content: FrameNode, slot: NodeContent): void
 
-export declare function nshAttachSubWindow(
-  sessionId: number,
-  windowId: number,
-  content: NodeContent,
-  platformWindowId: number,
-): boolean;
+export declare function nshAttachSubWindow(sessionId: number, windowId: number, content: NodeContent, platformWindowId: number): boolean
 
-export declare function nshCloseSession(sessionId: number): void;
+export declare function nshCloseSession(sessionId: number): void
 
-export declare function nshCreateSession(
-  init: HostInit,
-  platformWindowId: number,
-  resourceManager: object,
-  applyBatch: (batch: Batch) => void,
-  onCommand: (command: HostCommand) => void,
-  tabBar: (context: TabBarContext) => object,
-  frameFactory: (callbacks: {
-    frame(timestamp: number): boolean;
-  }) => (request: object) => void,
-): number;
+export declare function nshCreateSession(init: HostInit, platformWindowId: number, resourceManager: object, applyBatch: (batch: Batch) => void, onCommand: (command: HostCommand) => void, tabBar: (context: TabBarContext) => object, frameFactory: (callbacks: { frame(timestamp: number): boolean }) => (request: object) => void): number
 
-export declare function nshDesktopEvent(
-  sessionId: number,
-  kind: string,
-  payload: string,
-): void;
+export declare function nshDesktopEvent(sessionId: number, kind: string, payload: string): void
 
-export declare function nshEditorEvent(
-  targetId: number,
-  event: EditorEvent,
-): EditorReceipt;
+export declare function nshEditorEvent(targetId: number, event: EditorEvent): EditorReceipt
 
-export declare function nshEditorKeyEvent(
-  targetId: number,
-  event: EditorKeyEvent,
-): boolean;
+export declare function nshEditorKeyEvent(targetId: number, event: EditorKeyEvent): boolean
 
-export declare function nshOpenUrlResult(
-  sessionId: number,
-  openId: number,
-  opened: boolean,
-): void;
+export declare function nshOpenUrlResult(sessionId: number, openId: number, opened: boolean): void
 
-export declare function nshPickImagesResult(
-  sessionId: number,
-  pickId: number,
-  files: Array<PickedDescriptor>,
-): void;
+export declare function nshPickImagesResult(sessionId: number, pickId: number, files: Array<PickedDescriptor>): void
 
-export declare function nshRegisterSessionBinder(
-  sdkApiVersion: number,
-  binder: (uiContext: object) => number,
-  alerts?: (options: object) => () => void,
-): void;
+export declare function nshRegisterSessionBinder(sdkApiVersion: number, binder: (uiContext: object) => number, alerts?: (options: object) => () => void): void
 
-export declare function nshReportHostError(
-  sessionId: number,
-  message: string,
-): void;
+export declare function nshReportHostError(sessionId: number, message: string): void
 
-export declare function nshRetireNativeNode(targetId: number): void;
+export declare function nshRetireNativeNode(targetId: number): void
 
-export declare function nshServiceEvent(
-  sessionId: number,
-  key: number,
-  value: SystemEvent,
-): void;
+export declare function nshServiceEvent(sessionId: number, key: number, value: SystemEvent): void
 
-export declare function nshSetLifecycle(
-  sessionId: number,
-  lifecycle: string,
-): void;
+export declare function nshSetLifecycle(sessionId: number, lifecycle: string): void
 
-export declare function nshUpdateAccessibility(
-  sessionId: number,
-  screenReader?: boolean | undefined | null,
-  reduceMotion?: boolean | undefined | null,
-): void;
+export declare function nshUpdateAccessibility(sessionId: number, screenReader?: boolean | undefined | null, reduceMotion?: boolean | undefined | null): void
 
-export declare function nshUpdateConfig(
-  sessionId: number,
-  colorMode: number,
-  fontSizeScale: number,
-  language: string,
-  rtl: boolean,
-  deviceType?: string | undefined | null,
-  pixelRatio?: number | undefined | null,
-  languages?: Array<string> | undefined | null,
-  timeZone?: string | undefined | null,
-  regionalLocale?: string | undefined | null,
-  is24HourClock?: boolean | undefined | null,
-  fontChanged?: boolean | undefined | null,
-): void;
+export declare function nshUpdateConfig(sessionId: number, colorMode: number, fontSizeScale: number, language: string, rtl: boolean, deviceType?: string | undefined | null, pixelRatio?: number | undefined | null, languages?: Array<string> | undefined | null, timeZone?: string | undefined | null, regionalLocale?: string | undefined | null, is24HourClock?: boolean | undefined | null, fontChanged?: boolean | undefined | null): void
 
-export declare function nshUpdateKeyboard(
-  sessionId: number,
-  duration: number,
-): void;
+export declare function nshUpdateKeyboard(sessionId: number, duration: number): void
 
-export declare function nshUpdateWindow(
-  sessionId: number,
-  platformWindowId: number,
-  visual: Array<AvoidArea>,
-  keyboard: AvoidArea,
-  maxRefreshRate?: number | undefined | null,
-): void;
+export declare function nshUpdateWindow(sessionId: number, platformWindowId: number, visual: Array<AvoidArea>, keyboard: AvoidArea, maxRefreshRate?: number | undefined | null): void
 
-export declare function nshViewAction(action: MenuAction): boolean;
+export declare function nshViewAction(action: MenuAction): boolean
 
-export declare function nshWebControllerAttached(
-  targetId: number,
-  nativeTag: string,
-): boolean;
+export declare function nshWebControllerAttached(targetId: number, nativeTag: string): boolean
 
-export declare function nshWebDownloadAllowed(
-  targetId: number,
-  url: string,
-): boolean;
+export declare function nshWebDownloadAllowed(targetId: number, url: string): boolean
 
-export declare function nshWebEvent(event: WebEvent): boolean;
+export declare function nshWebEvent(event: WebEvent): boolean
 
-export declare function nshWebNavigate(targetId: number, url: string): boolean;
+export declare function nshWebNavigate(targetId: number, url: string): boolean
 
-export declare function onBackPressIntercept(
-  uiContext: import("@ohos.arkui.UIContext").UIContext,
-): boolean;
+export declare function onBackPressIntercept(uiContext: import('@ohos.arkui.UIContext').UIContext): boolean
 
 /** Reply handle for a `host.call(...)` or `host.post(...)` from the app (`nsh/host`). */
 export declare class NshHostReply {
   /** True when the app used `host.post(name, data)` (one-way; `resolve` and `reject` are no-ops). */
-  get isPost(): boolean;
+  get isPost(): boolean
   /** Resolves `host.call(name, data)` with a JSON-serializable value (`null` when omitted). */
-  resolve(value?: string | number | boolean | object | null | undefined): void;
+  resolve(value?: string | number | boolean | object | null | undefined): void
   /** Rejects `host.call(name, data)` with an error message. */
-  reject(message: string): void;
+  reject(message: string): void
 }
 
 /** A verified package that can be consumed by one NshSurface. */
 export declare class NshPackage {
   /** Signed identity and version of the verified package. */
-  get info(): NshPackageInfo;
+  get info(): NshPackageInfo
   /** Whether a surface has consumed this package. */
-  get isConsumed(): boolean;
+  get isConsumed(): boolean
 }
 
 /** A `<Scroll>` of the app watched by the host on the UI thread. */
 export declare class NshScrollHandle {
   /** Whether the scroll view is still mounted with the watched `nativeID`. */
-  get isAlive(): boolean;
+  get isAlive(): boolean
   /** The horizontal scroll offset in vp. */
-  get scrollX(): number;
+  get scrollX(): number
   /** The vertical scroll offset in vp. */
-  get scrollY(): number;
+  get scrollY(): number
   /** The content's width in vp (at least the viewport's). */
-  get contentWidth(): number;
+  get contentWidth(): number
   /** The content's height in vp (at least the viewport's). */
-  get contentHeight(): number;
+  get contentHeight(): number
   /** The visible width in vp. */
-  get viewportWidth(): number;
+  get viewportWidth(): number
   /** The visible height in vp. */
-  get viewportHeight(): number;
+  get viewportHeight(): number
   /** Scrolls by `dx`, `dy`, clamped to the content. */
-  scrollBy(dx: number, dy: number, animated?: boolean | undefined | null): void;
+  scrollBy(dx: number, dy: number, animated?: boolean | undefined | null): void
   /** Ends a fling or an animated scroll where it is. */
-  stopScrolling(): void;
+  stopScrolling(): void
   /**
-   * Calls `listener(scrollX, scrollY, dx, dy)` on every offset change.
-   * Returns a listener id for `removeListener`.
-   */
-  onScroll(
-    listener: (arg0: number, arg1: number, arg2: number, arg3: number) => void,
-  ): number;
+  * Calls `listener(scrollX, scrollY, dx, dy)` on every offset change.
+  * Returns a listener id for `removeListener`.
+  */
+  onScroll(listener: (arg0: number, arg1: number, arg2: number, arg3: number) => void): number
   /**
-   * Calls `listener(contentWidth, contentHeight)` when the content size changes.
-   * Returns a listener id for `removeListener`.
-   */
-  onContentSizeChange(listener: (arg0: number, arg1: number) => void): number;
+  * Calls `listener(contentWidth, contentHeight)` when the content size changes.
+  * Returns a listener id for `removeListener`.
+  */
+  onContentSizeChange(listener: (arg0: number, arg1: number) => void): number
   /** Stops calling listener `id`. */
-  removeListener(id: number): void;
+  removeListener(id: number): void
 }
 
 /**
- * An independently owned Native Shell view. Place `content` in one ContentSlot,
- * load a module, and dispose the instance when its owner releases it.
- */
+  * An independently owned Native Shell view. Place `content` in one ContentSlot,
+  * load a module, and dispose the instance when its owner releases it.
+  */
 export declare class NshSurface {
   /** Creates an empty view bound to `uiContext` with validated per-instance limits and capability grants. */
-  constructor(
-    uiContext: import("@ohos.arkui.UIContext").UIContext,
-    options?: NshOptions | undefined | null,
-  );
+  constructor(uiContext: import('@ohos.arkui.UIContext').UIContext, options?: NshOptions | undefined | null)
   /**
-   * Platform NodeContent for `ContentSlot(surface.content)`. Keep the surface
-   * in an ordinary host field; one instance can occupy one slot at a time.
-   */
-  get content(): import("@ohos.arkui.node").NodeContent;
+  * Platform NodeContent for `ContentSlot(surface.content)`. Keep the surface
+  * in an ordinary host field; one instance can occupy one slot at a time.
+  */
+  get content(): import('@ohos.arkui.node').NodeContent
   /**
-   * Loads trusted source, replacing this instance's app. Loading before layout
-   * stages the source until its ContentSlot has a positive native size.
-   */
-  loadSource(source: string, sourceMap?: string | undefined | null): void;
+  * Loads trusted source, replacing this instance's app. Loading before layout
+  * stages the source until its ContentSlot has a positive native size.
+  */
+  loadSource(source: string, sourceMap?: string | undefined | null): void
   /**
-   * Consumes a verified package and starts it with this instance's grants and limits.
-   * Assets and declared capabilities come from the signed package.
-   */
-  runPackage(package: NshPackage): void;
+  * Consumes a verified package and starts it with this instance's grants and limits.
+  * Assets and declared capabilities come from the signed package.
+  */
+  runPackage(package: NshPackage): void
   /**
-   * Reads a source or precompiled HAP resource and its companion capabilities.
-   * The promise resolves when accepted; JS evaluation errors use the error
-   * handler. A later load, stop, dispose or Ability teardown cancels this load.
-   */
-  loadResource(
-    name: string,
-    sourceMap?: string | undefined | null,
-  ): Promise<void>;
+  * Reads a source or precompiled HAP resource and its companion capabilities.
+  * The promise resolves when accepted; JS evaluation errors use the error
+  * handler. A later load, stop, dispose or Ability teardown cancels this load.
+  */
+  loadResource(name: string, sourceMap?: string | undefined | null): Promise<void>
   /** Starts the Rust app linked into this binary (`nsh_platform_harmonyos::app!`). */
-  runApp(): void;
+  runApp(): void
   /** Whether this binary was built with a linked Rust app (`runApp()`). */
-  get hasApp(): boolean;
+  get hasApp(): boolean
   /**
-   * Stops the app and cancels pending loads, retaining this view and its factories.
-   * A subsequent load starts a fresh engine in the same native view.
-   */
-  stop(): void;
+  * Stops the app and cancels pending loads, retaining this view and its factories.
+  * A subsequent load starts a fresh engine in the same native view.
+  */
+  stop(): void
   /**
-   * Selects this view as the target for system back handling. Pointer/focus
-   * input selects it automatically; hosts may select it when switching tabs.
-   */
-  activate(): void;
+  * Selects this view as the target for system back handling. Pointer/focus
+  * input selects it automatically; hosts may select it when switching tabs.
+  */
+  activate(): void
   /**
-   * Routes a system back press to the window session owning this surface.
-   * Returns `true` if a running Native Shell app consumed the back action.
-   */
-  onBackPress(): boolean;
+  * Routes a system back press to the window session owning this surface.
+  * Returns `true` if a running Native Shell app consumed the back action.
+  */
+  onBackPress(): boolean
   /**
-   * Connects this development view to a server, preserving state through hot updates.
-   * Available in SDK builds with the `dev` feature.
-   */
-  connectDevServer(address: string): void;
+  * Connects this development view to a server, preserving state through hot updates.
+  * Available in SDK builds with the `dev` feature.
+  */
+  connectDevServer(address: string): void
   /** Disconnects the development client, retaining the last loaded module. */
-  disconnectDevServer(): void;
+  disconnectDevServer(): void
   /**
-   * Sets the launch parameters (`host.params` in `nsh/host`) for apps started from now on.
-   * A running app keeps the parameters it started with.
-   */
-  setParams(params?: object | null | undefined): void;
+  * Sets the launch parameters (`host.params` in `nsh/host`) for apps started from now on.
+  * A running app keeps the parameters it started with.
+  */
+  setParams(params?: object | null | undefined): void
   /**
-   * Sends event `name` with `data` to the running app (`host.on(name, listener)` in `nsh/host`).
-   * Events sent before the app listens or starts are queued up to the channel limit.
-   */
-  send(
-    name: string,
-    data?: string | number | boolean | object | null | undefined,
-  ): void;
+  * Sends event `name` with `data` to the running app (`host.on(name, listener)` in `nsh/host`).
+  * Events sent before the app listens or starts are queued up to the channel limit.
+  */
+  send(name: string, data?: string | number | boolean | object | null | undefined): void
   /**
-   * Registers a handler for `host.call(name, data)` and `host.post(name, data)` (`nsh/host`).
-   * Pass `null` or `undefined` to remove the handler for `name`.
-   */
-  handle(
-    name: string,
-    handler?:
-      | ((
-          data: string | number | boolean | object | null,
-          reply: NshHostReply,
-        ) => void)
-      | null
-      | undefined,
-  ): void;
+  * Registers a handler for `host.call(name, data)` and `host.post(name, data)` (`nsh/host`).
+  * Pass `null` or `undefined` to remove the handler for `name`.
+  */
+  handle(name: string, handler?: ((data: string | number | boolean | object | null, reply: NshHostReply) => void) | null | undefined): void
   /** Removes a `nsh/host` call/post handler previously registered with `handle`. */
-  removeHandler(name: string): void;
+  removeHandler(name: string): void
   /**
-   * Intercepts URLs opened by the app (`openUrl` in `nsh/core` and Markdown links)
-   * after scheme checks pass. Return `true` if handled by the host, or `false` to
-   * fall back to the system URL handler. Pass `null` or `undefined` to remove.
-   */
-  setOpenUrlHandler(
-    handler?: ((url: string) => boolean) | null | undefined,
-  ): void;
+  * Intercepts URLs opened by the app (`openUrl` in `nsh/core` and Markdown links)
+  * after scheme checks pass. Return `true` if handled by the host, or `false` to
+  * fall back to the system URL handler. Pass `null` or `undefined` to remove.
+  */
+  setOpenUrlHandler(handler?: ((url: string) => boolean) | null | undefined): void
   /**
-   * Hands `url`, one the embedding Ability was opened with (its launch `Want.uri`
-   * or `onNewWant`), to the running app's `UrlScheme.on("open")` listeners (`nsh`).
-   * While no app runs, the next one loaded gets it.
-   */
-  openUrl(url: string): void;
+  * Hands `url`, one the embedding Ability was opened with (its launch `Want.uri`
+  * or `onNewWant`), to the running app's `UrlScheme.on("open")` listeners (`nsh`).
+  * While no app runs, the next one loaded gets it.
+  */
+  openUrl(url: string): void
   /** Sets this app's storage directory for subsequent loads; omitted follows filesDir. */
-  setStorageDirectory(path?: string | undefined | null): void;
+  setStorageDirectory(path?: string | undefined | null): void
   /** Sets disk cache options for subsequent loads; omitted restores the host's defaults. */
-  setCacheOptions(options?: NshCacheOptions | undefined | null): void;
+  setCacheOptions(options?: NshCacheOptions | undefined | null): void
   /**
-   * Applies the embedding app's theme overrides (a shadcn/ui `cssVars` theme JSON string,
-   * or `null`/`undefined` to restore the app's own theme), taking effect immediately and
-   * for all subsequent loads on this surface.
-   */
-  setThemeOverrides(json?: string | undefined | null): void;
+  * Applies the embedding app's theme overrides (a shadcn/ui `cssVars` theme JSON string,
+  * or `null`/`undefined` to restore the app's own theme), taking effect immediately and
+  * for all subsequent loads on this surface.
+  */
+  setThemeOverrides(json?: string | undefined | null): void
   /**
-   * Registers a font file (TrueType, OpenType, WOFF or WOFF2) the host ships,
-   * so every app this surface loads can name its family in `fontFamily` without
-   * bundling the file. A font registered before a load is in that app's first
-   * frame; one registered while an app runs is used from the next layout.
-   * Registering the same file again does nothing.
-   */
-  registerFont(data: Uint8Array): void;
+  * Registers a font file (TrueType, OpenType, WOFF or WOFF2) the host ships,
+  * so every app this surface loads can name its family in `fontFamily` without
+  * bundling the file. A font registered before a load is in that app's first
+  * frame; one registered while an app runs is used from the next layout.
+  * Registering the same file again does nothing.
+  */
+  registerFont(data: Uint8Array): void
   /**
-   * Watches the `<Scroll>` whose `nativeID` is `native_id` on the UI thread,
-   * calling `watcher` with its `NshScrollHandle` when mounted and `null` when
-   * unmounted. Pass `null` or `undefined` to remove the watcher.
-   */
-  watchScroll(
-    nativeId: string,
-    watcher?: ((scroll: NshScrollHandle | null) => void) | null | undefined,
-  ): void;
+  * Watches the `<Scroll>` whose `nativeID` is `native_id` on the UI thread,
+  * calling `watcher` with its `NshScrollHandle` when mounted and `null` when
+  * unmounted. Pass `null` or `undefined` to remove the watcher.
+  */
+  watchScroll(nativeId: string, watcher?: ((scroll: NshScrollHandle | null) => void) | null | undefined): void
   /** Forwards per-instance environment observations, including before the first load. */
-  setEnvironment(changes: NshEnvironment): void;
+  setEnvironment(changes: NshEnvironment): void
   /** Receives asynchronous load, engine and native mount errors for this instance. */
-  setErrorHandler(handler: (arg: string) => void): void;
+  setErrorHandler(handler: (arg: string) => void): void
   /** Registers a factory on this instance, before or after a module is loaded. */
-  registerComponent(name: string, factory: (id: number) => object): void;
+  registerComponent(name: string, factory: (id: number) => object): void
   /** Removes a factory for future mounts; already mounted widgets keep their owner. */
-  unregisterComponent(name: string): void;
+  unregisterComponent(name: string): void
   /**
-   * Emits to the live component instance identified by its factory handle.
-   * Handles from stopped or replaced engines are rejected.
-   */
-  emitComponentEvent(
-    handle: number,
-    name: string,
-    data: string | number | boolean | object | null,
-  ): void;
+  * Emits to the live component instance identified by its factory handle.
+  * Handles from stopped or replaced engines are rejected.
+  */
+  emitComponentEvent(handle: number, name: string, data: string | number | boolean | object | null): void
   /** Reports a live native component's intrinsic dimensions in vp. */
-  setComponentSize(handle: number, width: number, height: number): void;
+  setComponentSize(handle: number, width: number, height: number): void
   /** Permanently releases this view and its engine. Repeated calls are harmless. */
-  dispose(): void;
+  dispose(): void
   /** Whether the current module's engine is running. */
-  get isRunning(): boolean;
+  get isRunning(): boolean
   /** Whether this instance has been permanently released. */
-  get isDisposed(): boolean;
+  get isDisposed(): boolean
   /**
-   * Whether source is being read or waiting for an attached, positive-size slot.
-   * Evaluation starts asynchronously after this becomes false.
-   */
-  get isLoading(): boolean;
+  * Whether source is being read or waiting for an attached, positive-size slot.
+  * Evaluation starts asynchronously after this becomes false.
+  */
+  get isLoading(): boolean
   /** Latest load, engine or native mount error; cleared by a new accepted source. */
-  get lastError(): string;
+  get lastError(): string
 }
 
 /** A persistent trust store. Each method that accesses its state runs on a worker. */
 export declare class NshTrust {
   /** Opens a private state directory and installs the host's root public keys (base64). */
-  static open(stateDirectory: string, roots: Array<string>): Promise<NshTrust>;
+  static open(stateDirectory: string, roots: Array<string>): Promise<NshTrust>
   /** Adds a root public key without waiting for an in-progress verification on the UI thread. */
-  addRoot(root: string): Promise<void>;
+  addRoot(root: string): Promise<void>
   /** Verifies and persists a newer signed revocation list. Returns its exact sequence number. */
-  updateRevocations(json: string): Promise<string>;
+  updateRevocations(json: string): Promise<string>
   /**
-   * Verifies a downloaded package, extracts assets and persists rollback protection.
-   * Rejection leaves every running surface unchanged.
-   */
-  openPackage(path: string): Promise<NshPackage>;
+  * Verifies a downloaded package, extracts assets and persists rollback protection.
+  * Rejection leaves every running surface unchanged.
+  */
+  openPackage(path: string): Promise<NshPackage>
   /** Verifies a signed HAP rawfile using `uiContext`, or the sole active NSH session when omitted. */
-  openResource(
-    name: string,
-    uiContext?: import("@ohos.arkui.UIContext").UIContext,
-  ): Promise<NshPackage>;
+  openResource(name: string, uiContext?: import('@ohos.arkui.UIContext').UIContext): Promise<NshPackage>
 }
 
 /** Native callback ownership for the system tab bar, scoped to its surface load. */
 export declare class TabBarContext {
   /** The built-in NSH component requested by the engine. */
-  get name(): string;
+  get name(): string
   /** Reports the controlled value selected in a built-in mobile control. */
-  valueChanged(value: any): void;
+  valueChanged(value: any): void
   /** Supplies the intrinsic size in logical points. */
-  size(width: number, height: number): void;
+  size(width: number, height: number): void
   /** Reports the native selection while the component remains mounted. */
-  change(index: number): void;
+  change(index: number): void
   /** Supplies the tab bar's intrinsic height in vp. */
-  height(height: number): void;
+  height(height: number): void
 }
