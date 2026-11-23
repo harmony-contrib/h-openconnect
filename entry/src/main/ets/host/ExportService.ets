@@ -1,3 +1,4 @@
+import { common } from '@kit.AbilityKit';
 import { util } from '@kit.ArkTS';
 import { fileIo, picker } from '@kit.CoreFileKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
@@ -11,6 +12,18 @@ const LOG_TAG: string = 'HOpenConnectExport';
  * system document picker with pre-filled suggested filenames.
  */
 export class ExportService {
+  private readonly context?: common.UIAbilityContext;
+
+  constructor(context?: common.UIAbilityContext) {
+    this.context = context;
+  }
+
+  private createPicker(): picker.DocumentViewPicker {
+    return this.context
+      ? new picker.DocumentViewPicker(this.context)
+      : new picker.DocumentViewPicker();
+  }
+
   async exportLog(suggestedName: string, content: string): Promise<void> {
     if (!content || content.length === 0) {
       throw new Error('log export content is empty');
@@ -19,7 +32,7 @@ export class ExportService {
       .replace(/[\\/:*?"<>|]/g, '_')
       .trim() || 'h-openconnect-log';
     const fileName = baseName.endsWith('.log') ? baseName : `${baseName}.log`;
-    const documentPicker = new picker.DocumentViewPicker();
+    const documentPicker = this.createPicker();
     const options = new picker.DocumentSaveOptions();
     options.newFileNames = [fileName];
     options.fileSuffixChoices = ['Log|.log', 'Text|.txt'];
@@ -58,7 +71,7 @@ export class ExportService {
       .replace(/[\\/:*?"<>|]/g, '_')
       .trim() || 'connection';
     const fileName = baseName.endsWith('.png') ? baseName : `${baseName}.png`;
-    const documentPicker = new picker.DocumentViewPicker();
+    const documentPicker = this.createPicker();
     const options = new picker.DocumentSaveOptions();
     options.newFileNames = [fileName];
     options.fileSuffixChoices = ['PNG|.png'];

@@ -23,6 +23,8 @@ import type { CoreClient } from "./client";
 import {
   DesktopNavigation,
   desktopShortcuts,
+  isSettingsSection,
+  type SettingsSection,
 } from "./desktop-navigation";
 import { workspaceLayout, workspaceLayoutEquals } from "./layout";
 import { isLifecycleConnected, type RuntimeDomain } from "./model";
@@ -57,7 +59,7 @@ import {
   Notifications,
   NotificationViewport,
 } from "./ui/notifications";
-import { Loading } from "./ui/surface";
+import { Badge, Loading } from "./ui/surface";
 import { Tabs } from "./ui/tabs";
 import { chrome, density, focusRing, palette, spacing, typography } from "./ui/tokens";
 import { Workspaces } from "./workspaces";
@@ -104,9 +106,10 @@ function pageDomains(page: Page): RuntimeDomain[] {
 
 function pageMeasure(page: Page, wide: boolean): number {
   if (!wide) return 640;
-  if (page === "home" || page === "statistics") return 960;
-  if (page === "profiles" || page === "logs") return 1120;
-  return 720;
+  if (page === "home") return 960;
+  if (page === "profiles" || page === "statistics") return 1120;
+  if (page === "logs") return 1180;
+  return platform.desktop ? 720 : 640;
 }
 
 function pageRequiredDomains(item: Route): RuntimeDomain[] {
@@ -258,6 +261,14 @@ export function HOpenConnectApp(props: { client: CoreClient }) {
     });
   };
 
+  const switchSettingsSection = (next: SettingsSection) => {
+    if (page() === next) return;
+    requestNavigation(() => {
+      if (workspaces.depth() > 1) workspaces.replace({ name: next });
+      else workspaces.switch(next, () => ({ name: next }));
+    });
+  };
+
   const navigate = (next: Page, query?: string) => {
     requestNavigation(() => {
       if (
@@ -314,7 +325,7 @@ export function HOpenConnectApp(props: { client: CoreClient }) {
     }),
   );
 
-  // Desktop keyboard shortcuts.
+  // Desktop keyboard shortcuts (aligned with Paws PC navigation & refresh).
   if (platform.desktop) {
     for (const shortcut of desktopShortcuts) {
       cleanup(
@@ -328,6 +339,23 @@ export function HOpenConnectApp(props: { client: CoreClient }) {
         if (overlays() === 0) sidebarExpanded.set(!layout().expanded);
       }),
     );
+    cleanup(
+      keymap.bind("mod+n", () => {
+        if (overlays() === 0 && page() !== "profile-editor") {
+          openProfileEditor();
+        }
+      }),
+    );
+    effect(() => {
+      if (page() === "profile-editor") return;
+      cleanup(
+        keymap.bind("mod+r", () => {
+          if (overlays() === 0) {
+            props.client.domains.refresh(pageDomains(page()));
+          }
+        }),
+      );
+    });
   }
 
   const appContext: AppContext = {
@@ -358,13 +386,16 @@ export function HOpenConnectApp(props: { client: CoreClient }) {
     openProfileEditor,
   };
 
+  const wide = () => layout().sidebar;
   const showBack = () => workspaces.depth() > 1;
-  const showBottomBar = () => !layout().sidebar && workspaces.depth() === 1;
-  const isSettingsSubTab = () =>
-    layout().sidebar && (page() === "settings" || page() === "about");
+  const showBottomBar = () => !wide() && workspaces.depth() === 1;
+  const showSettingsBar = () => wide() && isSettingsSection(page());
 
   const headerTitle = () => {
     const current = route();
+    if (wide() && isSettingsSection(current.name)) {
+      return t("设置", "Settings");
+    }
     if (current.name === "profile-editor") {
       return current.query
         ? t("编辑配置", "Edit connection")
@@ -372,6 +403,17 @@ export function HOpenConnectApp(props: { client: CoreClient }) {
     }
     const pair = pageTitles[current.name] ?? ["H-OpenConnect", "H-OpenConnect"];
     return t(pair[0], pair[1]);
+  };
+
+  const confirmClearLogs = () => {
+    void confirmAction(
+      appContext,
+      t("清空当前日志？", "Clear current logs?"),
+      async () => {
+        await props.client.run("logs.clear", {}, t("日志已清空", "Logs cleared"));
+      },
+      { actionLabel: t("清空", "Clear") },
+    );
   };
 
   const scanAndImportProfile = async () => {
@@ -435,11 +477,13 @@ export function HOpenConnectApp(props: { client: CoreClient }) {
             flex: 1,
             flexDirection: "row",
             backgroundColor: palette().background,
+            paddingTop: platform.desktop ? 0 : safeArea().top,
+            paddingBottom: showBottomBar() ? 0 : safeArea().bottom,
             paddingLeft: safeArea().left,
             paddingRight: safeArea().right,
           }}
         >
-          <If when={layout().sidebar}>
+          <If when={wide()}>
             <DesktopNavigation
               page={page()}
               version={props.client.domains.data("about")?.appVersion || "1.0.1"}
@@ -459,7 +503,6 @@ export function HOpenConnectApp(props: { client: CoreClient }) {
             <View
               desktop={platform.desktop ? { windowDrag: true } : undefined}
               style={{
-                paddingTop: platform.desktop ? 0 : safeArea().top,
                 backgroundColor: palette().background,
                 borderBottomWidth: 1,
                 borderBottomColor: palette().line,
@@ -467,14 +510,21 @@ export function HOpenConnectApp(props: { client: CoreClient }) {
             >
               <View
                 style={{
-                  minHeight: platform.desktop
-                    ? Math.max(chrome.toolbar, titleBar().height)
-                    : chrome.header,
-                  paddingHorizontal: layout().inset,
+                  minHeight: Math.max(
+                    wide()
+                      ? Math.max(
+                          chrome.toolbar,
+                          platform.desktop ? titleBar().height : 0,
+                        )
+                      : chrome.header,
+                    density.line(24) * Math.max(1, fontScale()) + spacing.md,
+                  ),
+                  paddingLeft:
+                    (wide() ? layout().inset : spacing.lg) +
+                    (!wide() && platform.desktop ? titleBar().left : 0),
                   paddingRight:
-                    platform.desktop && titleBar().right > 0
-                      ? titleBar().right + 12
-                      : layout().inset,
+                    (wide() ? layout().inset : spacing.lg) +
+                    (platform.desktop ? titleBar().right : 0),
                   flexDirection: "row",
                   alignItems: "center",
                   gap: spacing.sm,
@@ -505,27 +555,19 @@ export function HOpenConnectApp(props: { client: CoreClient }) {
                 >
                   {headerTitle()}
                 </Text>
-                <If when={isSettingsSubTab()}>
-                  <View desktop={platform.desktop ? { windowDrag: false } : undefined}>
-                    <Tabs
-                      inline
-                      size="small"
-                      idPrefix="settings-section"
-                      value={page()}
-                      options={[
-                        { value: "settings", label: t("通用", "General") },
-                        { value: "about", label: t("关于", "About") },
-                      ]}
-                      onChange={(next) => {
-                        const target = next as Page;
-                        requestNavigation(() => {
-                          workspaces.replace({ name: target });
-                        });
-                      }}
-                    />
-                  </View>
-                </If>
                 <View desktop={platform.desktop ? { windowDrag: false } : undefined}>
+                  <If when={wide() && (page() === "home" || page() === "statistics")}>
+                    <Action
+                      id="header-refresh"
+                      small
+                      secondary
+                      icon="refresh-cw"
+                      label={t("刷新", "Refresh")}
+                      onPress={() =>
+                        props.client.domains.refresh(pageDomains(page()))
+                      }
+                    />
+                  </If>
                   <If when={page() === "profiles"}>
                     <View
                       style={{
@@ -534,24 +576,31 @@ export function HOpenConnectApp(props: { client: CoreClient }) {
                         gap: 6,
                       }}
                     >
-                      <Action
-                        id="header-scan-qr"
-                        secondary
-                        small
-                        icon="scan-line"
-                        loading={
-                          props.client.isPending("platform.scanQr") ||
-                          props.client.isPending("profiles.importQr")
-                        }
-                        label={t("扫码", "Scan")}
-                        onPress={() => void scanAndImportProfile()}
-                      />
+                      <If when={props.client.canScanQr}>
+                        <Action
+                          id="header-scan-qr"
+                          secondary
+                          small
+                          icon="scan-line"
+                          loading={
+                            props.client.isPending("platform.scanQr") ||
+                            props.client.isPending("profiles.importQr")
+                          }
+                          label={t("扫码", "Scan")}
+                          onPress={() => void scanAndImportProfile()}
+                        />
+                      </If>
                       <Action
                         id="header-add-profile"
-                        primary
+                        primary={!platform.desktop}
+                        secondary={platform.desktop}
                         small
                         icon="plus"
-                        label={t("新建", "New")}
+                        label={
+                          platform.desktop
+                            ? t("新建连接…", "New connection…")
+                            : t("新建", "New")
+                        }
                         onPress={() => openProfileEditor()}
                       />
                     </View>
@@ -564,11 +613,21 @@ export function HOpenConnectApp(props: { client: CoreClient }) {
                         gap: 6,
                       }}
                     >
+                      <If when={wide()}>
+                        <Badge
+                          tone={logRecording() ? "brand" : "neutral"}
+                          label={
+                            logRecording()
+                              ? t("正在记录", "Recording")
+                              : t("已暂停", "Paused")
+                          }
+                        />
+                      </If>
                       <Action
                         id="logs-toggle-recording"
                         small
-                        stop={logRecording()}
-                        secondary={!logRecording()}
+                        stop={logRecording() && !wide()}
+                        secondary={!logRecording() || wide()}
                         icon={logRecording() ? "stop" : "play"}
                         loading={props.client.isPending("logs.setRecording")}
                         label={
@@ -580,32 +639,70 @@ export function HOpenConnectApp(props: { client: CoreClient }) {
                           logRecordingIntent.set(logRecordingIntent() + 1)
                         }
                       />
-                      <IconButton
-                        id="logs-clear"
-                        small
-                        icon="trash-2"
-                        label={t("清空当前日志", "Clear logs")}
-                        disabled={props.client.isPending("logs.clear")}
-                        onPress={() => {
-                          void confirmAction(
-                            appContext,
-                            t("清空当前日志？", "Clear current logs?"),
-                            async () => {
-                              await props.client.run(
-                                "logs.clear",
-                                {},
-                                t("日志已清空", "Logs cleared"),
-                              );
-                            },
-                            { actionLabel: t("清空", "Clear") },
-                          );
-                        }}
-                      />
+                      <If
+                        when={wide()}
+                        else={
+                          <IconButton
+                            id="logs-clear"
+                            small
+                            icon="trash-2"
+                            label={t("清空当前日志", "Clear logs")}
+                            disabled={
+                              props.client.isPending("logs.clear") ||
+                              (props.client.domains.data("logs")?.entries
+                                .length ?? 0) === 0
+                            }
+                            onPress={confirmClearLogs}
+                          />
+                        }
+                      >
+                        <Action
+                          id="logs-clear"
+                          small
+                          secondary
+                          icon="trash-2"
+                          label={t("清空…", "Clear…")}
+                          disabled={
+                            props.client.isPending("logs.clear") ||
+                            (props.client.domains.data("logs")?.entries
+                              .length ?? 0) === 0
+                          }
+                          onPress={confirmClearLogs}
+                        />
+                      </If>
                     </View>
                   </If>
                 </View>
               </View>
             </View>
+
+            {/* Unified wide-screen Settings section bar (aligned with Paws) */}
+            <If when={showSettingsBar()}>
+              <View
+                testID="settings-section-bar"
+                style={{
+                  width: "100%",
+                  maxWidth: pageMeasure("settings", true),
+                  alignSelf: "center",
+                  paddingHorizontal: layout().inset,
+                  paddingTop: spacing.md,
+                  paddingBottom: spacing.xs,
+                }}
+              >
+                <Tabs
+                  idPrefix="settings-section"
+                  inline={platform.desktop}
+                  value={page()}
+                  options={[
+                    { value: "settings", label: t("外观", "Appearance") },
+                    { value: "about", label: t("关于", "About") },
+                  ]}
+                  onChange={(next) =>
+                    switchSettingsSection(next as SettingsSection)
+                  }
+                />
+              </View>
+            </If>
 
             {/* Independent workspace stacks */}
             <View style={{ flex: 1, minHeight: 0, position: "relative" }}>

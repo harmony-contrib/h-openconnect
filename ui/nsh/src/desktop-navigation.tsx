@@ -72,9 +72,22 @@ export const desktopShortcuts = [
   desktopSettings,
 ].map((item) => ({ key: item.keybinding, page: item.page }));
 
+export type SettingsSection = "settings" | "about";
+
+export function isSettingsSection(page: Page): page is SettingsSection {
+  return page === "settings" || page === "about";
+}
+
 function normalizeDestination(page: Page): Page {
   if (page === "profile-editor") return "profiles";
-  if (page === "about" || page === "privacy") return "settings";
+  if (
+    page === "theme" ||
+    page === "language" ||
+    page === "about" ||
+    page === "privacy"
+  ) {
+    return "settings";
+  }
   return page;
 }
 
@@ -236,7 +249,7 @@ export function DesktopNavigation(props: {
         style={{
           minHeight: platform.desktop
             ? Math.max(chrome.toolbar, titleBar().height)
-            : chrome.toolbar + 4,
+            : chrome.toolbar,
           paddingTop:
             platform.desktop && !expanded() && titleBar().left > 0
               ? titleBar().height
@@ -252,6 +265,40 @@ export function DesktopNavigation(props: {
         <View desktop={platform.desktop ? { windowDrag: false } : undefined}>
           <Button
             testID="desktop-toggle-sidebar"
+            tooltip={
+              !expanded() ? (
+                <Tooltip
+                  style={{
+                    maxWidth: 260,
+                    paddingHorizontal: spacing.sm,
+                    paddingVertical: density.space(4),
+                    borderRadius: radius.sm,
+                    borderCurve: "continuous",
+                    backgroundColor: palette().popover,
+                    borderWidth: 1,
+                    borderColor: palette().border,
+                    flexDirection: "row",
+                    alignItems: "center",
+                    gap: spacing.sm,
+                  }}
+                >
+                  <Text style={{ fontSize: density.font(12), color: palette().text }}>
+                    {props.t("展开导航栏", "Expand sidebar")}
+                  </Text>
+                  <If when={platform.desktop}>
+                    <Text
+                      style={{
+                        fontSize: density.font(11),
+                        color: palette().muted,
+                        fontVariant: ["tabular-nums"],
+                      }}
+                    >
+                      {keymap.label("mod+b")}
+                    </Text>
+                  </If>
+                </Tooltip>
+              ) : undefined
+            }
             accessibilityLabel={
               expanded()
                 ? props.t("收起导航栏", "Collapse sidebar")

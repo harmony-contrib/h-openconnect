@@ -126,6 +126,8 @@ interface InitialDomains {
 interface LaunchParams {
   preferences: UiPreferences;
   deviceType: string;
+  canScanQr: boolean;
+  canGenerateQr: boolean;
   initialDomains?: InitialDomains;
 }
 
@@ -192,7 +194,7 @@ export class HOpenHostServices {
   readonly vpn: VpnService = new VpnService();
   private readonly context: common.UIAbilityContext;
   private readonly certFiles: CertFileService;
-  private readonly exporter: ExportService = new ExportService();
+  private readonly exporter: ExportService;
   private readonly qr: QrService = new QrService();
   private readonly session: UiCommandSession = new UiCommandSession();
   private surface?: NshSurface;
@@ -214,6 +216,7 @@ export class HOpenHostServices {
   constructor(context: common.UIAbilityContext) {
     this.context = context;
     this.certFiles = new CertFileService(context);
+    this.exporter = new ExportService(context);
     this.vpn.attachHost();
   }
 
@@ -253,6 +256,8 @@ export class HOpenHostServices {
       const params: LaunchParams = {
         preferences: prefs,
         deviceType: deviceInfo.deviceType,
+        canScanQr: this.qr.canScanQr(),
+        canGenerateQr: this.qr.canGenerateQr(),
         initialDomains: this.readInitialDomainsSafe(prefs),
       };
       surface.setParams(params);

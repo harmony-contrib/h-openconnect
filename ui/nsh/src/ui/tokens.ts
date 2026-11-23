@@ -49,7 +49,7 @@ export const spacing = {
     return density.space(24);
   },
   get section() {
-    return density.space(20);
+    return density.space(24);
   },
   get region() {
     return density.space(32);
@@ -113,7 +113,7 @@ export const control = {
     return pointer() ? 24 : 36;
   },
   get large() {
-    return pointer() ? 34 : 46;
+    return pointer() ? 34 : 48;
   },
   get icon() {
     return pointer() ? 28 : 40;
@@ -128,6 +128,9 @@ export const control = {
     return pointer() ? 30 : 36;
   },
   get segmentSmall() {
+    return pointer() ? 24 : 32;
+  },
+  get compactHeight() {
     return pointer() ? 24 : 32;
   },
   get box() {

@@ -328,58 +328,86 @@ export function HomePage() {
     );
   };
 
-  const renderSessionSummary = () => {
+  const renderSpeedSection = () => {
     const stats = () => statsData()?.stats;
+    const total = () =>
+      (stats()?.bytesReceived ?? 0) + (stats()?.bytesSent ?? 0);
     return (
-      <View style={{ gap: spacing.section }}>
+      <View style={{ gap: spacing.sm }}>
+        <SectionHeader
+          title={ui.t("速率", "Speed")}
+          meta={
+            connected()
+              ? `${ui.t("本次", "Session")} ${formatBytes(total())}`
+              : undefined
+          }
+        />
         <SpeedGrid
           upload={latestSample()?.txBytesPerSec}
           download={latestSample()?.rxBytesPerSec}
           connected={connected()}
           formatBytes={formatBytes}
         />
-        <Card
-          id="home-session-card"
-          title={ui.t("当前会话", "Current session")}
-          right={
-            <Action
-              id="home-open-stats"
-              variant="link"
-              small
-              label={ui.t("查看统计", "Details")}
-              onPress={() => ui.switchWorkspace("statistics")}
-            />
-          }
-        >
-          <Detail
-            label={ui.t("连接时长", "Duration")}
-            value={
-              connected() ? formatDuration(stats()?.connectedSeconds ?? 0) : "—"
-            }
-          />
-          <Separator />
-          <Detail
-            label={ui.t("分配地址", "Assigned IP")}
-            value={connected() ? stats()?.assignedIp || "—" : "—"}
-          />
-          <Separator />
-          <Detail
-            label={ui.t("网关", "Gateway")}
-            value={connected() ? stats()?.gateway || activeProfile()?.server || "—" : "—"}
-          />
-          <Separator />
-          <Detail
-            label={ui.t("累计流量", "Transferred")}
-            value={
-              connected()
-                ? `${formatBytes(stats()?.bytesReceived ?? 0)} ↓ · ${formatBytes(stats()?.bytesSent ?? 0)} ↑`
-                : "—"
-            }
-          />
-        </Card>
       </View>
     );
   };
+
+  const renderSessionCard = () => {
+    const stats = () => statsData()?.stats;
+    return (
+      <Card
+        id="home-session-card"
+        title={ui.t("当前会话", "Current session")}
+        right={
+          <Action
+            id="home-open-stats"
+            variant="link"
+            small
+            label={ui.t("查看统计", "Details")}
+            onPress={() => ui.switchWorkspace("statistics")}
+          />
+        }
+      >
+        <Detail
+          label={ui.t("连接时长", "Duration")}
+          value={
+            connected() ? formatDuration(stats()?.connectedSeconds ?? 0) : "—"
+          }
+        />
+        <Separator />
+        <Detail
+          label={ui.t("分配地址", "Assigned IP")}
+          value={connected() ? stats()?.assignedIp || "—" : "—"}
+        />
+        <Separator />
+        <Detail
+          label={ui.t("网关", "Gateway")}
+          value={connected() ? stats()?.gateway || activeProfile()?.server || "—" : "—"}
+        />
+        <Separator />
+        <Detail
+          label={ui.t("累计流量", "Transferred")}
+          value={
+            connected()
+              ? `${formatBytes(stats()?.bytesReceived ?? 0)} ↓ · ${formatBytes(stats()?.bytesSent ?? 0)} ↑`
+              : "—"
+          }
+        />
+      </Card>
+    );
+  };
+
+  const renderSessionSummary = () => (
+    <View style={{ gap: spacing.section }}>
+      <SpeedGrid
+        upload={latestSample()?.txBytesPerSec}
+        download={latestSample()?.rxBytesPerSec}
+        connected={connected()}
+        formatBytes={formatBytes}
+      />
+      {renderSessionCard()}
+    </View>
+  );
 
   const renderQuickProfiles = () => (
     <View style={{ gap: spacing.sm }}>
@@ -474,7 +502,7 @@ export function HomePage() {
     >
       <Body>
         <If
-          when={layout().overview && connected()}
+          when={layout().overview}
           else={
             <View style={{ gap: spacing.section }}>
               {renderHeroCard()}
@@ -484,6 +512,11 @@ export function HomePage() {
           }
         >
           <View
+            testID={
+              platform.desktop
+                ? "desktop-home-workspace"
+                : "wide-home-workspace"
+            }
             style={{
               flexDirection: "row",
               gap: layout().gap,
@@ -491,17 +524,22 @@ export function HomePage() {
             }}
           >
             <View
+              testID="home-status-panel"
               style={{
-                width: Math.max(320, layout().connection),
+                width: layout().connection,
                 minWidth: 0,
                 gap: spacing.section,
               }}
             >
               {renderHeroCard()}
-              {renderQuickProfiles()}
+              {renderSpeedSection()}
+              <If when={connected()}>{renderSessionCard()}</If>
             </View>
-            <View style={{ flex: 1, minWidth: 0, gap: spacing.section }}>
-              {renderSessionSummary()}
+            <View
+              testID="home-profiles-panel"
+              style={{ flex: 1, minWidth: 0, gap: spacing.section }}
+            >
+              {renderQuickProfiles()}
             </View>
           </View>
         </If>

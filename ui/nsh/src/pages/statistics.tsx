@@ -144,30 +144,41 @@ export function StatisticsPage() {
       style={{ flex: 1 }}
     >
       <Body>
-        <SpeedGrid
-          upload={latest()?.txBytesPerSec}
-          download={latest()?.rxBytesPerSec}
-          connected={connected()}
-          formatBytes={formatBytes}
-        />
         <If
           when={layout().overview}
           else={
             <View style={{ gap: spacing.section }}>
+              <SpeedGrid
+                upload={latest()?.txBytesPerSec}
+                download={latest()?.rxBytesPerSec}
+                connected={connected()}
+                formatBytes={formatBytes}
+              />
               {renderTrafficCard()}
               {renderNetworkCard()}
             </View>
           }
         >
           <View
+            testID="statistics-wide-workspace"
             style={{
               flexDirection: "row",
               gap: layout().gap,
               alignItems: "flex-start",
             }}
           >
-            <View style={{ flex: 1, minWidth: 0 }}>{renderTrafficCard()}</View>
-            <View style={{ flex: 1, minWidth: 0 }}>{renderNetworkCard()}</View>
+            <View style={{ flex: 1, minWidth: 0, gap: spacing.section }}>
+              <SpeedGrid
+                upload={latest()?.txBytesPerSec}
+                download={latest()?.rxBytesPerSec}
+                connected={connected()}
+                formatBytes={formatBytes}
+              />
+              {renderTrafficCard()}
+            </View>
+            <View style={{ flex: 1, minWidth: 0, gap: spacing.section }}>
+              {renderNetworkCard()}
+            </View>
           </View>
         </If>
       </Body>

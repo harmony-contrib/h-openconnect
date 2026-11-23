@@ -177,7 +177,14 @@ export class MockHOpenHost {
     this.appRef = app;
   }
 
-  hostOptions(options: { seedInitialDomains?: boolean } = {}): HostOptions {
+  hostOptions(
+    options: {
+      seedInitialDomains?: boolean;
+      deviceType?: string;
+      canScanQr?: boolean;
+      canGenerateQr?: boolean;
+    } = {},
+  ): HostOptions {
     const initialDomains = options.seedInitialDomains
       ? {
           config: this.queryDomain(0, "config").data,
@@ -190,6 +197,15 @@ export class MockHOpenHost {
     return {
       params: {
         preferences: this.preferences,
+        ...(options.deviceType !== undefined
+          ? { deviceType: options.deviceType }
+          : {}),
+        ...(options.canScanQr !== undefined
+          ? { canScanQr: options.canScanQr }
+          : {}),
+        ...(options.canGenerateQr !== undefined
+          ? { canGenerateQr: options.canGenerateQr }
+          : {}),
         ...(initialDomains ? { initialDomains } : {}),
       },
       handlers: {

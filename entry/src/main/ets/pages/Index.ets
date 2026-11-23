@@ -1,22 +1,13 @@
-import { NshOptions, NshSurface } from '@nsh/harmonyos';
+import { NshSurface } from '@nsh/harmonyos';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import BuildProfile from 'BuildProfile';
 import { describeError } from '../common/Errors';
 import { hopenHost } from '../host/HOpenHostServices';
 
-const SURFACE_CAPABILITIES: string =
-  '{"application":true,"clipboard":true,"statusBar":true,"openUrl":{"schemes":["https","http"]},"host":["core.*","platform.*"]}';
-
-function createSurfaceOptions(): NshOptions {
-  return {
-    capabilities: SURFACE_CAPABILITIES,
-  };
-}
-
 @Entry
 @Component
 struct Index {
-  private surface: NshSurface = new NshSurface(this.getUIContext(), createSurfaceOptions());
+  private surface: NshSurface = new NshSurface(this.getUIContext());
   private contentMounted: boolean = false;
   @State loadError: string = '';
   @State loadFailed: boolean = false;

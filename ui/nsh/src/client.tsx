@@ -1,4 +1,4 @@
-import { batch, host, signal } from "nsh";
+import { batch, host, platform, signal } from "nsh";
 import { DomainStore } from "./domain-store";
 import { sanitizeDisplayText } from "./locale";
 import type {
@@ -63,6 +63,9 @@ const DEFAULT_PREFS: PreferencesSnapshot = {
 export class CoreClient {
   readonly transport: CoreTransport;
   readonly domains: DomainStore;
+  readonly deviceType: string;
+  readonly canScanQr: boolean;
+  readonly canGenerateQr: boolean;
   readonly preferences = signal<PreferencesSnapshot>(DEFAULT_PREFS, {
     equals: (prev, next) =>
       prev.language === next.language &&
@@ -81,6 +84,18 @@ export class CoreClient {
 
   constructor(transport?: CoreTransport) {
     this.transport = transport ?? new NshHostTransport();
+    const rawDeviceType = this.transport.params?.deviceType;
+    this.deviceType =
+      typeof rawDeviceType === "string" && rawDeviceType.length > 0
+        ? rawDeviceType
+        : platform.desktop
+          ? "2in1"
+          : "phone";
+    const rawCanScan = this.transport.params?.canScanQr;
+    this.canScanQr =
+      typeof rawCanScan === "boolean" ? rawCanScan : !platform.desktop;
+    const rawCanGen = this.transport.params?.canGenerateQr;
+    this.canGenerateQr = typeof rawCanGen === "boolean" ? rawCanGen : true;
     const initialPrefs = this.transport.params?.preferences as
       | Partial<PreferencesSnapshot>
       | undefined;

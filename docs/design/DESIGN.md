@@ -14,9 +14,13 @@ This repository maintains both the design reference documentation and an interac
 
 ## Design Principles
 
-1. **Dual Density Tiers**:
-   - **Touch Tier (Phone & Pad)**: 40pt regular / 36pt small buttons, 46pt inputs & Select triggers, 46pt sheet rows / 36pt Pad popover rows.
-   - **Pointer Tier (HarmonyOS 2-in-1 / PC)**: 28pt regular / 24pt small buttons, 32pt inputs & Select triggers, 26pt anchored menu rows.
+1. **Dual Density Tiers & Multi-Device Form Factors (Paws Parity)**:
+   - **Touch Tier (Phone & Pad)**: 40pt regular / 36pt small buttons, 46pt inputs & 44pt Select triggers, 46pt sheet rows / 36pt Pad popover rows. Pad stays on the Touch tier even with a keyboard attached (`!platform.desktop`).
+   - **Pointer Tier (HarmonyOS 2-in-1 / PC)**: 28pt regular / 24pt small buttons, 32pt inputs & Select triggers, 26pt anchored menu rows, 40pt list rows, 7pt control / 10pt card radii.
+   - **Phone (`< 600pt`, touch)**: 4-tab bottom navigation (`Overview / Connections / Statistics / Settings`), single-column content, native `BottomSheet`, Theme & Language as secondary push pages.
+   - **Pad Portrait (`600–839pt`, touch)**: 4-tab bottom navigation (`maxWidth: 640`), anchored floating `<Popover>` for `Select`/`ObjectMenu` at `>= 768pt`, `BottomSheet` promoted to centered `Dialog` at `>= 768pt`.
+   - **Pad Landscape (`>= 840pt`, touch)**: Left navigation rail (`64pt` for `840–1099pt`, `232pt` sidebar at `>= 1100pt`, toggleable), `48pt` unified toolbar aligned with status-bar safe area across sidebar & content, persistent 2-column Overview (`home-status-panel` + `home-profiles-panel` even when disconnected), Master-Detail Connections, 2-column Statistics, persistent split-pane Logs inspector, and unified Settings section bar (`Appearance` inline + `About`).
+   - **HarmonyOS 2-in-1 / PC (`platform.desktop`)**: Seamless `48pt` window-draggable toolbar (`window.titleBar.style = "hidden"`), `titleBar().left/right` clearance for OS window buttons, left sidebar (`232pt` standard, `64pt` icon rail below `800pt` — never collapses to bottom tabs), `secondary` small toolbar buttons, right-click `ContextMenu`, closable `330pt` Logs inspector drawer + inline filter toolbar, keyboard shortcuts (`Mod+1..4`, `Mod+,`, `Mod+B`, `Mod+R`, `Mod+N`, `Escape`), single-instance `nsh.secondInstance` handling, and ScanKit camera scanning automatically hidden when unsupported (`canScanQr = false`).
 2. **Overflow-Proof Controls**:
    - Multi-word 3–4 option pickers (such as Authentication Method and Split-Tunnel Mode in the Profile Editor) use the controlled `<Select>` component (native Bottom Sheet on Phone, anchored Popover on `>= 768pt`), preventing horizontal clipping on 390pt phones, English locale, and scaled typography.
    - Segmented controls are reserved for compact 2–5 short-label tabs (e.g. `Current / Archives`, `All / Info / Warn / Error / Debug`, `System / Light / Dark`).

@@ -173,11 +173,8 @@ test("profile CRUD, dirty draft leave guard and delete confirmation", async () =
   await app.press("id:dialog-close");
   await app.waitFor("id:export-profile-qr", { state: "gone" });
 
-  await app.press("id:header-scan-qr");
-  await app.waitUntil(() =>
-    host.commands.some((c) => c.command === "profiles.importQr"),
-  );
-  expect(app.texts().some((t) => t.includes("Scanned Branch"))).toBe(true);
+  // Desktop 2-in-1 hides camera-only QR scanning cleanly when unsupported.
+  expect(app.shows("id:header-scan-qr")).toBe(false);
 
   await app.press("id:profile-row-lab-sg");
   await app.waitFor("id:detail-delete-profile");
@@ -189,6 +186,171 @@ test("profile CRUD, dirty draft leave guard and delete confirmation", async () =
     ),
   );
   await app.waitFor("id:profile-row-lab-sg", { state: "gone" });
+});
+
+test("Pad portrait & landscape align with Paws touch-tier split-pane, popovers, and unified settings", async () => {
+  const host = new MockHOpenHost({ language: "zh-CN" });
+  const pad = await open("../App.tsx", {
+    platform: "ios",
+    width: 1024,
+    height: 768,
+    locale: "zh-CN",
+    host: host.hostOptions({
+      seedInitialDomains: true,
+      deviceType: "tablet",
+      canScanQr: true,
+    }),
+  });
+  host.attachApp(pad);
+
+  // Pad landscape (1024 >= 840): sidebar rail + always-2-col overview even when disconnected.
+  await pad.waitFor("id:wide-home-workspace");
+  expect(pad.shows("id:desktop-sidebar")).toBe(true);
+  expect(pad.shows("id:bottom-navigation")).toBe(false);
+  expect(pad.shows("id:home-status-panel")).toBe(true);
+  expect(pad.shows("id:home-profiles-panel")).toBe(true);
+  expect(pad.shows("id:header-refresh")).toBe(true);
+  assertNoVpnCopy(pad.texts(), "pad/home");
+
+  // Profiles master-detail + camera QR scan button available on tablet.
+  await pad.press("id:nav-profiles");
+  await pad.waitFor("id:profiles-master-detail");
+  expect(pad.shows("id:profile-detail-card")).toBe(true);
+  expect(pad.shows("id:header-scan-qr")).toBe(true);
+  await pad.press("id:header-scan-qr");
+  await pad.waitUntil(() =>
+    host.commands.some((c) => c.command === "profiles.importQr"),
+  );
+  expect(pad.texts().some((t) => t.includes("Scanned Branch"))).toBe(true);
+
+  // Editor Select opens anchored Popover on Pad (>= 768pt) and survives resizing to Pad portrait.
+  await pad.press("id:header-add-profile");
+  await pad.waitFor("id:editor-name");
+  await pad.type("id:editor-name", "Pad Draft");
+  await pad.press("id:editor-auth-method");
+  await pad.waitFor("id:select-popover");
+  expect(pad.shows("id:select-option-saml")).toBe(true);
+  await pad.keyboard.press("escape");
+  await pad.waitFor("id:select-popover", { state: "gone" });
+
+  // Resize from Pad landscape (1024) to Pad portrait (768) preserves form draft.
+  await pad.setViewport(768, 1024);
+  expect(pad.value("id:editor-name")).toBe("Pad Draft");
+  expect(pad.shows("id:desktop-sidebar")).toBe(false);
+
+  // Dismiss draft and return to Pad landscape.
+  pad.onDialog((dlg) => dlg.buttons[dlg.buttons.length - 1]);
+  await pad.press("id:nav-back");
+  await pad.waitFor("id:profiles-list");
+  expect(pad.shows("id:bottom-navigation")).toBe(true);
+
+  await pad.setViewport(1180, 820);
+  await pad.waitFor("id:desktop-sidebar");
+
+  // Pad landscape Statistics 2-col layout.
+  await pad.press("id:nav-statistics");
+  await pad.waitFor("id:statistics-wide-workspace");
+  assertNoVpnCopy(pad.texts(), "pad/statistics");
+
+  // Pad landscape Logs persistent split-pane inspector.
+  await pad.press("id:nav-logs");
+  await pad.waitFor("id:logs-list");
+  await pad.waitFor("id:log-inspector-copy");
+  assertNoVpnCopy(pad.texts(), "pad/logs");
+
+  // Pad landscape Settings unified section bar (Appearance inline + About tab).
+  await pad.press("id:nav-settings");
+  await pad.waitFor("id:settings-section-bar");
+  expect(pad.shows("id:pref-theme-dark")).toBe(true);
+  expect(pad.shows("id:pref-language-en")).toBe(true);
+  assertNoVpnCopy(pad.texts(), "pad/settings");
+  await pad.press("id:settings-section-about");
+  await pad.waitFor("id:about-version-card");
+  expect(pad.shows("id:settings-section-bar")).toBe(true);
+  assertNoVpnCopy(pad.texts(), "pad/about");
+});
+
+test("PC desktop shell, shortcuts, context menu, narrow-window rail, and closable log inspector", async () => {
+  const host = new MockHOpenHost({ language: "zh-CN" });
+  const pc = await open("../App.tsx", {
+    platform: "windows",
+    width: 1280,
+    height: 900,
+    locale: "zh-CN",
+    host: host.hostOptions({
+      seedInitialDomains: true,
+      deviceType: "2in1",
+      canScanQr: false,
+    }),
+  });
+  host.attachApp(pc);
+
+  // PC standard (1280x900): sidebar + 2-col overview even when disconnected.
+  await pc.waitFor("id:desktop-home-workspace");
+  expect(pc.shows("id:desktop-sidebar")).toBe(true);
+  expect(pc.shows("id:bottom-navigation")).toBe(false);
+  expect(pc.shows("id:header-refresh")).toBe(true);
+  assertNoVpnCopy(pc.texts(), "pc/home");
+
+  // Keyboard shortcuts: Mod+2 -> Profiles, right-click ContextMenu -> Edit.
+  await pc.keyboard.press("mod+2");
+  await pc.waitFor("id:profiles-master-detail");
+  expect(pc.shows("id:header-scan-qr")).toBe(false);
+  await pc.rightClick("id:profile-row-lab-sg");
+  await pc.waitFor("id:profile-edit-lab-sg");
+  await pc.press("id:profile-edit-lab-sg");
+  await pc.waitFor("id:editor-name");
+  await pc.type("id:editor-name", " Updated");
+
+  // Narrow PC window (620x760 & 390x844) NEVER collapses to bottom tabs and keeps draft intact.
+  await pc.setViewport(620, 760);
+  expect(pc.shows("id:desktop-sidebar")).toBe(true);
+  expect(pc.shows("id:bottom-navigation")).toBe(false);
+  expect(pc.value("id:editor-name")).toContain("Updated");
+
+  await pc.setViewport(390, 844);
+  expect(pc.shows("id:desktop-sidebar")).toBe(true);
+  expect(pc.shows("id:bottom-navigation")).toBe(false);
+
+  // Restore to 1280x900 and discard draft via nav-back.
+  await pc.setViewport(1280, 900);
+  pc.onDialog((dlg) => dlg.buttons[dlg.buttons.length - 1]);
+  await pc.press("id:nav-back");
+  await pc.waitFor("id:profiles-master-detail");
+
+  // Mod+N opens new profile editor directly on PC.
+  await pc.keyboard.press("mod+n");
+  await pc.waitFor("id:editor-name");
+  expect(pc.value("id:editor-name")).toBe("");
+  await pc.press("id:nav-back");
+  await pc.waitFor("id:profiles-master-detail");
+
+  // Mod+4 -> Logs with closable 330pt inspector drawer.
+  await pc.keyboard.press("mod+4");
+  await pc.waitFor("id:logs-list");
+  expect(pc.shows("id:logs-inspector")).toBe(false);
+  await pc.press("id:log-row-2026-11-23T10:00:09Z");
+  await pc.waitFor("id:logs-inspector");
+  await pc.press("id:log-inspector-copy");
+  expect(pc.clipboard()).toContain("Gateway rejected expired token");
+  await pc.press("id:dialog-close");
+  await pc.waitFor("id:logs-inspector", { state: "gone" });
+  assertNoVpnCopy(pc.texts(), "pc/logs");
+
+  // Mod+, -> Unified Settings section bar on PC.
+  await pc.keyboard.press("mod+,");
+  await pc.waitFor("id:settings-section-bar");
+  expect(pc.shows("id:pref-theme-dark")).toBe(true);
+  expect(pc.shows("id:pref-language-en")).toBe(true);
+  await pc.press("id:settings-section-about");
+  await pc.waitFor("id:about-version-card");
+  assertNoVpnCopy(pc.texts(), "pc/settings-about");
+
+  // Mod+B toggles sidebar without losing the sidebar chrome.
+  await pc.keyboard.press("mod+b");
+  expect(pc.shows("id:desktop-sidebar")).toBe(true);
+  await pc.keyboard.press("mod+1");
+  await pc.waitFor("id:desktop-home-workspace");
 });
 
 test("Paws-aligned logs page: recording, level filter, inspector, archives and clear", async () => {

@@ -43,6 +43,7 @@ export function workspaceLayout(
     detailMin,
     overview,
     connection,
+    tableDetails: usable >= 800 * textScale,
   };
 }
 
@@ -65,6 +66,7 @@ export function workspaceLayoutEquals(
     previous.collectionMin === next.collectionMin &&
     previous.detailMin === next.detailMin &&
     previous.overview === next.overview &&
-    previous.connection === next.connection
+    previous.connection === next.connection &&
+    previous.tableDetails === next.tableDetails
   );
 }

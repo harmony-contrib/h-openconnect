@@ -29,6 +29,102 @@ const OPENCONNECT_LICENSE_URL =
   "https://www.gnu.org/licenses/old-licenses/lgpl-2.1.html";
 const NSH_URL = "https://github.com/longbridge/nsh";
 
+function ThemeOptionsSection() {
+  const ui = useApp();
+  const prefs = () => ui.client.preferences();
+
+  const setTheme = (theme: string) => {
+    const previous = ui.client.preferences();
+    ui.client.preferences.set({
+      ...previous,
+      theme: theme as ThemePreference,
+    });
+    void ui.client
+      .run("preferences.set", {
+        theme: theme as ThemePreference,
+      })
+      .then((res) => {
+        if (!res) ui.client.preferences.set(previous);
+      });
+  };
+
+  return (
+    <View style={{ gap: spacing.sm }}>
+      <SectionHeader title={ui.t("外观主题", "Appearance")} />
+      <ListSurface>
+        <RadioGroup
+          idPrefix="pref-theme"
+          insetRow
+          label={ui.t("外观主题", "Appearance")}
+          value={prefs().theme}
+          options={[
+            { value: "system", label: ui.t("跟随系统", "System") },
+            { value: "light", label: ui.t("浅色", "Light") },
+            { value: "dark", label: ui.t("深色", "Dark") },
+          ]}
+          onChange={setTheme}
+        />
+      </ListSurface>
+      <View style={{ paddingHorizontal: spacing.xxs }}>
+        <Hint
+          text={ui.t(
+            "选择「跟随系统」时，界面会自动适配设备的浅色与深色模式。",
+            "When set to System, the interface follows your device appearance automatically.",
+          )}
+        />
+      </View>
+    </View>
+  );
+}
+
+function LanguageOptionsSection() {
+  const ui = useApp();
+  const prefs = () => ui.client.preferences();
+
+  const setLanguage = (language: string) => {
+    const previous = ui.client.preferences();
+    ui.client.preferences.set({
+      ...previous,
+      language: language as LanguagePreference,
+    });
+    void ui.client
+      .run("preferences.set", {
+        language: language as LanguagePreference,
+      })
+      .then((res) => {
+        if (!res) ui.client.preferences.set(previous);
+      });
+  };
+
+  return (
+    <View style={{ gap: spacing.sm }}>
+      <SectionHeader title={ui.t("显示语言", "Display language")} />
+      <ListSurface>
+        <RadioGroup
+          idPrefix="pref-language"
+          insetRow
+          label={ui.t("显示语言", "Display language")}
+          value={prefs().language}
+          options={[
+            { value: "system", label: ui.t("跟随系统", "System") },
+            { value: "zh-CN", label: "简体中文" },
+            { value: "en", label: "English" },
+          ]}
+          onChange={setLanguage}
+        />
+      </ListSurface>
+      <View style={{ paddingHorizontal: spacing.xxs }}>
+        <Hint
+          text={ui.t(
+            "切换语言后界面文案将立即更新，无需重启应用。",
+            "Interface copy updates immediately without restarting the app.",
+          )}
+        />
+      </View>
+    </View>
+  );
+}
+
 export function SettingsPage() {
   const ui = useApp();
   const layout = useLayout();
@@ -64,52 +160,60 @@ export function SettingsPage() {
       style={{ flex: 1 }}
     >
       <Body>
-        <View style={{ gap: spacing.sm }}>
-          <SectionHeader title={ui.t("偏好", "Preferences")} />
-          <ListSurface>
-            <ListRow
-              id="settings-open-theme"
-              icon="palette"
-              title={ui.t("主题", "Theme")}
-              value={themeSummary()}
-              chevron
-              divider
-              onPress={() => ui.navigate("theme")}
-            />
-            <ListRow
-              id="settings-open-language"
-              icon="globe"
-              title={ui.t("语言", "Language")}
-              value={languageSummary()}
-              chevron
-              onPress={() => ui.navigate("language")}
-            />
-          </ListSurface>
-        </View>
+        <If
+          when={layout().sidebar}
+          else={
+            <>
+              <View style={{ gap: spacing.sm }}>
+                <SectionHeader title={ui.t("偏好", "Preferences")} />
+                <ListSurface>
+                  <ListRow
+                    id="settings-open-theme"
+                    icon="palette"
+                    title={ui.t("主题", "Theme")}
+                    value={themeSummary()}
+                    chevron
+                    divider
+                    onPress={() => ui.navigate("theme")}
+                  />
+                  <ListRow
+                    id="settings-open-language"
+                    icon="globe"
+                    title={ui.t("语言", "Language")}
+                    value={languageSummary()}
+                    chevron
+                    onPress={() => ui.navigate("language")}
+                  />
+                </ListSurface>
+              </View>
 
-        <If when={!layout().sidebar}>
-          <View style={{ gap: spacing.sm }}>
-            <SectionHeader title={ui.t("更多", "More")} />
-            <ListSurface>
-              <ListRow
-                id="settings-open-logs"
-                icon="file-text"
-                title={ui.t("日志", "Logs")}
-                chevron
-                divider
-                onPress={() => ui.navigate("logs")}
-              />
-              <ListRow
-                id="settings-open-about"
-                icon="info"
-                title={ui.t("关于", "About")}
-                value={about()?.appVersion || "1.0.1"}
-                tabular
-                chevron
-                onPress={() => ui.navigate("about")}
-              />
-            </ListSurface>
-          </View>
+              <View style={{ gap: spacing.sm }}>
+                <SectionHeader title={ui.t("更多", "More")} />
+                <ListSurface>
+                  <ListRow
+                    id="settings-open-logs"
+                    icon="file-text"
+                    title={ui.t("日志", "Logs")}
+                    chevron
+                    divider
+                    onPress={() => ui.navigate("logs")}
+                  />
+                  <ListRow
+                    id="settings-open-about"
+                    icon="info"
+                    title={ui.t("关于", "About")}
+                    value={about()?.appVersion || "1.0.1"}
+                    tabular
+                    chevron
+                    onPress={() => ui.navigate("about")}
+                  />
+                </ListSurface>
+              </View>
+            </>
+          }
+        >
+          <ThemeOptionsSection />
+          <LanguageOptionsSection />
         </If>
       </Body>
     </Scroll>
@@ -117,24 +221,6 @@ export function SettingsPage() {
 }
 
 export function ThemeSettingsPage() {
-  const ui = useApp();
-  const prefs = () => ui.client.preferences();
-
-  const setTheme = (theme: string) => {
-    const previous = ui.client.preferences();
-    ui.client.preferences.set({
-      ...previous,
-      theme: theme as ThemePreference,
-    });
-    void ui.client
-      .run("preferences.set", {
-        theme: theme as ThemePreference,
-      })
-      .then((res) => {
-        if (!res) ui.client.preferences.set(previous);
-      });
-  };
-
   return (
     <Scroll
       testID="theme-settings-scroll"
@@ -142,55 +228,13 @@ export function ThemeSettingsPage() {
       style={{ flex: 1 }}
     >
       <Body>
-        <View style={{ gap: spacing.sm }}>
-          <SectionHeader title={ui.t("外观主题", "Appearance")} />
-          <ListSurface>
-            <RadioGroup
-              idPrefix="pref-theme"
-              insetRow
-              label={ui.t("外观主题", "Appearance")}
-              value={prefs().theme}
-              options={[
-                { value: "system", label: ui.t("跟随系统", "System") },
-                { value: "light", label: ui.t("浅色", "Light") },
-                { value: "dark", label: ui.t("深色", "Dark") },
-              ]}
-              onChange={setTheme}
-            />
-          </ListSurface>
-          <View style={{ paddingHorizontal: spacing.xxs }}>
-            <Hint
-              text={ui.t(
-                "选择「跟随系统」时，界面会自动适配设备的浅色与深色模式。",
-                "When set to System, the interface follows your device appearance automatically.",
-              )}
-            />
-          </View>
-        </View>
+        <ThemeOptionsSection />
       </Body>
     </Scroll>
   );
 }
 
 export function LanguageSettingsPage() {
-  const ui = useApp();
-  const prefs = () => ui.client.preferences();
-
-  const setLanguage = (language: string) => {
-    const previous = ui.client.preferences();
-    ui.client.preferences.set({
-      ...previous,
-      language: language as LanguagePreference,
-    });
-    void ui.client
-      .run("preferences.set", {
-        language: language as LanguagePreference,
-      })
-      .then((res) => {
-        if (!res) ui.client.preferences.set(previous);
-      });
-  };
-
   return (
     <Scroll
       testID="language-settings-scroll"
@@ -198,31 +242,7 @@ export function LanguageSettingsPage() {
       style={{ flex: 1 }}
     >
       <Body>
-        <View style={{ gap: spacing.sm }}>
-          <SectionHeader title={ui.t("显示语言", "Display language")} />
-          <ListSurface>
-            <RadioGroup
-              idPrefix="pref-language"
-              insetRow
-              label={ui.t("显示语言", "Display language")}
-              value={prefs().language}
-              options={[
-                { value: "system", label: ui.t("跟随系统", "System") },
-                { value: "zh-CN", label: "简体中文" },
-                { value: "en", label: "English" },
-              ]}
-              onChange={setLanguage}
-            />
-          </ListSurface>
-          <View style={{ paddingHorizontal: spacing.xxs }}>
-            <Hint
-              text={ui.t(
-                "切换语言后界面文案将立即更新，无需重启应用。",
-                "Interface copy updates immediately without restarting the app.",
-              )}
-            />
-          </View>
-        </View>
+        <LanguageOptionsSection />
       </Body>
     </Scroll>
   );

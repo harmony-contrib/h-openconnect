@@ -139,10 +139,38 @@ export function ProfilesPage() {
     );
   };
 
+  const selectProfile = (targetId: string) => {
+    if (targetId === activeId() || liveOrBusy()) return;
+    optimisticActiveId.set(targetId);
+    void ui.client.run("profiles.select", { id: targetId }).finally(() => {
+      if (optimisticActiveId() === targetId) {
+        optimisticActiveId.set(undefined);
+      }
+    });
+  };
+
+  const toggleFavorite = (profile: ConnectionProfile) => {
+    const id = profile.id;
+    const next = !isFavorite(profile);
+    optimisticFavorites.update((m) => ({
+      ...m,
+      [id]: next,
+    }));
+    void ui.client.run("profiles.toggleFavorite", { id }).finally(() => {
+      optimisticFavorites.update((m) => {
+        if (!(id in m)) return m;
+        const copy = { ...m };
+        delete copy[id];
+        return copy;
+      });
+    });
+  };
+
   const buildCommands = (profile: ConnectionProfile): ObjectCommand[] => {
     const isActive = profile.id === activeId();
+    const favored = isFavorite(profile);
     const locked = isActive && liveOrBusy();
-    return [
+    const commands: ObjectCommand[] = [
       {
         id: `profile-select-${profile.id}`,
         icon: "check",
@@ -151,9 +179,7 @@ export function ProfilesPage() {
         disabledReason: liveOrBusy()
           ? ui.t("请先断开连接", "Disconnect first")
           : undefined,
-        run: () => {
-          void ui.client.run("profiles.select", { id: profile.id });
-        },
+        run: () => selectProfile(profile.id),
       },
       {
         id: `profile-edit-${profile.id}`,
@@ -167,74 +193,77 @@ export function ProfilesPage() {
       },
       {
         id: `profile-favorite-${profile.id}`,
-        icon: profile.favorite ? "star-filled" : "star",
-        label: profile.favorite
+        icon: favored ? "star-filled" : "star",
+        label: favored
           ? ui.t("取消收藏", "Remove favorite")
           : ui.t("收藏", "Add to favorites"),
-        run: () => {
-          void ui.client.run("profiles.toggleFavorite", { id: profile.id });
-        },
+        run: () => toggleFavorite(profile),
       },
-      {
+    ];
+    if (ui.client.canGenerateQr) {
+      commands.push({
         id: `profile-qr-${profile.id}`,
         icon: "qr-code",
         label: ui.t("导出二维码…", "Export QR…"),
         run: () => {
           void openQrExport(profile);
         },
-      },
-      {
-        id: `profile-delete-${profile.id}`,
-        icon: "trash-2",
-        label: ui.t("删除配置…", "Delete…"),
-        danger: true,
-        disabled: locked,
-        disabledReason: locked
-          ? ui.t("请先断开连接", "Disconnect first")
-          : undefined,
-        run: () => deleteProfile(profile),
-      },
-    ];
+      });
+    }
+    commands.push({
+      id: `profile-delete-${profile.id}`,
+      icon: "trash-2",
+      label: ui.t("删除配置…", "Delete…"),
+      danger: true,
+      disabled: locked,
+      disabledReason: locked
+        ? ui.t("请先断开连接", "Disconnect first")
+        : undefined,
+      run: () => deleteProfile(profile),
+    });
+    return commands;
   };
 
   const renderListPane = () => (
     <View style={{ gap: spacing.md }}>
-      <View
-        style={{
-          flexDirection: "row",
-          alignItems: "center",
-          gap: spacing.sm,
-          flexWrap: "wrap",
-        }}
-      >
-        <Tabs
-          inline={platform.desktop}
-          idPrefix="profiles-tab"
-          value={tab()}
-          options={[
-            {
-              value: "all",
-              label: ui.t("全部", "All"),
-              count: profiles().length,
-            },
-            {
-              value: "favorites",
-              label: ui.t("收藏", "Favorites"),
-              count: profiles().filter((p) => p.favorite).length,
-            },
-          ]}
-          onChange={(next) => tab.set(next)}
-        />
-        <View style={{ flex: 1, minWidth: 160 }}>
-          <SearchField
-            id="profiles-search"
-            label={ui.t("搜索配置", "Search connections")}
-            placeholder={ui.t("搜索名称或服务器", "Search name or server")}
-            value={query()}
-            onChange={(value) => query.set(value)}
+      <If when={profiles().length > 0}>
+        <View
+          style={{
+            flexDirection: "row",
+            alignItems: "center",
+            gap: spacing.sm,
+            flexWrap: "wrap",
+          }}
+        >
+          <Tabs
+            inline={platform.desktop}
+            idPrefix="profiles-tab"
+            value={tab()}
+            options={[
+              {
+                value: "all",
+                label: ui.t("全部", "All"),
+                count: profiles().length,
+              },
+              {
+                value: "favorites",
+                label: ui.t("收藏", "Favorites"),
+                count: profiles().filter((p) => isFavorite(p)).length,
+              },
+            ]}
+            onChange={(next) => tab.set(next)}
           />
+          <View style={{ flex: 1, minWidth: 160 }}>
+            <SearchField
+              id="profiles-search"
+              label={ui.t("搜索配置", "Search connections")}
+              placeholder={ui.t("搜索名称或服务器", "Search name or server")}
+              value={query()}
+              onChange={(value) => query.set(value)}
+            />
+          </View>
         </View>
-      </View>
+      </If>
 
       <ListSurface id="profiles-list">
         <If
@@ -334,24 +363,7 @@ export function ProfilesPage() {
                                 ? ui.t("取消收藏", "Unfavorite")
                                 : ui.t("收藏", "Favorite")
                             }
-                            onPress={() => {
-                              const id = item().id;
-                              const next = !favored();
-                              optimisticFavorites.update((m) => ({
-                                ...m,
-                                [id]: next,
-                              }));
-                              void ui.client
-                                .run("profiles.toggleFavorite", { id })
-                                .finally(() => {
-                                  optimisticFavorites.update((m) => {
-                                    if (!(id in m)) return m;
-                                    const copy = { ...m };
-                                    delete copy[id];
-                                    return copy;
-                                  });
-                                });
-                            }}
+                            onPress={() => toggleFavorite(item())}
                           />
                           {menuTrigger}
                         </View>
@@ -360,16 +372,7 @@ export function ProfilesPage() {
                         if (layout().masterDetail) {
                           inspectedId.set(item().id);
                         } else if (!liveOrBusy()) {
-                          const targetId = item().id;
-                          if (targetId === activeId()) return;
-                          optimisticActiveId.set(targetId);
-                          void ui.client
-                            .run("profiles.select", { id: targetId })
-                            .finally(() => {
-                              if (optimisticActiveId() === targetId) {
-                                optimisticActiveId.set(undefined);
-                              }
-                            });
+                          selectProfile(item().id);
                         } else {
                           ui.openProfileEditor(item().id);
                         }
@@ -467,9 +470,7 @@ export function ProfilesPage() {
                     icon="check"
                     label={ui.t("设为当前", "Set active")}
                     disabled={liveOrBusy()}
-                    onPress={() =>
-                      void ui.client.run("profiles.select", { id: item().id })
-                    }
+                    onPress={() => selectProfile(item().id)}
                   />
                 </If>
                 <Action
@@ -481,14 +482,17 @@ export function ProfilesPage() {
                   disabled={locked()}
                   onPress={() => ui.openProfileEditor(item().id)}
                 />
-                <Action
-                  id="detail-qr-profile"
-                  secondary
-                  small
-                  icon="qr-code"
-                  label={ui.t("二维码", "QR")}
-                  onPress={() => void openQrExport(item())}
-                />
+                <If when={ui.client.canGenerateQr}>
+                  <Action
+                    id="detail-qr-profile"
+                    secondary
+                    small
+                    icon="qr-code"
+                    loading={qrLoading()}
+                    label={ui.t("二维码", "QR")}
+                    onPress={() => void openQrExport(item())}
+                  />
+                </If>
                 <Action
                   id="detail-delete-profile"
                   danger
@@ -518,16 +522,23 @@ export function ProfilesPage() {
         <Body>
           <If when={layout().masterDetail} else={renderListPane()}>
             <View
+              testID="profiles-master-detail"
               style={{
                 flexDirection: "row",
                 gap: layout().gap,
                 alignItems: "flex-start",
               }}
             >
-              <View style={{ flex: 1.15, minWidth: 0 }}>
+              <View
+                style={{
+                  width: layout().collection,
+                  flexShrink: 0,
+                  minWidth: 0,
+                }}
+              >
                 {renderListPane()}
               </View>
-              <View style={{ flex: 0.85, minWidth: 280 }}>
+              <View style={{ flex: 1, minWidth: layout().detailMin }}>
                 {renderDetailPane()}
               </View>
             </View>

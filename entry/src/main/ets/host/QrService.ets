@@ -1,5 +1,6 @@
 import { common } from '@kit.AbilityKit';
 import { util } from '@kit.ArkTS';
+import { deviceInfo } from '@kit.BasicServicesKit';
 import { image } from '@kit.ImageKit';
 import { generateBarcode, scanBarcode, scanCore } from '@kit.ScanKit';
 import { describeError } from '../common/Errors';
@@ -21,7 +22,18 @@ export interface QrImageResult {
  * Generates PNG QR codes and scans QR codes via HarmonyOS ScanKit.
  */
 export class QrService {
+  canGenerateQr(): boolean {
+    return canIUse('SystemCapability.Multimedia.Scan.GenerateBarcode');
+  }
+
+  canScanQr(): boolean {
+    return deviceInfo.deviceType !== '2in1' && canIUse('SystemCapability.Multimedia.Scan.ScanBarcode');
+  }
+
   async generateQr(text: string): Promise<QrImageResult> {
+    if (!this.canGenerateQr()) {
+      throw new Error('QR code generation is not supported on this device');
+    }
     if (!text || text.length === 0) {
       throw new Error('QR payload is empty');
     }
@@ -66,6 +78,9 @@ export class QrService {
   }
 
   async scanQr(context: common.UIAbilityContext): Promise<string> {
+    if (!this.canScanQr()) {
+      throw new Error('QR code scanning is not supported on this device');
+    }
     const options: scanBarcode.ScanOptions = {
       scanTypes: [scanCore.ScanType.QR_CODE],
       enableMultiMode: false,

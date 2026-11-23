@@ -86,8 +86,18 @@ export default class EntryAbility extends UIAbility {
     this.hostServices?.onForeground();
   }
 
-  public onNewWant(_want: Want, _launchParam: AbilityConstant.LaunchParam): void {
+  public onNewWant(want: Want, _launchParam: AbilityConstant.LaunchParam): void {
     this.hostServices?.onForeground();
+    const rawArgs = want.parameters?.['nsh.args'];
+    const args: string[] = [];
+    if (Array.isArray(rawArgs)) {
+      for (let i = 0; i < rawArgs.length; i++) {
+        if (typeof rawArgs[i] === 'string') {
+          args.push(rawArgs[i] as string);
+        }
+      }
+    }
+    this.context.eventHub.emit('nsh.secondInstance', args);
   }
 
   public onWindowStageCreate(windowStage: window.WindowStage): void {

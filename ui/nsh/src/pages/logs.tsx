@@ -1019,6 +1019,7 @@ function LogInspector(props: {
       </ListSurface>
       <Actions align="start">
         <Action
+          id="log-inspector-copy"
           small
           secondary
           icon="copy"
