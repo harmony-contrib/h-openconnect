@@ -1,0 +1,21 @@
+[package]
+name = "hopenconnect_app"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "UI-independent application layer for H-OpenConnect"
+
+[dependencies]
+hopenconnect_core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints]
+workspace = true

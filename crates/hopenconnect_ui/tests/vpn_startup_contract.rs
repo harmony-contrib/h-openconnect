@@ -1,4 +1,4 @@
-const VPN_PLUGIN: &str = include_str!("../../../entry/src/main/ets/plugins/VpnPlugin.ets");
+const VPN_PLUGIN: &str = include_str!("../../../entry/src/main/ets/host/VpnService.ets");
 const VPN_ABILITY: &str =
     include_str!("../../../entry/src/main/ets/vpnability/HOpenConnectVpnExtensionAbility.ets");
 const VPN_CONFIG: &str = include_str!("../../../entry/src/main/ets/vpnability/VpnConfig.ets");
@@ -9,7 +9,7 @@ const VPN_EMULATOR_COMPATIBILITY: &str =
 const VPN_HANDOFF: &str = include_str!("../src/vpn_handoff.rs");
 const NAPI_TYPES: &str =
     include_str!("../../../entry/src/main/cpp/types/libhopenconnect_ui/Index.d.ts");
-const UI_STATE: &str = include_str!("../src/state.rs");
+const APP_RECONNECT: &str = include_str!("../../hopenconnect_app/src/reconnect.rs");
 
 fn section<'a>(source: &'a str, start: &str, end: &str) -> &'a str {
     let start = source.find(start).expect("section start");
@@ -30,16 +30,18 @@ fn standard_start_bootstraps_without_descriptors_then_hands_off_the_session() {
     assert!(!NAPI_TYPES.contains("setPlatformVpnRunning"));
     assert!(!NAPI_TYPES.contains("expirePlatformVpnStart"));
 
-    let request = section(
+    let request = section(VPN_PLUGIN, "async requestStartVpn", "async requestStopVpn");
+    let perform_start = section(
         VPN_PLUGIN,
-        "private async requestStartVpnWithContext",
-        "private async requestStopVpnWithContext",
+        "private async performStartVpn",
+        "private async performStopVpn",
     );
     assert!(request.contains("advancePlatformVpnIntent()"));
-    assert!(request.contains("beginPlatformVpnStartForIntent(intentEpoch)"));
-    assert!(request.contains("awaitPlatformVpnStart(attemptId)"));
+    assert!(perform_start.contains("beginPlatformVpnStartForIntent(intentEpoch)"));
+    assert!(perform_start.contains("awaitPlatformVpnStart(attemptId)"));
     assert!(VPN_ABILITY.contains("failUnattachedPlatformVpnStart(attemptId, message)"));
-    assert!(request.contains("startVpnExtensionWithHandoff(optionsJson, attemptId, sharedMemory)"));
+    assert!(perform_start
+        .contains("startVpnExtensionWithHandoff(optionsJson, attemptId, sharedMemory)"));
     assert!(VPN_LAUNCHER.contains("preparePlatformVpnHandoff(attemptId)"));
     assert!(VPN_LAUNCHER.contains("buildVpnBootstrapWant(attemptId, handoffToken)"));
     assert!(VPN_LAUNCHER.contains("sendPlatformVpnHandoff("));
@@ -48,22 +50,19 @@ fn standard_start_bootstraps_without_descriptors_then_hands_off_the_session() {
         1,
         "one user action must issue exactly one descriptor-free system VPN start"
     );
-    assert!(!request.contains("buildVpnWant(optionsJson, this.platformSharedMemory, attemptId)"));
-    assert!(!request.contains("awaitPlatformVpnStartAttachment"));
-    assert!(!request.contains("Promise.race"));
-    assert!(!request.contains("15000"));
+    assert!(
+        !perform_start.contains("buildVpnWant(optionsJson, this.platformSharedMemory, attemptId)")
+    );
+    assert!(!perform_start.contains("awaitPlatformVpnStartAttachment"));
+    assert!(!perform_start.contains("Promise.race"));
+    assert!(!perform_start.contains("15000"));
 
-    let install = section(VPN_PLUGIN, "onInstall(", "async invokeAsync(");
+    let install = section(VPN_PLUGIN, "attachHost(", "detachHost(");
     assert!(install.contains("authorizeVpnForEmulatorDebug()"));
     assert!(install.contains("prepareVpnForEmulatorDebug()"));
     assert!(request.contains("await this.startupVpnPreparation"));
     assert!(VPN_EMULATOR_COMPATIBILITY.contains("updateVpnAuthorizedState"));
     assert!(VPN_EMULATOR_COMPATIBILITY.contains("BuildProfile.DEBUG"));
-    let perform_start = section(
-        VPN_PLUGIN,
-        "private async performStartVpn",
-        "private async requestStopVpnWithContext",
-    );
     assert!(!perform_start.contains("claimCurrentPlatformVpnStop(intentEpoch)"));
 
     let extension = section(
@@ -107,16 +106,10 @@ fn descriptor_free_authorization_bootstrap_waits_for_the_rebound_want() {
 
 #[test]
 fn tick_observes_native_terminal_state_before_auto_reconnect_edge() {
-    let tick = section(
-        UI_STATE,
-        "Action::TickSession =>",
-        "Action::SetChallengeField",
-    );
-    let previous = tick
-        .find("let prev = state.last_lifecycle")
-        .expect("old state");
-    let engine_tick = tick.find("shared_engine().tick()").expect("engine tick");
-    let sync = tick.find("state.sync_engine()").expect("state sync");
+    let tick = section(APP_RECONNECT, "pub fn tick_engine", "#[cfg(test)]");
+    let previous = tick.find("let (prev, user_disconnect)").expect("old state");
+    let engine_tick = tick.find("engine.tick()?").expect("engine tick");
+    let snapshot = tick.find("engine.snapshot()?").expect("engine snapshot");
     let edge = tick
         .find("prev.should_auto_reconnect_to")
         .expect("reconnect edge");
@@ -125,8 +118,8 @@ fn tick_observes_native_terminal_state_before_auto_reconnect_edge() {
         .expect("remember terminal state");
 
     assert!(previous < engine_tick);
-    assert!(engine_tick < sync);
-    assert!(sync < edge);
+    assert!(engine_tick < snapshot);
+    assert!(snapshot < edge);
     assert!(edge < remember);
 }
 
@@ -235,7 +228,7 @@ fn stale_wants_and_terminal_cleanup_are_attempt_scoped_before_mutation() {
 
     let stop = section(
         VPN_PLUGIN,
-        "private async prepareVpnForEmulatorDebug",
+        "async requestStopVpn",
         "private async waitForCooperativeCleanup",
     );
     assert!(stop.contains("claimCurrentPlatformVpnStop(intentEpoch)"));

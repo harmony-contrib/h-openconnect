@@ -1,48 +1,28 @@
-use arkit::entry;
-use arkit::openharmony_ability::OpenHarmonyApp;
-use arkit::prelude::Element;
+//! Thin N-API binding shell for H-OpenConnect.
+//!
+//! NSH (`@nsh/harmonyos` + `ui/nsh/`) owns all presentation. This cdylib binds
+//! `hopenconnect_app` for the UI host and `hopenconnect_core` for the HarmonyOS
+//! VPN Extension process.
+
 use hopenconnect_core::{shared_engine, ConnectRequest};
 use napi_derive_ohos::napi;
 use napi_ohos::{bindgen_prelude::Object, Error, Result, Status};
 use std::os::fd::AsRawFd;
+use std::sync::{Arc, LazyLock};
 
-mod bridge;
-mod connection_qr;
-mod i18n;
-mod locale;
-mod log_filter;
-mod model;
 mod socket_protect;
-mod state;
-mod time_format;
-mod view;
-mod virtual_identity;
 mod vpn_handoff;
+mod web_auth;
 
-#[entry(plugins = [
-    bridge::HOpenUrlBridgePlugin,
-    bridge::HOpenVpnBridgePlugin,
-    bridge::HOpenColorModeBridgePlugin,
-    bridge::HOpenExportBridgePlugin,
-    bridge::HOpenScanBridgePlugin,
-    bridge::HOpenCertFileBridgePlugin,
-    bridge::HOpenSafeAreaBridgePlugin,
-])]
-fn app(handle: OpenHarmonyApp) -> Element {
-    let initial_safe_area = bridge::initial_safe_area(&handle);
-    bridge::set_app(handle);
-    // Interactive authentication runs in the UI process before a platform VPN
-    // attempt or ashmem channel exists. Register the direct system-browser
-    // path here; the extension-to-UI ashmem path remains the fallback for a
-    // later protocol reauthentication initiated by the extension process.
-    hopenconnect_core::set_external_browser_handler(Some(Box::new(|uri| {
-        bridge::open_external_browser_blocking(uri.to_owned()).is_ok()
-    })));
-    view::App(initial_safe_area)
-}
+static UI_WAIT_CANCEL: LazyLock<tokio::sync::watch::Sender<u64>> =
+    LazyLock::new(|| tokio::sync::watch::channel(0).0);
 
 fn to_napi_error(err: impl std::fmt::Display) -> Error {
     Error::new(Status::GenericFailure, err.to_string())
+}
+
+fn app_error(err: hopenconnect_app::AppError) -> Error {
+    Error::from_reason(err.to_string())
 }
 
 fn parse_positive_u64(value: &str, label: &str) -> Result<u64> {
@@ -65,6 +45,130 @@ fn parse_positive_u64(value: &str, label: &str) -> Result<u64> {
         ));
     }
     Ok(parsed)
+}
+
+/// Host gateway owning one application command & observation session.
+#[napi]
+pub struct UiCommandSession {
+    application: Arc<hopenconnect_app::Application>,
+}
+
+#[napi]
+impl UiCommandSession {
+    #[napi(constructor)]
+    pub fn new() -> Self {
+        Self {
+            application: Arc::new(hopenconnect_app::Application::shared()),
+        }
+    }
+
+    #[napi]
+    pub async fn dispatch(&self, request_json: String) -> Result<String> {
+        self.application
+            .dispatch_json(&request_json)
+            .await
+            .map_err(app_error)
+    }
+
+    #[napi]
+    pub async fn query_state(&self, request_json: String) -> Result<String> {
+        let application = Arc::clone(&self.application);
+        let runtime = tokio::runtime::Handle::current();
+        tokio::task::spawn_blocking(move || {
+            runtime.block_on(application.query_state_json(&request_json))
+        })
+        .await
+        .map_err(to_napi_error)?
+        .map_err(app_error)
+    }
+
+    #[napi]
+    pub fn subscribe_state(&self, request_json: String) -> Result<String> {
+        self.application
+            .subscribe_state_json(&request_json)
+            .map_err(app_error)
+    }
+
+    #[napi]
+    pub fn observe_state(&self, critical_only: bool) -> Result<String> {
+        self.application
+            .observe_state_json(critical_only)
+            .map_err(app_error)
+    }
+
+    #[napi]
+    pub fn tick_session(&self) -> Result<String> {
+        let outcome = self.application.tick_session().map_err(app_error)?;
+        serde_json::to_string(&outcome).map_err(to_napi_error)
+    }
+
+    #[napi]
+    pub fn close(&self) {
+        self.application.close();
+    }
+}
+
+impl Default for UiCommandSession {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Drop for UiCommandSession {
+    fn drop(&mut self) {
+        self.application.close();
+    }
+}
+
+#[napi]
+pub fn query_ui_preferences() -> Result<String> {
+    let prefs = hopenconnect_app::preferences_snapshot(&shared_engine()).map_err(app_error)?;
+    serde_json::to_string(&prefs).map_err(to_napi_error)
+}
+
+#[napi]
+pub async fn wait_for_ui_revision(after_revision: String) -> Result<String> {
+    let after = after_revision
+        .parse::<u64>()
+        .map_err(|_| Error::from_reason("invalid UI revision"))?;
+    let mut cancel = UI_WAIT_CANCEL.subscribe();
+    let application = hopenconnect_app::Application::shared();
+    let revision = tokio::select! {
+        revision = application.wait_for_revision(after) => revision.map_err(app_error)?,
+        _ = cancel.changed() => shared_engine().runtime_revisions().revision,
+    };
+    Ok(revision.to_string())
+}
+
+#[napi]
+pub fn cancel_ui_revision_wait() {
+    UI_WAIT_CANCEL.send_modify(|generation| *generation = generation.wrapping_add(1));
+}
+
+/// Complete local disconnect cleanup after platform VPN stop finishes.
+#[napi]
+pub async fn finalize_disconnect() -> Result<()> {
+    shared_engine().disconnect().await.map_err(to_napi_error)
+}
+
+/// Register the UI process's SAML / web sign-in callback (`{ openUrl: (uri: string) => boolean }`).
+#[napi]
+pub fn register_external_browser_handler(callbacks: Object<'static>) -> Result<()> {
+    web_auth::register_external_browser_handler(callbacks)
+}
+
+#[napi]
+pub fn clear_external_browser_handler() {
+    web_auth::clear_external_browser_handler();
+}
+
+/// Consume a pending cross-process SAML browser open request from the VPN Extension, if any.
+#[napi]
+pub fn take_pending_browser_open() -> Result<String> {
+    match hopenconnect_core::take_browser_open_pending() {
+        Some(request) => serde_json::to_string(&request).map_err(to_napi_error),
+        None => Ok(String::new()),
+    }
 }
 
 #[napi]
@@ -360,20 +464,23 @@ pub fn cancel_platform_vpn_start(attempt_id: String) -> Result<bool> {
 
 #[napi]
 pub fn configure_ui_locale(locale: String) -> Result<()> {
-    std::env::set_var("HOPENCONNECT_UI_LOCALE", locale);
+    std::env::set_var("HOPENCONNECT_UI_LOCALE", &locale);
+    if hopenconnect_app::set_system_locale(locale).map_err(app_error)? {
+        cancel_ui_revision_wait();
+    }
     Ok(())
 }
 
 #[napi]
 pub fn configure_system_color_mode(color_mode: i32) -> Result<()> {
     std::env::set_var("HOPENCONNECT_SYSTEM_COLOR_MODE", color_mode.to_string());
+    if hopenconnect_app::set_system_color_mode(color_mode).map_err(app_error)? {
+        cancel_ui_revision_wait();
+    }
     Ok(())
 }
 
 /// Register ics-style per-fd protect: OpenConnect → `vpnConnection.protect(fd)`.
-///
-/// Pass `{ protectSocket: async (fd: number) => Promise<void> }`. Native waits
-/// for completion before OpenConnect calls connect(2).
 #[napi]
 pub fn register_socket_protect(callbacks: Object<'static>) -> Result<()> {
     socket_protect::register_socket_protect(callbacks)
@@ -417,9 +524,6 @@ pub fn set_platform_vpn_failed(attempt_id: String, error: String) -> Result<bool
 }
 
 fn dry_run_from_env() -> bool {
-    // Real OpenConnect is the default when the binary is built with
-    // `native-anyconnect`. Explicit HOPENCONNECT_DRY_RUN=1 keeps the development
-    // mock path available without adding commands to production abilities.
     match std::env::var("HOPENCONNECT_DRY_RUN") {
         Ok(value) => value == "1" || value.eq_ignore_ascii_case("true"),
         Err(_) => {

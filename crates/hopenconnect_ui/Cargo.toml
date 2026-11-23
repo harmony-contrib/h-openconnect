@@ -4,9 +4,8 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
-homepage.workspace = true
 rust-version.workspace = true
-description = "H-OpenConnect Arkit UI + NAPI shell over hopenconnect_core / anyconnect-rs"
+description = "H-OpenConnect thin N-API binding over hopenconnect_app and hopenconnect_core"
 
 [lib]
 crate-type = ["cdylib"]
@@ -19,17 +18,17 @@ default = []
 native-anyconnect = ["hopenconnect_core/native-anyconnect"]
 
 [dependencies]
-arkit.workspace = true
-base64.workspace = true
-dioxus.workspace = true
+hopenconnect_app.workspace = true
 hopenconnect_core.workspace = true
 libc = "0.2"
 napi-derive-ohos.workspace = true
 napi-ohos.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-time.workspace = true
 tokio.workspace = true
 
 [build-dependencies]
 napi-build-ohos.workspace = true
+
+[lints]
+workspace = true

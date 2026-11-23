@@ -5,19 +5,25 @@ const ENTRY_ABILITY: &str =
 const TUNNEL_ABILITY: &str =
     include_str!("../../../entry/src/main/ets/vpnability/HOpenConnectVpnExtensionAbility.ets");
 const INDEX_PAGE: &str = include_str!("../../../entry/src/main/ets/pages/Index.ets");
+const HOST_SERVICES: &str = include_str!("../../../entry/src/main/ets/host/HOpenHostServices.ets");
 const PLATFORM_IDENTITY: &str =
     include_str!("../../../entry/src/main/ets/common/PlatformIdentity.ets");
-const EN_US: &str = include_str!("../locales/en-US.ftl");
-const ZH_CN: &str = include_str!("../locales/zh-CN.ftl");
 const PACKAGE_MANIFEST: &str = include_str!("../../../oh-package.json5");
-const UI_MODEL: &str = include_str!("../src/model.rs");
-const UI_STATE: &str = include_str!("../src/state.rs");
+const BASE_STRINGS: &str =
+    include_str!("../../../entry/src/main/resources/base/element/string.json");
+const APP_SANITIZE: &str = include_str!("../../hopenconnect_app/src/sanitize.rs");
+const APP_OBSERVATION: &str = include_str!("../../hopenconnect_app/src/observation.rs");
 const UI_LIB: &str = include_str!("../src/lib.rs");
-const UI_VIEW: &str = include_str!("../src/view/mod.rs");
-const HOME_PAGE: &str = include_str!("../src/view/pages/home.rs");
-const CONNECTIONS_PAGE: &str = include_str!("../src/view/pages/connections.rs");
-const CHALLENGE_PAGE: &str = include_str!("../src/view/pages/challenge.rs");
-const LOGS_PAGE: &str = include_str!("../src/view/pages/logs.rs");
+const WEB_AUTH: &str = include_str!("../src/web_auth.rs");
+
+const NSH_HOME_PAGE: &str = include_str!("../../../ui/nsh/src/pages/home.tsx");
+const NSH_PROFILES_PAGE: &str = include_str!("../../../ui/nsh/src/pages/profiles.tsx");
+const NSH_EDITOR_PAGE: &str = include_str!("../../../ui/nsh/src/pages/profile-editor.tsx");
+const NSH_CHALLENGE_PAGE: &str = include_str!("../../../ui/nsh/src/pages/auth-challenge.tsx");
+const NSH_STATS_PAGE: &str = include_str!("../../../ui/nsh/src/pages/statistics.tsx");
+const NSH_LOGS_PAGE: &str = include_str!("../../../ui/nsh/src/pages/logs.tsx");
+const NSH_SETTINGS_PAGE: &str = include_str!("../../../ui/nsh/src/pages/settings.tsx");
+const NSH_DESKTOP_NAV: &str = include_str!("../../../ui/nsh/src/desktop-navigation.tsx");
 
 fn contains_vpn_word(source: &str) -> bool {
     source
@@ -25,13 +31,46 @@ fn contains_vpn_word(source: &str) -> bool {
         .any(|word| word.eq_ignore_ascii_case("vpn"))
 }
 
+/// Checks string literals inside TSX source so internal command IDs (`"vpn.connect"`)
+/// or identifiers do not false-positive while user-facing copy is strictly audited.
+fn contains_vpn_word_in_user_copy(source: &str) -> bool {
+    let mut in_quote: Option<char> = None;
+    let mut escaped = false;
+    let mut current = String::new();
+    for ch in source.chars() {
+        if let Some(quote) = in_quote {
+            if escaped {
+                current.push(ch);
+                escaped = false;
+            } else if ch == '\\' {
+                escaped = true;
+            } else if ch == quote {
+                in_quote = None;
+                let trimmed = current.trim();
+                let is_internal_command = trimmed.starts_with("vpn.");
+                if !is_internal_command && contains_vpn_word(trimmed) {
+                    return true;
+                }
+                current.clear();
+            } else {
+                current.push(ch);
+            }
+        } else if ch == '"' || ch == '\'' || ch == '`' {
+            in_quote = Some(ch);
+            current.clear();
+        }
+    }
+    false
+}
+
 #[test]
-fn startup_opens_the_native_ui_without_a_privacy_gate() {
+fn startup_opens_the_nsh_surface_without_a_privacy_gate() {
     let removed_gate = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../entry/src/main/ets/common/PrivacyConsent.ets");
 
     assert!(!removed_gate.exists());
-    assert_eq!(INDEX_PAGE.matches("DefaultXComponent({").count(), 1);
+    assert!(INDEX_PAGE.contains("NshSurface"));
+    assert!(INDEX_PAGE.contains("ContentSlot(this.surface.content)"));
     assert!(!INDEX_PAGE.contains("PrivacyConsent"));
     assert!(!INDEX_PAGE.contains("privacyAccepted"));
     assert!(!INDEX_PAGE.contains("agreeAndContinue"));
@@ -59,53 +98,46 @@ fn platform_identity_is_configured_without_consent_state() {
 #[test]
 fn user_visible_copy_does_not_contain_the_vpn_term() {
     for (name, source) in [
-        ("English locale", EN_US),
-        ("Chinese locale", ZH_CN),
         ("ArkUI entry page", INDEX_PAGE),
         ("package description", PACKAGE_MANIFEST),
+        ("base string resources", BASE_STRINGS),
     ] {
         assert!(!contains_vpn_word(source), "{name} contains the VPN term");
     }
 
-    assert!(!EN_US.to_ascii_lowercase().contains("privacy consent"));
-    assert!(!ZH_CN.contains("同意隐私政策"));
+    for (name, source) in [
+        ("Home page", NSH_HOME_PAGE),
+        ("Profiles page", NSH_PROFILES_PAGE),
+        ("Profile editor page", NSH_EDITOR_PAGE),
+        ("Auth challenge page", NSH_CHALLENGE_PAGE),
+        ("Statistics page", NSH_STATS_PAGE),
+        ("Logs page", NSH_LOGS_PAGE),
+        ("Settings/About/Privacy page", NSH_SETTINGS_PAGE),
+        ("Desktop navigation", NSH_DESKTOP_NAV),
+    ] {
+        assert!(
+            !contains_vpn_word_in_user_copy(source),
+            "{name} contains the VPN term in user-visible copy"
+        );
+    }
 }
 
 #[test]
-fn dynamic_text_is_sanitized_at_every_visible_error_boundary() {
-    assert!(UI_MODEL.contains("pub fn sanitize_display_text"));
-    assert!(UI_MODEL.contains("normalized.match_indices(\"vpn\")"));
-    assert!(UI_STATE.contains("let message = sanitize_display_text(&message);"));
-    assert!(HOME_PAGE.contains("content: sanitize_display_text(&error)"));
-    assert!(CONNECTIONS_PAGE.contains("content: sanitize_display_text(&error)"));
-    assert!(CHALLENGE_PAGE.matches("sanitize_display_text").count() >= 2);
-    assert!(LOGS_PAGE.contains("let message = sanitize_display_text(&log.message);"));
+fn dynamic_text_is_sanitized_at_the_application_observation_boundary() {
+    assert!(APP_SANITIZE.contains("pub fn sanitize_display_text"));
+    assert!(APP_SANITIZE.contains("normalized.match_indices(\"vpn\")"));
+    assert!(APP_OBSERVATION.contains("sanitize_auth_challenge"));
+    assert!(APP_OBSERVATION.contains("sanitize_diagnostic_entry"));
+    assert!(APP_OBSERVATION.contains("sanitize_optional"));
 }
 
 #[test]
-fn interactive_sso_registers_a_direct_ui_browser_handler() {
-    let set_app = UI_LIB.find("bridge::set_app(handle)").expect("UI bridge");
-    let register = UI_LIB
-        .find("set_external_browser_handler")
-        .expect("OpenConnect browser handler");
-    assert!(set_app < register);
-    assert!(UI_LIB.contains("bridge::open_external_browser_blocking(uri.to_owned()).is_ok()"));
-}
-
-#[test]
-fn authentication_sheet_reserves_the_keyboard_occlusion() {
-    assert!(CHALLENGE_PAGE.contains("let bottom_inset = metrics.ime_area.bottom.max(0.0);"));
-    assert!(CHALLENGE_PAGE.contains("bottom_inset,"));
-
-    let auth_sheet = UI_VIEW
-        .split("fn AuthSheet(")
-        .nth(1)
-        .expect("AuthSheet component")
-        .split("fn App(")
-        .next()
-        .expect("AuthSheet body");
-    assert!(auth_sheet.contains("BottomSheet {"));
-    assert!(auth_sheet.contains("height: bottom_inset"));
+fn interactive_sso_uses_upstream_native_auth_session_and_browser_bridge() {
+    assert!(WEB_AUTH.contains("set_external_browser_handler"));
+    assert!(UI_LIB.contains("register_external_browser_handler"));
+    assert!(HOST_SERVICES.contains("NativeAuthSession"));
+    assert!(HOST_SERVICES.contains("from '@nsh/harmonyos'"));
+    assert!(HOST_SERVICES.contains("registerExternalBrowserHandler"));
 }
 
 #[test]

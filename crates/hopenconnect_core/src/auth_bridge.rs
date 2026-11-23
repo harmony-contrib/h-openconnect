@@ -13,6 +13,7 @@ use std::collections::HashSet;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
+use tokio::sync::watch;
 
 /// Shared credentials used for auto-fill before prompting the UI.
 #[derive(Debug, Clone, Default)]
@@ -39,18 +40,63 @@ struct Inner {
 }
 
 /// Cross-thread auth interaction handle (one per [`crate::SessionEngine`]).
-#[derive(Debug, Default)]
 pub struct AuthInteraction {
     inner: Mutex<Inner>,
+    change_tx: watch::Sender<u64>,
+    on_change: Option<Arc<dyn Fn() + Send + Sync>>,
+}
+
+impl std::fmt::Debug for AuthInteraction {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AuthInteraction")
+            .field("inner", &self.inner)
+            .field("has_on_change", &self.on_change.is_some())
+            .finish()
+    }
+}
+
+impl Default for AuthInteraction {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl AuthInteraction {
     pub fn new() -> Self {
-        Self::default()
+        let (change_tx, _) = watch::channel(0);
+        Self {
+            inner: Mutex::new(Inner::default()),
+            change_tx,
+            on_change: None,
+        }
     }
 
     pub fn shared() -> Arc<Self> {
         Arc::new(Self::new())
+    }
+
+    /// Create a shared auth interaction handle that immediately notifies the
+    /// owning engine whenever an interactive challenge arrives, is submitted,
+    /// or is aborted.
+    pub fn with_on_change(on_change: Arc<dyn Fn() + Send + Sync>) -> Arc<Self> {
+        let (change_tx, _) = watch::channel(0);
+        Arc::new(Self {
+            inner: Mutex::new(Inner::default()),
+            change_tx,
+            on_change: Some(on_change),
+        })
+    }
+
+    /// Subscribe to interactive auth challenge arrival/clearance events.
+    pub fn subscribe(&self) -> watch::Receiver<u64> {
+        self.change_tx.subscribe()
+    }
+
+    fn notify_changed(&self) {
+        self.change_tx.send_modify(|seq| *seq = seq.wrapping_add(1));
+        if let Some(callback) = &self.on_change {
+            callback();
+        }
     }
 
     /// Snapshot of the form currently waiting on the UI, if any.
@@ -75,6 +121,8 @@ impl AuthInteraction {
                 cancelled: true,
             });
         }
+        drop(guard);
+        self.notify_changed();
     }
 
     /// Reset abort flag at the start of a new connect attempt.
@@ -92,6 +140,8 @@ impl AuthInteraction {
                 cancelled: true,
             });
         }
+        drop(guard);
+        self.notify_changed();
     }
 
     /// Submit a UI response for the current challenge.
@@ -114,6 +164,8 @@ impl AuthInteraction {
             .reply_tx
             .send(reply)
             .map_err(|_| CoreError::msg("authentication worker is no longer waiting"))?;
+        drop(guard);
+        self.notify_changed();
         Ok(())
     }
 
@@ -159,6 +211,7 @@ impl AuthInteraction {
                 reply_tx: tx,
             });
         }
+        self.notify_changed();
 
         // Poll so abort from another thread is observed even if UI never replies.
         loop {

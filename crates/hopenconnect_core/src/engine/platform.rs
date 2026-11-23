@@ -180,6 +180,11 @@ impl SessionEngine {
             // consume it again.
             self.persist_platform_locked(&mut inner)?;
         }
+        self.bump_revisions(|rev| {
+            rev.status = rev.status.saturating_add(1);
+            rev.statistics = rev.statistics.saturating_add(1);
+            rev.logs = rev.logs.saturating_add(1);
+        });
         Ok(())
     }
 

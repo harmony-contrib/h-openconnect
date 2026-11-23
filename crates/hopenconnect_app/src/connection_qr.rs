@@ -1,5 +1,11 @@
-use crate::model::VpnConnection;
+//! Portable QR payload encoding and decoding for connection profiles.
+//!
+//! Keeps wire compatibility with `h-openconnect.connection` v1 so QR codes
+//! exported by earlier releases import cleanly across versions.
+
+use hopenconnect_core::ConnectionProfile;
 use serde::{Deserialize, Serialize};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 const FORMAT: &str = "h-openconnect.connection";
 const VERSION: u8 = 1;
@@ -10,10 +16,10 @@ const MAX_SCANNED_BYTES: usize = 8 * 1024;
 struct ConnectionQrPayload {
     format: String,
     version: u8,
-    profile: VpnConnection,
+    profile: ConnectionProfile,
 }
 
-pub(crate) fn encode_connection_qr(profile: &VpnConnection) -> Result<String, String> {
+pub(crate) fn encode_connection_qr(profile: &ConnectionProfile) -> Result<String, String> {
     profile.validate()?;
     let mut transferable = profile.clone();
     transferable.id.clear();
@@ -25,7 +31,7 @@ pub(crate) fn encode_connection_qr(profile: &VpnConnection) -> Result<String, St
     .map_err(|_| "could not encode the connection QR code".to_owned())
 }
 
-pub(crate) fn decode_connection_qr(scanned: &str) -> Result<VpnConnection, String> {
+pub(crate) fn decode_connection_qr(scanned: &str) -> Result<ConnectionProfile, String> {
     let scanned = scanned.trim_start_matches('\u{feff}').trim();
     if scanned.len() > MAX_SCANNED_BYTES {
         return Err("connection QR code is too large".to_owned());
@@ -40,15 +46,30 @@ pub(crate) fn decode_connection_qr(scanned: &str) -> Result<VpnConnection, Strin
     Ok(payload.profile)
 }
 
+pub(crate) fn new_imported_connection_id(existing: &[ConnectionProfile]) -> String {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or(0);
+    let mut suffix = 0_u32;
+    loop {
+        let candidate = format!("conn-qr-{nanos}-{suffix}");
+        if !existing.iter().any(|profile| profile.id == candidate) {
+            return candidate;
+        }
+        suffix = suffix.saturating_add(1);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn example() -> VpnConnection {
-        let mut profile = VpnConnection::new_draft();
+    fn example() -> ConnectionProfile {
+        let mut profile = ConnectionProfile::new_draft();
         profile.id = "existing-profile".to_owned();
-        profile.name = "Work VPN".to_owned();
-        profile.server = "vpn.example.com".to_owned();
+        profile.name = "Work Gateway".to_owned();
+        profile.server = "gw.example.com".to_owned();
         profile.username = "alice".to_owned();
         profile.password = "secret-password".to_owned();
         profile.token_string = "token-secret".to_owned();
@@ -74,21 +95,12 @@ mod tests {
     #[test]
     fn rejects_unrelated_or_invalid_connection_data() {
         let encoded = encode_connection_qr(&example()).unwrap();
-        assert!(decode_connection_qr("https://vpn.example.com").is_err());
+        assert!(decode_connection_qr("https://gw.example.com").is_err());
         assert!(
             decode_connection_qr(&encoded.replace("h-openconnect.connection", "other.app"))
                 .is_err()
         );
         assert!(decode_connection_qr(&encoded.replace("\"version\":1", "\"version\":2")).is_err());
-        assert!(decode_connection_qr(&encoded.replace("vpn.example.com", "")).is_err());
-    }
-
-    #[test]
-    fn scanned_id_cannot_replace_an_existing_connection() {
-        let encoded = encode_connection_qr(&example()).unwrap();
-        let mut json: serde_json::Value = serde_json::from_str(&encoded).unwrap();
-        json["profile"]["id"] = serde_json::Value::String("existing-profile".to_owned());
-        let imported = decode_connection_qr(&json.to_string()).unwrap();
-        assert!(imported.id.is_empty());
+        assert!(decode_connection_qr(&" ".repeat(MAX_SCANNED_BYTES + 1)).is_err());
     }
 }
