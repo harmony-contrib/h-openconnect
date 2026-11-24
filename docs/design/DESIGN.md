@@ -11,6 +11,10 @@ This repository maintains both the design reference documentation and an interac
 - **HarmonyOS Project Assets**:
   - Layered adaptive icons & splash icons installed across `AppScope/resources/base/media/` and `entry/src/main/resources/{base,dark}/media/` (`background.png`, `foreground.png`, `startIcon.png`).
   - Splash window background synced in `entry/src/main/resources/{base,dark}/element/color.json` (`#F6F6F9` light / `#16191F` dark).
+- **AppGallery Promotional Screenshots**: Light-theme promotional showcase posters preserved in [`docs/design/screenshots/`](./screenshots/) (reproducible via [`scripts/generate-appgallery-screenshots.mjs`](../../scripts/generate-appgallery-screenshots.mjs)):
+  - `phone/`: 5 × `1080×1920` (9:16) posters (`01-overview.png` .. `05-logs-settings.png`)
+  - `pad/`: 5 × `1920×1280` (3:2) landscape dual-pane posters (`01-overview.png` .. `05-logs-settings.png`)
+  - `pc/`: 5 × `1920×1080` (16:9) HarmonyOS 2-in-1 desktop posters (`01-overview.png` .. `05-logs-settings.png`)
 
 ## Design Principles
 
