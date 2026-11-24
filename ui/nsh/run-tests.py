@@ -80,8 +80,12 @@ def main() -> int:
         options.timeout,
     )
     bundle_js = bundle_dir / "bundle.js"
+    bundle_nshc = bundle_dir / "bundle.nshc"
     if not bundle_js.is_file():
         print(f"FAIL: missing bundle output at {bundle_js}", file=sys.stderr)
+        return 1
+    if not bundle_nshc.is_file() or bundle_nshc.stat().st_size == 0:
+        print(f"FAIL: missing bytecode bundle output at {bundle_nshc}", file=sys.stderr)
         return 1
     artifact = bundle_js.read_text(encoding="utf-8")
     if "new CoreClient" not in artifact:

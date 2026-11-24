@@ -286,6 +286,11 @@ export interface NshOptions {
   cacheOptions?: NshCacheOptions
   /** Allow explicit status-bar and fullscreen-video requests to manage window bars. Default true. */
   managesStatusBar?: boolean
+  /**
+   * Allow touches on regions without hit-testable NSH content (for example a `box-none` app
+   * root) to pass through to sibling views behind this surface. Default false.
+   */
+  passThroughTouches?: boolean
   /** System observations available before the app starts. */
   environment?: NshEnvironment
   /** Interpreter stack ceiling in bytes (64 KiB through 4 MiB). */
@@ -467,6 +472,10 @@ export declare function getCapabilities(): NshCapabilities
 /** Installs the optional HiLog logger for a development host. */
 export declare function initLogging(): void
 
+export declare function nshAbilityResult(sessionId: number, requestId: number, ok: boolean, payload?: string | undefined | null, code?: number | undefined | null, message?: string | undefined | null): void
+
+export declare function nshAbilityWant(kind: string, payload: string): void
+
 export declare function nshAttachNativeNode(targetId: number, content: FrameNode): void
 
 export declare function nshAttachNativeSubtree(targetId: number, content: FrameNode, slot: NodeContent): void
@@ -493,6 +502,8 @@ export declare function nshReportHostError(sessionId: number, message: string): 
 
 export declare function nshRetireNativeNode(targetId: number): void
 
+export declare function nshRunUiTask(sessionId: number, taskId: number, uiContext: import('@ohos.arkui.UIContext').UIContext, bundleName: string, moduleName?: string | undefined | null): void
+
 export declare function nshServiceEvent(sessionId: number, key: number, value: SystemEvent): void
 
 export declare function nshSetLifecycle(sessionId: number, lifecycle: string): void
@@ -503,7 +514,7 @@ export declare function nshUpdateConfig(sessionId: number, colorMode: number, fo
 
 export declare function nshUpdateKeyboard(sessionId: number, duration: number): void
 
-export declare function nshUpdateWindow(sessionId: number, platformWindowId: number, visual: Array<AvoidArea>, keyboard: AvoidArea, maxRefreshRate?: number | undefined | null): void
+export declare function nshUpdateWindow(sessionId: number, platformWindowId: number, visual: Array<AvoidArea>, keyboard: AvoidArea, maxRefreshRate?: number | undefined | null, windowWidth?: number | undefined | null, windowHeight?: number | undefined | null): void
 
 export declare function nshViewAction(action: MenuAction): boolean
 

@@ -146,8 +146,17 @@ PY_ATTEST
 
 cd "$ROOT_DIR"
 mkdir -p target/ohos/hopenconnect-bundle entry/src/main/resources/rawfile entry/src/main/cpp/types/libnsh_platform_harmonyos entry/libs/arm64-v8a
-"$NSH_BIN" build "$ROOT_DIR/ui/nsh" -o "$ROOT_DIR/target/ohos/hopenconnect-bundle"
-cp "$ROOT_DIR/target/ohos/hopenconnect-bundle/bundle.js" "$ROOT_DIR/entry/src/main/resources/rawfile/hopenconnect.bundle.js"
+if [ "$NSH_PROFILE" = release ]; then
+  "$NSH_BIN" build --release "$ROOT_DIR/ui/nsh" -o "$ROOT_DIR/target/ohos/hopenconnect-bundle"
+else
+  "$NSH_BIN" build "$ROOT_DIR/ui/nsh" -o "$ROOT_DIR/target/ohos/hopenconnect-bundle"
+fi
+test -s "$ROOT_DIR/target/ohos/hopenconnect-bundle/bundle.nshc" || {
+  echo 'NSH build produced no bytecode bundle (bundle.nshc)' >&2
+  exit 1
+}
+cp "$ROOT_DIR/target/ohos/hopenconnect-bundle/bundle.nshc" "$ROOT_DIR/entry/src/main/resources/rawfile/hopenconnect.bundle.nshc"
+rm -f "$ROOT_DIR/entry/src/main/resources/rawfile/hopenconnect.bundle.js"
 for companion in app.json capabilities.json; do
   if [ -f "$ROOT_DIR/target/ohos/hopenconnect-bundle/$companion" ]; then
     cp "$ROOT_DIR/target/ohos/hopenconnect-bundle/$companion" "$ROOT_DIR/entry/src/main/resources/rawfile/$companion"
