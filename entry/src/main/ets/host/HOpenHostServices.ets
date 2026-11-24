@@ -1,18 +1,18 @@
-import { ConfigurationConstant, common } from '@kit.AbilityKit';
-import { UIContext } from '@kit.ArkUI';
-import { deviceInfo } from '@kit.BasicServicesKit';
-import { hilog } from '@kit.PerformanceAnalysisKit';
-import { NativeAuthSession, NshHostReply, NshSurface, SystemReply } from '@nsh/harmonyos';
-import window from '@ohos.window';
-import hopenconnectUi, { UiCommandSession } from 'libhopenconnect_ui.so';
-import { describeError } from '../common/Errors';
-import { CertFileService } from './CertFileService';
-import { ExportService } from './ExportService';
-import { QrService } from './QrService';
-import { VpnService } from './VpnService';
+import { ConfigurationConstant, common } from "@kit.AbilityKit";
+import { UIContext } from "@kit.ArkUI";
+import { deviceInfo } from "@kit.BasicServicesKit";
+import { hilog } from "@kit.PerformanceAnalysisKit";
+import { NativeAuthSession, NshHostReply, NshSurface, SystemReply } from "@nsh/harmonyos";
+import window from "@ohos.window";
+import hopenconnectUi, { UiCommandSession } from "libhopenconnect_ui.so";
+import { describeError } from "../common/Errors";
+import { CertFileService } from "./CertFileService";
+import { ExportService } from "./ExportService";
+import { QrService } from "./QrService";
+import { VpnService } from "./VpnService";
 
 const LOG_DOMAIN: number = 0x0000;
-const LOG_TAG: string = 'HOpenHost';
+const LOG_TAG: string = "HOpenHost";
 
 interface UiRequest {
   id: number;
@@ -205,7 +205,7 @@ export class HOpenHostServices {
   private closingAuthProgrammatically: boolean = false;
   private closed: boolean = false;
   private surfaceGeneration: number = 0;
-  private publishedPreferences: string = '';
+  private publishedPreferences: string = "";
   private requestedBarDark?: boolean;
   private barUpdates: Promise<void> = Promise.resolve();
   private connectedTimer: number = -1;
@@ -236,7 +236,7 @@ export class HOpenHostServices {
     }
     const generation = ++this.surfaceGeneration;
     this.surface = surface;
-    this.publishedPreferences = '';
+    this.publishedPreferences = "";
 
     this.authSession = new NativeAuthSession(uiContext);
     this.syncAuthSessionColorMode();
@@ -247,7 +247,12 @@ export class HOpenHostServices {
     try {
       hopenconnectUi.registerExternalBrowserHandler(browserBridge);
     } catch (err) {
-      hilog.warn(LOG_DOMAIN, LOG_TAG, 'register web auth handler failed %{public}s', describeError(err));
+      hilog.warn(
+        LOG_DOMAIN,
+        LOG_TAG,
+        "register web auth handler failed %{public}s",
+        describeError(err),
+      );
     }
 
     const prefs = this.readPreferencesSafe();
@@ -268,42 +273,72 @@ export class HOpenHostServices {
         return false;
       }
       void this.context.openLink(url).catch((err: Error): void => {
-        hilog.warn(LOG_DOMAIN, LOG_TAG, 'openLink failed %{public}s', describeError(err));
+        hilog.warn(LOG_DOMAIN, LOG_TAG, "openLink failed %{public}s", describeError(err));
       });
       return true;
     });
 
-    surface.handle('core.command', (data: string | number | boolean | object | null, reply: NshHostReply): void => {
-      void this.handleCoreCommand(data, reply);
-    });
-    surface.handle('core.subscribe', (data: string | number | boolean | object | null, reply: NshHostReply): void => {
-      this.handleCoreSubscribe(data, reply);
-    });
-    surface.handle('core.query', (data: string | number | boolean | object | null, reply: NshHostReply): void => {
-      void this.handleCoreQuery(data, reply);
-    });
-    surface.handle('platform.pickCertFile', (data: string | number | boolean | object | null, reply: NshHostReply): void => {
-      void this.handlePickCertFile(data, reply);
-    });
-    surface.handle('platform.exportLog', (data: string | number | boolean | object | null, reply: NshHostReply): void => {
-      void this.handleExportLog(data, reply);
-    });
-    surface.handle('platform.openUrl', (data: string | number | boolean | object | null, reply: NshHostReply): void => {
-      void this.handleOpenUrl(data, reply);
-    });
-    surface.handle('platform.qr', (data: string | number | boolean | object | null, reply: NshHostReply): void => {
-      void this.handleGenerateQr(data, reply);
-    });
-    surface.handle('platform.exportQr', (data: string | number | boolean | object | null, reply: NshHostReply): void => {
-      void this.handleExportQr(data, reply);
-    });
-    surface.handle('platform.scanQr', (_data: string | number | boolean | object | null, reply: NshHostReply): void => {
-      void this.handleScanQr(reply);
-    });
-    surface.handle('platform.syncAppearance', (_data: string | number | boolean | object | null, reply: NshHostReply): void => {
-      this.refreshAppearance();
-      reply.resolve({ ok: true } as SimpleOk);
-    });
+    surface.handle(
+      "core.command",
+      (data: string | number | boolean | object | null, reply: NshHostReply): void => {
+        void this.handleCoreCommand(data, reply);
+      },
+    );
+    surface.handle(
+      "core.subscribe",
+      (data: string | number | boolean | object | null, reply: NshHostReply): void => {
+        this.handleCoreSubscribe(data, reply);
+      },
+    );
+    surface.handle(
+      "core.query",
+      (data: string | number | boolean | object | null, reply: NshHostReply): void => {
+        void this.handleCoreQuery(data, reply);
+      },
+    );
+    surface.handle(
+      "platform.pickCertFile",
+      (data: string | number | boolean | object | null, reply: NshHostReply): void => {
+        void this.handlePickCertFile(data, reply);
+      },
+    );
+    surface.handle(
+      "platform.exportLog",
+      (data: string | number | boolean | object | null, reply: NshHostReply): void => {
+        void this.handleExportLog(data, reply);
+      },
+    );
+    surface.handle(
+      "platform.openUrl",
+      (data: string | number | boolean | object | null, reply: NshHostReply): void => {
+        void this.handleOpenUrl(data, reply);
+      },
+    );
+    surface.handle(
+      "platform.qr",
+      (data: string | number | boolean | object | null, reply: NshHostReply): void => {
+        void this.handleGenerateQr(data, reply);
+      },
+    );
+    surface.handle(
+      "platform.exportQr",
+      (data: string | number | boolean | object | null, reply: NshHostReply): void => {
+        void this.handleExportQr(data, reply);
+      },
+    );
+    surface.handle(
+      "platform.scanQr",
+      (_data: string | number | boolean | object | null, reply: NshHostReply): void => {
+        void this.handleScanQr(reply);
+      },
+    );
+    surface.handle(
+      "platform.syncAppearance",
+      (_data: string | number | boolean | object | null, reply: NshHostReply): void => {
+        this.refreshAppearance();
+        reply.resolve({ ok: true } as SimpleOk);
+      },
+    );
 
     void this.observeRevisions(generation);
     void this.observePlatformChanges(generation);
@@ -383,14 +418,14 @@ export class HOpenHostServices {
       // allowing all HTTP/HTTPS IdP & loopback redirects inside upstream's
       // NativeAuthSession sheet. When OpenConnect finishes obtain_cookie,
       // `closeWebAuthSession()` dismisses the sheet automatically.
-      auth.open(key, trimmed, 'hopenconnect', false, (reply: SystemReply): void => {
+      auth.open(key, trimmed, "hopenconnect", false, (reply: SystemReply): void => {
         if (this.activeAuthKey === key) {
           this.activeAuthKey = 0;
         }
         if (this.closingAuthProgrammatically) {
           return;
         }
-        if (reply.phase === 'cancelled' || (reply.error && reply.error.length > 0)) {
+        if (reply.phase === "cancelled" || (reply.error && reply.error.length > 0)) {
           try {
             hopenconnectUi.cancelAuthChallenge();
           } catch (_err) {
@@ -403,7 +438,12 @@ export class HOpenHostServices {
       if (this.activeAuthKey === key) {
         this.activeAuthKey = 0;
       }
-      hilog.warn(LOG_DOMAIN, LOG_TAG, 'NativeAuthSession.open failed %{public}s', describeError(err));
+      hilog.warn(
+        LOG_DOMAIN,
+        LOG_TAG,
+        "NativeAuthSession.open failed %{public}s",
+        describeError(err),
+      );
       return false;
     }
   }
@@ -430,9 +470,9 @@ export class HOpenHostServices {
       return;
     }
     const prefs = this.readPreferencesSafe();
-    if (!prefs || prefs.theme === 'system') {
+    if (!prefs || prefs.theme === "system") {
       this.authSession.setColorMode(ThemeColorMode.SYSTEM);
-    } else if (prefs.theme === 'dark') {
+    } else if (prefs.theme === "dark") {
       this.authSession.setColorMode(ThemeColorMode.DARK);
     } else {
       this.authSession.setColorMode(ThemeColorMode.LIGHT);
@@ -444,30 +484,32 @@ export class HOpenHostServices {
     reply: NshHostReply,
   ): Promise<void> {
     if (this.closed) {
-      reply.reject('Host session is closed');
+      reply.reject("Host session is closed");
       return;
     }
     try {
       const request = data as UiRequest;
-      if (!request || typeof request.command !== 'string') {
-        reply.reject('Invalid command request');
+      if (!request || typeof request.command !== "string") {
+        reply.reject("Invalid command request");
         return;
       }
       const responseJson = await this.session.dispatch(JSON.stringify(request));
       const result = JSON.parse(responseJson) as UiResult;
 
-      if (request.command === 'vpn.cancelConnect' ||
-        request.command === 'vpn.disconnect' ||
-        request.command === 'vpn.resetState' ||
-        request.command === 'auth.cancel') {
+      if (
+        request.command === "vpn.cancelConnect" ||
+        request.command === "vpn.disconnect" ||
+        request.command === "vpn.resetState" ||
+        request.command === "auth.cancel"
+      ) {
         this.closeWebAuthSession();
       }
 
       let startConnectInBackground = false;
       if (result.ok && result.effect) {
-        if (result.effect.kind === 'connect') {
+        if (result.effect.kind === "connect") {
           startConnectInBackground = true;
-        } else if (request.command === 'vpn.resetState' && result.effect.kind === 'stop') {
+        } else if (request.command === "vpn.resetState" && result.effect.kind === "stop") {
           await this.applyResetEffect();
         } else {
           await this.applyPlatformEffect(result.effect);
@@ -476,9 +518,9 @@ export class HOpenHostServices {
 
       this.publishPreferences(this.readPreferencesSafe());
       const criticalOnly =
-        request.command === 'vpn.disconnect' ||
-        request.command === 'vpn.cancelConnect' ||
-        request.command === 'vpn.resetState';
+        request.command === "vpn.disconnect" ||
+        request.command === "vpn.cancelConnect" ||
+        request.command === "vpn.resetState";
       const observation = this.publishChanges(criticalOnly);
       if (result.ok && observation) {
         result.barrier = observation.barrier;
@@ -491,7 +533,7 @@ export class HOpenHostServices {
     } catch (err) {
       this.closeWebAuthSession();
       this.publishChanges(false);
-      reply.reject(describeError(err) || 'Command failed');
+      reply.reject(describeError(err) || "Command failed");
     }
   }
 
@@ -500,7 +542,7 @@ export class HOpenHostServices {
     reply: NshHostReply,
   ): void {
     if (this.closed) {
-      reply.reject('Host session is closed');
+      reply.reject("Host session is closed");
       return;
     }
     try {
@@ -508,7 +550,7 @@ export class HOpenHostServices {
       const change = JSON.parse(changeJson) as StateChanged;
       reply.resolve(change);
     } catch (err) {
-      reply.reject(describeError(err) || 'Subscribe failed');
+      reply.reject(describeError(err) || "Subscribe failed");
     }
   }
 
@@ -517,7 +559,7 @@ export class HOpenHostServices {
     reply: NshHostReply,
   ): Promise<void> {
     if (this.closed) {
-      reply.reject('Host session is closed');
+      reply.reject("Host session is closed");
       return;
     }
     try {
@@ -525,7 +567,7 @@ export class HOpenHostServices {
       const parsed = JSON.parse(responseJson) as Object;
       reply.resolve(parsed);
     } catch (err) {
-      reply.reject(describeError(err) || 'Query failed');
+      reply.reject(describeError(err) || "Query failed");
     }
   }
 
@@ -535,12 +577,13 @@ export class HOpenHostServices {
   ): Promise<void> {
     try {
       const args = (data as PickCertArgs | null) ?? {};
-      const kind = typeof args.kind === 'string' && args.kind.length > 0 ? args.kind : 'certificate';
+      const kind =
+        typeof args.kind === "string" && args.kind.length > 0 ? args.kind : "certificate";
       const path = await this.certFiles.pickCertFile(kind);
       const result: PickCertResult = { path };
       reply.resolve(result);
     } catch (err) {
-      reply.reject(describeError(err) || 'Certificate selection failed');
+      reply.reject(describeError(err) || "Certificate selection failed");
     }
   }
 
@@ -550,26 +593,27 @@ export class HOpenHostServices {
   ): Promise<void> {
     try {
       const args = (data as ExportLogArgs | null) ?? {};
-      const fileName = typeof args.fileName === 'string' && args.fileName.length > 0
-        ? args.fileName
-        : 'h-openconnect-log.log';
-      let content = typeof args.content === 'string' ? args.content : '';
+      const fileName =
+        typeof args.fileName === "string" && args.fileName.length > 0
+          ? args.fileName
+          : "h-openconnect-log.log";
+      let content = typeof args.content === "string" ? args.content : "";
       if (content.length === 0 && args.fileName && args.fileName.length > 0) {
         const readReq: UiRequest = {
           id: 0,
-          command: 'logs.readArchive',
+          command: "logs.readArchive",
           payload: { fileName: args.fileName } as ExportLogArgs,
         };
         const resp = JSON.parse(await this.session.dispatch(JSON.stringify(readReq))) as UiResult;
-        if (!resp.ok || typeof resp.data !== 'string') {
-          throw new Error(resp.error || 'Unable to read log archive');
+        if (!resp.ok || typeof resp.data !== "string") {
+          throw new Error(resp.error || "Unable to read log archive");
         }
         content = resp.data;
       }
       await this.exporter.exportLog(fileName, content);
       reply.resolve({ ok: true } as SimpleOk);
     } catch (err) {
-      reply.reject(describeError(err) || 'Export log failed');
+      reply.reject(describeError(err) || "Export log failed");
     }
   }
 
@@ -579,14 +623,14 @@ export class HOpenHostServices {
   ): Promise<void> {
     try {
       const args = (data as OpenUrlArgs | null) ?? {};
-      const url = typeof args.url === 'string' ? args.url.trim() : '';
+      const url = typeof args.url === "string" ? args.url.trim() : "";
       if (!/^https?:\/\//i.test(url)) {
-        throw new Error('Only HTTP and HTTPS links are supported');
+        throw new Error("Only HTTP and HTTPS links are supported");
       }
       await this.context.openLink(url);
       reply.resolve({ ok: true } as SimpleOk);
     } catch (err) {
-      reply.reject(describeError(err) || 'Open link failed');
+      reply.reject(describeError(err) || "Open link failed");
     }
   }
 
@@ -596,11 +640,11 @@ export class HOpenHostServices {
   ): Promise<void> {
     try {
       const args = (data as QrGenerateArgs | null) ?? {};
-      const text = typeof args.text === 'string' ? args.text : '';
+      const text = typeof args.text === "string" ? args.text : "";
       const image = await this.qr.generateQr(text);
       reply.resolve(image);
     } catch (err) {
-      reply.reject(describeError(err) || 'Generate QR code failed');
+      reply.reject(describeError(err) || "Generate QR code failed");
     }
   }
 
@@ -610,12 +654,12 @@ export class HOpenHostServices {
   ): Promise<void> {
     try {
       const args = (data as QrExportArgs | null) ?? {};
-      const name = typeof args.name === 'string' && args.name.length > 0 ? args.name : 'connection';
-      const pngBase64 = typeof args.pngBase64 === 'string' ? args.pngBase64 : '';
+      const name = typeof args.name === "string" && args.name.length > 0 ? args.name : "connection";
+      const pngBase64 = typeof args.pngBase64 === "string" ? args.pngBase64 : "";
       await this.exporter.exportImage(name, pngBase64);
       reply.resolve({ ok: true } as SimpleOk);
     } catch (err) {
-      reply.reject(describeError(err) || 'Export QR image failed');
+      reply.reject(describeError(err) || "Export QR image failed");
     }
   }
 
@@ -625,7 +669,7 @@ export class HOpenHostServices {
       const result: ScanQrResult = { content };
       reply.resolve(result);
     } catch (err) {
-      reply.reject(describeError(err) || 'Scan QR code failed');
+      reply.reject(describeError(err) || "Scan QR code failed");
     }
   }
 
@@ -646,7 +690,12 @@ export class HOpenHostServices {
       void this.vpn
         .requestStartVpn(optionsJson)
         .catch((err: Error): void => {
-          hilog.warn(LOG_DOMAIN, LOG_TAG, 'background tunnel start failed %{public}s', describeError(err));
+          hilog.warn(
+            LOG_DOMAIN,
+            LOG_TAG,
+            "background tunnel start failed %{public}s",
+            describeError(err),
+          );
         })
         .finally((): void => {
           this.publishChanges(false);
@@ -654,7 +703,7 @@ export class HOpenHostServices {
         });
     } catch (err) {
       this.closeWebAuthSession();
-      hilog.warn(LOG_DOMAIN, LOG_TAG, 'prepare connect failed %{public}s', describeError(err));
+      hilog.warn(LOG_DOMAIN, LOG_TAG, "prepare connect failed %{public}s", describeError(err));
       this.publishChanges(false);
     } finally {
       this.connectInFlight = false;
@@ -667,22 +716,32 @@ export class HOpenHostServices {
     try {
       await this.vpn.requestStopVpn(true);
     } catch (err) {
-      hilog.warn(LOG_DOMAIN, LOG_TAG, 'best-effort tunnel stop during reset skipped %{public}s', describeError(err));
+      hilog.warn(
+        LOG_DOMAIN,
+        LOG_TAG,
+        "best-effort tunnel stop during reset skipped %{public}s",
+        describeError(err),
+      );
     } finally {
       try {
         await hopenconnectUi.finalizeDisconnect();
       } catch (err) {
-        hilog.warn(LOG_DOMAIN, LOG_TAG, 'finalizeDisconnect during reset failed %{public}s', describeError(err));
+        hilog.warn(
+          LOG_DOMAIN,
+          LOG_TAG,
+          "finalizeDisconnect during reset failed %{public}s",
+          describeError(err),
+        );
       }
     }
   }
 
   private async applyPlatformEffect(effect: UiEffect): Promise<void> {
-    if (effect.kind === 'connect') {
+    if (effect.kind === "connect") {
       void this.runConnectBackground();
-    } else if (effect.kind === 'start') {
+    } else if (effect.kind === "start") {
       await this.vpn.requestStartVpn(effect.optionsJson);
-    } else if (effect.kind === 'stop') {
+    } else if (effect.kind === "stop") {
       try {
         await this.vpn.requestStopVpn();
       } finally {
@@ -706,17 +765,18 @@ export class HOpenHostServices {
     try {
       const json = hopenconnectUi.querySession();
       const snap = JSON.parse(json) as SessionSnapshotSeed;
-      const lifecycle = typeof snap.lifecycle === 'string' && snap.lifecycle.length > 0
-        ? snap.lifecycle
-        : 'disconnected';
+      const lifecycle =
+        typeof snap.lifecycle === "string" && snap.lifecycle.length > 0
+          ? snap.lifecycle
+          : "disconnected";
       const busy =
-        lifecycle === 'connecting' ||
-        lifecycle === 'authenticating' ||
-        lifecycle === 'establishing' ||
-        lifecycle === 'disconnecting';
+        lifecycle === "connecting" ||
+        lifecycle === "authenticating" ||
+        lifecycle === "establishing" ||
+        lifecycle === "disconnecting";
       const activeConnectionId = snap.activeConnectionId ?? null;
       const sdkReady = Boolean(snap.sdkReady);
-      const backend = typeof snap.backend === 'string' ? snap.backend : '';
+      const backend = typeof snap.backend === "string" ? snap.backend : "";
       const seeded: InitialDomains = {
         config: {
           activeConnectionId,
@@ -729,7 +789,7 @@ export class HOpenHostServices {
         },
         status: {
           lifecycle,
-          vpnSessionId: '',
+          vpnSessionId: "",
           lastError: snap.lastError ?? null,
           sdkReady,
           backend,
@@ -741,7 +801,7 @@ export class HOpenHostServices {
           profiles: Array.isArray(snap.connections) ? snap.connections : [],
         },
         about: {
-          appVersion: typeof snap.appVersion === 'string' ? snap.appVersion : '',
+          appVersion: typeof snap.appVersion === "string" ? snap.appVersion : "",
           openconnectVersion: snap.anyconnectVersion ?? null,
           backend,
           sdkReady,
@@ -771,17 +831,17 @@ export class HOpenHostServices {
     }
     this.publishedPreferences = serialized;
     this.applyPreferences(prefs);
-    this.surface.send('core.preferences', prefs);
+    this.surface.send("core.preferences", prefs);
   }
 
   private applyPreferences(preferences: UiPreferences): void {
     const dark =
-      preferences.theme === 'dark' ||
-      (preferences.theme === 'system' &&
+      preferences.theme === "dark" ||
+      (preferences.theme === "system" &&
         preferences.systemColorMode === ConfigurationConstant.ColorMode.COLOR_MODE_DARK);
     this.syncAuthSessionColorMode();
 
-    if (deviceInfo.deviceType === '2in1') {
+    if (deviceInfo.deviceType === "2in1") {
       return;
     }
     const target = this.mainWindow;
@@ -794,14 +854,14 @@ export class HOpenHostServices {
         if (this.closed || this.mainWindow !== target || this.requestedBarDark !== dark) {
           return;
         }
-        await target.setWindowBackgroundColor('#00000000');
+        await target.setWindowBackgroundColor("#00000000");
         if (this.closed || this.mainWindow !== target || this.requestedBarDark !== dark) {
           return;
         }
-        const content = dark ? '#ffffffff' : '#ff000000';
+        const content = dark ? "#ffffffff" : "#ff000000";
         await target.setWindowSystemBarProperties({
-          statusBarColor: '#00000000',
-          navigationBarColor: '#00000000',
+          statusBarColor: "#00000000",
+          navigationBarColor: "#00000000",
           statusBarContentColor: content,
           navigationBarContentColor: content,
         });
@@ -810,7 +870,12 @@ export class HOpenHostServices {
         if (this.mainWindow === target && this.requestedBarDark === dark) {
           this.requestedBarDark = undefined;
         }
-        hilog.warn(LOG_DOMAIN, LOG_TAG, 'system bar appearance failed %{public}s', describeError(error));
+        hilog.warn(
+          LOG_DOMAIN,
+          LOG_TAG,
+          "system bar appearance failed %{public}s",
+          describeError(error),
+        );
       });
   }
 
@@ -819,7 +884,7 @@ export class HOpenHostServices {
       return;
     }
     if (change.changes.length > 0) {
-      this.surface.send('core.changed', change);
+      this.surface.send("core.changed", change);
     }
   }
 
@@ -828,9 +893,7 @@ export class HOpenHostServices {
       return undefined;
     }
     try {
-      const observation = JSON.parse(
-        this.session.observeState(criticalOnly),
-      ) as StateObservation;
+      const observation = JSON.parse(this.session.observeState(criticalOnly)) as StateObservation;
       this.emitChanged(observation.change);
       return observation;
     } catch (_err) {
@@ -844,14 +907,16 @@ export class HOpenHostServices {
     }
     try {
       const outcome = JSON.parse(this.session.tickSession()) as TickOutcome;
-      if (outcome.lifecycle === 'connected') {
+      if (outcome.lifecycle === "connected") {
         this.startConnectedTimer();
         this.closeWebAuthSession();
       } else {
         this.stopConnectedTimer();
-        if (outcome.lifecycle === 'establishing' ||
-          outcome.lifecycle === 'disconnected' ||
-          outcome.lifecycle === 'failed') {
+        if (
+          outcome.lifecycle === "establishing" ||
+          outcome.lifecycle === "disconnected" ||
+          outcome.lifecycle === "failed"
+        ) {
           this.closeWebAuthSession();
         }
       }
@@ -893,7 +958,7 @@ export class HOpenHostServices {
     this.autoReconnectInFlight = true;
     const req: UiRequest = {
       id: ++this.autoReconnectId,
-      command: 'vpn.connect',
+      command: "vpn.connect",
       payload: new Object(),
     };
     void this.session
@@ -905,7 +970,7 @@ export class HOpenHostServices {
         }
       })
       .catch((err: Error): void => {
-        hilog.warn(LOG_DOMAIN, LOG_TAG, 'auto-reconnect failed %{public}s', describeError(err));
+        hilog.warn(LOG_DOMAIN, LOG_TAG, "auto-reconnect failed %{public}s", describeError(err));
       })
       .finally((): void => {
         this.autoReconnectInFlight = false;
@@ -914,7 +979,7 @@ export class HOpenHostServices {
   }
 
   private async observeRevisions(generation: number): Promise<void> {
-    let revision = '0';
+    let revision = "0";
     const initial = this.publishChanges(false);
     if (initial) {
       revision = String(initial.change.revision);
@@ -935,7 +1000,7 @@ export class HOpenHostServices {
         }
         this.runSessionTick();
       } catch (err) {
-        hilog.warn(LOG_DOMAIN, LOG_TAG, 'revision observer error %{public}s', describeError(err));
+        hilog.warn(LOG_DOMAIN, LOG_TAG, "revision observer error %{public}s", describeError(err));
         await new Promise<void>((resolve): void => {
           setTimeout((): void => resolve(), 500);
         });
@@ -967,7 +1032,12 @@ export class HOpenHostServices {
         this.runSessionTick();
         this.publishChanges(false);
       } catch (err) {
-        hilog.warn(LOG_DOMAIN, LOG_TAG, 'platform change observer error %{public}s', describeError(err));
+        hilog.warn(
+          LOG_DOMAIN,
+          LOG_TAG,
+          "platform change observer error %{public}s",
+          describeError(err),
+        );
         await new Promise<void>((resolve): void => {
           setTimeout((): void => resolve(), 500);
         });
@@ -986,7 +1056,7 @@ export function installHOpenHost(context: common.UIAbilityContext): HOpenHostSer
 
 export function hopenHost(): HOpenHostServices {
   if (!currentHost) {
-    throw new Error('H-OpenConnect host services are not initialized');
+    throw new Error("H-OpenConnect host services are not initialized");
   }
   return currentHost;
 }

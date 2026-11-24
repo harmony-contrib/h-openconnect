@@ -1,9 +1,9 @@
-import { common } from '@kit.AbilityKit';
-import { util } from '@kit.ArkTS';
-import { deviceInfo } from '@kit.BasicServicesKit';
-import { image } from '@kit.ImageKit';
-import { generateBarcode, scanBarcode, scanCore } from '@kit.ScanKit';
-import { describeError } from '../common/Errors';
+import { common } from "@kit.AbilityKit";
+import { util } from "@kit.ArkTS";
+import { deviceInfo } from "@kit.BasicServicesKit";
+import { image } from "@kit.ImageKit";
+import { generateBarcode, scanBarcode, scanCore } from "@kit.ScanKit";
+import { describeError } from "../common/Errors";
 
 const SCAN_CANCELLED_CODE: number = 1000500002;
 const MAX_QR_BYTES: number = 2953;
@@ -23,24 +23,26 @@ export interface QrImageResult {
  */
 export class QrService {
   canGenerateQr(): boolean {
-    return canIUse('SystemCapability.Multimedia.Scan.GenerateBarcode');
+    return canIUse("SystemCapability.Multimedia.Scan.GenerateBarcode");
   }
 
   canScanQr(): boolean {
-    return deviceInfo.deviceType !== '2in1' && canIUse('SystemCapability.Multimedia.Scan.ScanBarcode');
+    return (
+      deviceInfo.deviceType !== "2in1" && canIUse("SystemCapability.Multimedia.Scan.ScanBarcode")
+    );
   }
 
   async generateQr(text: string): Promise<QrImageResult> {
     if (!this.canGenerateQr()) {
-      throw new Error('QR code generation is not supported on this device');
+      throw new Error("QR code generation is not supported on this device");
     }
     if (!text || text.length === 0) {
-      throw new Error('QR payload is empty');
+      throw new Error("QR payload is empty");
     }
-    const encoder = util.TextEncoder.create('utf-8');
+    const encoder = util.TextEncoder.create("utf-8");
     const encoded: Uint8Array = encoder.encodeInto(text);
     if (!encoded || encoded.byteLength === 0 || encoded.byteLength > MAX_QR_BYTES) {
-      throw new Error('Connection configuration is too large for a QR code');
+      throw new Error("Connection configuration is too large for a QR code");
     }
     const contentBuffer: ArrayBuffer = encoded.buffer.slice(
       encoded.byteOffset,
@@ -51,9 +53,10 @@ export class QrService {
       width: 1024,
       height: 1024,
       margin: 4,
-      level: encoded.byteLength > LEVEL_M_MAX_BYTES
-        ? generateBarcode.ErrorCorrectionLevel.LEVEL_L
-        : generateBarcode.ErrorCorrectionLevel.LEVEL_M,
+      level:
+        encoded.byteLength > LEVEL_M_MAX_BYTES
+          ? generateBarcode.ErrorCorrectionLevel.LEVEL_L
+          : generateBarcode.ErrorCorrectionLevel.LEVEL_M,
     };
     // Use the ArrayBuffer overload: ScanKit caps createBarcode(string, ...) at
     // 512 characters (error 401), whereas serialized connection profiles are
@@ -62,7 +65,7 @@ export class QrService {
     try {
       const packer = image.createImagePacker();
       try {
-        const packing: image.PackingOption = { format: 'image/png', quality: 100 };
+        const packing: image.PackingOption = { format: "image/png", quality: 100 };
         const png: ArrayBuffer = await packer.packToData(bitmap, packing);
         const pngBase64 = new util.Base64Helper().encodeToStringSync(new Uint8Array(png));
         return {
@@ -79,7 +82,7 @@ export class QrService {
 
   async scanQr(context: common.UIAbilityContext): Promise<string> {
     if (!this.canScanQr()) {
-      throw new Error('QR code scanning is not supported on this device');
+      throw new Error("QR code scanning is not supported on this device");
     }
     const options: scanBarcode.ScanOptions = {
       scanTypes: [scanCore.ScanType.QR_CODE],
@@ -88,13 +91,13 @@ export class QrService {
     };
     try {
       const result: scanBarcode.ScanResult = await scanBarcode.startScanForResult(context, options);
-      return (result.originalValue ?? '').trim();
+      return (result.originalValue ?? "").trim();
     } catch (err) {
       const error = err as ScanErrorLike;
       if (error.code === SCAN_CANCELLED_CODE) {
-        return '';
+        return "";
       }
-      throw new Error(describeError(err) || 'scan QR code failed');
+      throw new Error(describeError(err) || "scan QR code failed");
     }
   }
 }

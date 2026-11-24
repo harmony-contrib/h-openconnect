@@ -1,11 +1,11 @@
-import { common } from '@kit.AbilityKit';
-import { fileIo, picker } from '@kit.CoreFileKit';
-import { hilog } from '@kit.PerformanceAnalysisKit';
-import hopenconnectUi from 'libhopenconnect_ui.so';
-import { describeError } from '../common/Errors';
+import { common } from "@kit.AbilityKit";
+import { fileIo, picker } from "@kit.CoreFileKit";
+import { hilog } from "@kit.PerformanceAnalysisKit";
+import hopenconnectUi from "libhopenconnect_ui.so";
+import { describeError } from "../common/Errors";
 
 const LOG_DOMAIN: number = 0x0000;
-const LOG_TAG: string = 'HOpenConnectCertFile';
+const LOG_TAG: string = "HOpenConnectCertFile";
 
 /**
  * Selects a client/CA certificate or private key via the system document
@@ -24,11 +24,11 @@ export class CertFileService {
     this.ensureCertDir(dir);
     const options = new picker.DocumentSelectOptions();
     options.maxSelectNumber = 1;
-    options.fileSuffixFilters = ['.pem', '.crt', '.cer', '.key', '.p12', '.pfx', '.der', '.ca'];
+    options.fileSuffixFilters = [".pem", ".crt", ".cer", ".key", ".p12", ".pfx", ".der", ".ca"];
     const documentPicker = new picker.DocumentViewPicker(this.context);
     const uris: Array<string> = await documentPicker.select(options);
     if (!uris || uris.length === 0) {
-      return '';
+      return "";
     }
     const srcUri = uris[0];
     const baseName = this.fileNameFromUri(srcUri, kind);
@@ -46,24 +46,24 @@ export class CertFileService {
       try {
         fileIo.mkdirSync(dir, true);
       } catch (mkdirErr) {
-        hilog.error(LOG_DOMAIN, LOG_TAG, 'mkdir certs failed %{public}s', describeError(mkdirErr));
+        hilog.error(LOG_DOMAIN, LOG_TAG, "mkdir certs failed %{public}s", describeError(mkdirErr));
       }
     }
   }
 
   private fileNameFromUri(uri: string, kind: string): string {
     try {
-      const noQuery = uri.split('?')[0];
-      const segments = noQuery.split('/');
-      let last = segments.length > 0 ? segments[segments.length - 1] : '';
+      const noQuery = uri.split("?")[0];
+      const segments = noQuery.split("/");
+      let last = segments.length > 0 ? segments[segments.length - 1] : "";
       last = decodeURIComponent(last);
-      if (last && last.indexOf('.') > 0 && last.length < 128) {
-        return last.replace(/[\\/]/g, '_');
+      if (last && last.indexOf(".") > 0 && last.length < 128) {
+        return last.replace(/[\\/]/g, "_");
       }
     } catch (_err) {
       // fall through
     }
-    const ext = kind === 'private_key' ? 'key' : kind === 'ca_certificate' ? 'crt' : 'pem';
+    const ext = kind === "private_key" ? "key" : kind === "ca_certificate" ? "crt" : "pem";
     return `${kind}.${ext}`;
   }
 
@@ -96,7 +96,7 @@ export class CertFileService {
         }
       }
       if (total === 0) {
-        throw new Error('selected certificate file is empty');
+        throw new Error("selected certificate file is empty");
       }
       hopenconnectUi.securePrivateFile(destPath);
       completed = true;

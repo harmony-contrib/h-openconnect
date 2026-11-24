@@ -9,11 +9,11 @@
  *
  * No generateVpnId / multitun. Classic vpn-tun only (paws).
  */
-import { Want } from '@kit.AbilityKit';
-import { vpnExtension, VpnExtensionAbility } from '@kit.NetworkKit';
-import { hilog } from '@kit.PerformanceAnalysisKit';
-import hopenconnectUi from 'libhopenconnect_ui.so';
-import { configureNativePlatformIdentity } from '../common/PlatformIdentity';
+import { Want } from "@kit.AbilityKit";
+import { vpnExtension, VpnExtensionAbility } from "@kit.NetworkKit";
+import { hilog } from "@kit.PerformanceAnalysisKit";
+import hopenconnectUi from "libhopenconnect_ui.so";
+import { configureNativePlatformIdentity } from "../common/PlatformIdentity";
 import {
   buildVpnConfig,
   HOpenPlatformSharedMemoryFds,
@@ -23,10 +23,10 @@ import {
   readPlatformStartAttemptId,
   readOptionsJson,
   setHOpenBundleName,
-} from './VpnConfig';
+} from "./VpnConfig";
 
 const LOG_DOMAIN: number = 0x0000;
-const LOG_TAG: string = 'HOpenConnectVpn';
+const LOG_TAG: string = "HOpenConnectVpn";
 const PREPARE_TIMEOUT_MS: number = 120000;
 const PLATFORM_OPERATION_TIMEOUT_MS: number = 30000;
 
@@ -36,45 +36,49 @@ interface PlatformVpnHandoffPayload {
 }
 
 function withTimeout<T>(operation: Promise<T>, timeoutMs: number, label: string): Promise<T> {
-  return new Promise<T>((resolve: (value: T) => void, reject: (reason?: Object | string) => void): void => {
-    let settled: boolean = false;
-    const timer: number = setTimeout((): void => {
-      if (!settled) {
-        settled = true;
-        reject(new Error(`${label} timed out after ${timeoutMs}ms`));
-      }
-    }, timeoutMs);
-    operation.then((value: T): void => {
-      if (!settled) {
-        settled = true;
-        clearTimeout(timer);
-        resolve(value);
-      }
-    }).catch((err: Error): void => {
-      if (!settled) {
-        settled = true;
-        clearTimeout(timer);
-        reject(err);
-      }
-    });
-  });
+  return new Promise<T>(
+    (resolve: (value: T) => void, reject: (reason?: Object | string) => void): void => {
+      let settled: boolean = false;
+      const timer: number = setTimeout((): void => {
+        if (!settled) {
+          settled = true;
+          reject(new Error(`${label} timed out after ${timeoutMs}ms`));
+        }
+      }, timeoutMs);
+      operation
+        .then((value: T): void => {
+          if (!settled) {
+            settled = true;
+            clearTimeout(timer);
+            resolve(value);
+          }
+        })
+        .catch((err: Error): void => {
+          if (!settled) {
+            settled = true;
+            clearTimeout(timer);
+            reject(err);
+          }
+        });
+    },
+  );
 }
 
 function describeError(err: Error | Object | string | number | boolean | null | undefined): string {
   if (err instanceof Error) {
     return `${err.name}: ${err.message}`;
   }
-  if (typeof err === 'string') {
+  if (typeof err === "string") {
     return err;
   }
-  if (typeof err === 'number' || typeof err === 'boolean') {
+  if (typeof err === "number" || typeof err === "boolean") {
     return err.toString();
   }
   if (!err) {
-    return '';
+    return "";
   }
   const json = JSON.stringify(err);
-  return json && json !== '{}' ? json : err.toString();
+  return json && json !== "{}" ? json : err.toString();
 }
 
 export default class HOpenConnectVpnExtensionAbility extends VpnExtensionAbility {
@@ -84,9 +88,9 @@ export default class HOpenConnectVpnExtensionAbility extends VpnExtensionAbility
   private platformSubscriptionActive: boolean = false;
   private platformSubscriptionGeneration: number = 0;
   private requestGeneration: number = 0;
-  private inFlightAttemptId: string = '';
-  private pendingHandoffAttemptId: string = '';
-  private activeAttemptId: string = '';
+  private inFlightAttemptId: string = "";
+  private pendingHandoffAttemptId: string = "";
+  private activeAttemptId: string = "";
   private heartbeatTimer: number = -1;
   private requestChain: Promise<void> = Promise.resolve();
   private pendingPlatformOperation?: Promise<void>;
@@ -96,23 +100,23 @@ export default class HOpenConnectVpnExtensionAbility extends VpnExtensionAbility
 
   public onCreate(want: Want): void {
     super.onCreate(want);
-    hilog.info(LOG_DOMAIN, LOG_TAG, 'onCreate');
+    hilog.info(LOG_DOMAIN, LOG_TAG, "onCreate");
     this.startFromWant(want);
   }
 
   public onRequest(want: Want, startId: number): void {
-    hilog.info(LOG_DOMAIN, LOG_TAG, 'onRequest %{public}d', startId);
+    hilog.info(LOG_DOMAIN, LOG_TAG, "onRequest %{public}d", startId);
     this.startFromWant(want);
   }
 
   public onDestroy(): void {
-    hilog.info(LOG_DOMAIN, LOG_TAG, 'onDestroy');
+    hilog.info(LOG_DOMAIN, LOG_TAG, "onDestroy");
     this.requestGeneration += 1;
-    this.pendingHandoffAttemptId = '';
+    this.pendingHandoffAttemptId = "";
     this.stopHeartbeat();
     this.stopPlatformSubscription();
     this.destroyVpn().catch((err: Error): void => {
-      hilog.error(LOG_DOMAIN, LOG_TAG, 'onDestroy cleanup failed %{public}s', describeError(err));
+      hilog.error(LOG_DOMAIN, LOG_TAG, "onDestroy cleanup failed %{public}s", describeError(err));
     });
   }
 
@@ -120,40 +124,45 @@ export default class HOpenConnectVpnExtensionAbility extends VpnExtensionAbility
     try {
       setHOpenBundleName(this.context.applicationInfo.name);
       const home = `${this.context.filesDir}/h-openconnect`;
-      if (typeof (hopenconnectUi as ESObject).configureAppHomeForExtension === 'function') {
+      if (typeof (hopenconnectUi as ESObject).configureAppHomeForExtension === "function") {
         (hopenconnectUi as ESObject).configureAppHomeForExtension(home);
       } else {
         hopenconnectUi.configureAppHome(home);
       }
-      hilog.info(LOG_DOMAIN, LOG_TAG, 'configured native home (extension)');
+      hilog.info(LOG_DOMAIN, LOG_TAG, "configured native home (extension)");
     } catch (err) {
-      const message = describeError(err) || 'configure native home failed';
-      hilog.error(LOG_DOMAIN, LOG_TAG, 'configure native home failed %{private}s', message);
+      const message = describeError(err) || "configure native home failed";
+      hilog.error(LOG_DOMAIN, LOG_TAG, "configure native home failed %{private}s", message);
       throw new Error(message);
     }
   }
 
   private registerIcsSocketProtect(connection: vpnExtension.VpnConnection): void {
-    if (typeof (hopenconnectUi as ESObject).registerSocketProtect !== 'function') {
-      throw new Error('native socket protect registration is unavailable');
+    if (typeof (hopenconnectUi as ESObject).registerSocketProtect !== "function") {
+      throw new Error("native socket protect registration is unavailable");
     }
     (hopenconnectUi as ESObject).registerSocketProtect({
       protectSocket: async (fd: number): Promise<void> => {
         if (fd < 0 || this.vpnConnection !== connection) {
-          throw new Error('VpnConnection is unavailable');
+          throw new Error("VpnConnection is unavailable");
         }
         try {
           await connection.protect(fd);
-          hilog.info(LOG_DOMAIN, LOG_TAG, 'protect(fd) ok fd=%{public}d', fd);
+          hilog.info(LOG_DOMAIN, LOG_TAG, "protect(fd) ok fd=%{public}d", fd);
         } catch (err) {
           const message = describeError(err);
-          hilog.error(LOG_DOMAIN, LOG_TAG, 'protect(fd) failed fd=%{public}d %{public}s',
-            fd, message);
-          throw new Error(message || 'protect(fd) failed');
+          hilog.error(
+            LOG_DOMAIN,
+            LOG_TAG,
+            "protect(fd) failed fd=%{public}d %{public}s",
+            fd,
+            message,
+          );
+          throw new Error(message || "protect(fd) failed");
         }
       },
     });
-    hilog.info(LOG_DOMAIN, LOG_TAG, 'ics socket protect registered');
+    hilog.info(LOG_DOMAIN, LOG_TAG, "ics socket protect registered");
   }
 
   private startFromWant(want: Want): void {
@@ -161,7 +170,7 @@ export default class HOpenConnectVpnExtensionAbility extends VpnExtensionAbility
       configureNativePlatformIdentity(this.context, hopenconnectUi);
       this.configureNativeHome();
     } catch (err) {
-      hilog.error(LOG_DOMAIN, LOG_TAG, 'VPN request rejected %{public}s', describeError(err));
+      hilog.error(LOG_DOMAIN, LOG_TAG, "VPN request rejected %{public}s", describeError(err));
       return;
     }
     const sharedMemory = readPlatformSharedMemoryFds(want);
@@ -171,8 +180,12 @@ export default class HOpenConnectVpnExtensionAbility extends VpnExtensionAbility
         const handoffToken = readPlatformHandoffToken(want);
         this.receivePlatformHandoff(attemptId, handoffToken);
       } catch (err) {
-        hilog.error(LOG_DOMAIN, LOG_TAG,
-          'descriptor-free VPN bootstrap rejected %{public}s', describeError(err));
+        hilog.error(
+          LOG_DOMAIN,
+          LOG_TAG,
+          "descriptor-free VPN bootstrap rejected %{public}s",
+          describeError(err),
+        );
       }
       return;
     }
@@ -182,39 +195,56 @@ export default class HOpenConnectVpnExtensionAbility extends VpnExtensionAbility
       attemptId = readPlatformStartAttemptId(want);
       optionsJson = readOptionsJson(want);
     } catch (err) {
-      const message = describeError(err) || 'VPN request has invalid parameters';
-      hilog.error(LOG_DOMAIN, LOG_TAG, 'VPN request rejected %{public}s', message);
+      const message = describeError(err) || "VPN request has invalid parameters";
+      hilog.error(LOG_DOMAIN, LOG_TAG, "VPN request rejected %{public}s", message);
       return;
     }
     this.queueRequest(attemptId, optionsJson, sharedMemory);
   }
 
   private receivePlatformHandoff(attemptId: string, handoffToken: string): void {
-    if (attemptId === this.pendingHandoffAttemptId || attemptId === this.inFlightAttemptId ||
-      attemptId === this.activeAttemptId) {
+    if (
+      attemptId === this.pendingHandoffAttemptId ||
+      attemptId === this.inFlightAttemptId ||
+      attemptId === this.activeAttemptId
+    ) {
       return;
     }
     this.pendingHandoffAttemptId = attemptId;
-    hilog.info(LOG_DOMAIN, LOG_TAG,
-      'waiting for VPN session FD handoff attempt %{public}s', attemptId);
-    hopenconnectUi.receiveAndAttachPlatformVpnHandoff(handoffToken).then(
-      (payloadJson: string): void => {
+    hilog.info(
+      LOG_DOMAIN,
+      LOG_TAG,
+      "waiting for VPN session FD handoff attempt %{public}s",
+      attemptId,
+    );
+    hopenconnectUi
+      .receiveAndAttachPlatformVpnHandoff(handoffToken)
+      .then((payloadJson: string): void => {
         const payload = JSON.parse(payloadJson) as PlatformVpnHandoffPayload;
-        if (payload.attemptId !== attemptId || typeof payload.optionsJson !== 'string') {
-          throw new Error('VPN session FD handoff payload does not match the bootstrap attempt');
+        if (payload.attemptId !== attemptId || typeof payload.optionsJson !== "string") {
+          throw new Error("VPN session FD handoff payload does not match the bootstrap attempt");
         }
-        hilog.info(LOG_DOMAIN, LOG_TAG,
-          'received and attached VPN session FD handoff attempt %{public}s', attemptId);
+        hilog.info(
+          LOG_DOMAIN,
+          LOG_TAG,
+          "received and attached VPN session FD handoff attempt %{public}s",
+          attemptId,
+        );
         this.queueRequest(attemptId, payload.optionsJson);
-      },
-    ).catch((err: Error): void => {
-      hilog.error(LOG_DOMAIN, LOG_TAG,
-        'VPN session FD handoff failed %{public}s', describeError(err));
-    }).finally((): void => {
-      if (this.pendingHandoffAttemptId === attemptId) {
-        this.pendingHandoffAttemptId = '';
-      }
-    });
+      })
+      .catch((err: Error): void => {
+        hilog.error(
+          LOG_DOMAIN,
+          LOG_TAG,
+          "VPN session FD handoff failed %{public}s",
+          describeError(err),
+        );
+      })
+      .finally((): void => {
+        if (this.pendingHandoffAttemptId === attemptId) {
+          this.pendingHandoffAttemptId = "";
+        }
+      });
   }
 
   private queueRequest(
@@ -222,11 +252,10 @@ export default class HOpenConnectVpnExtensionAbility extends VpnExtensionAbility
     optionsJson: string,
     sharedMemory?: HOpenPlatformSharedMemoryFds,
   ): void {
-    if (sharedMemory && !this.isLatestWant(
-      sharedMemory.ashmemFd,
-      sharedMemory.notificationFd,
-      attemptId,
-    )) {
+    if (
+      sharedMemory &&
+      !this.isLatestWant(sharedMemory.ashmemFd, sharedMemory.notificationFd, attemptId)
+    ) {
       return;
     }
     if (attemptId === this.inFlightAttemptId || attemptId === this.activeAttemptId) {
@@ -234,35 +263,37 @@ export default class HOpenConnectVpnExtensionAbility extends VpnExtensionAbility
     }
     const generation = ++this.requestGeneration;
     this.inFlightAttemptId = attemptId;
-    this.requestChain = this.requestChain.then(async (): Promise<void> => {
-      await this.handleRequest(
-        attemptId,
-        optionsJson,
-        generation,
-        sharedMemory,
-      );
-    }).catch(async (err: Error): Promise<void> => {
-      if (generation !== this.requestGeneration || this.inFlightAttemptId !== attemptId) {
-        return;
-      }
-      const message = describeError(err) || 'vpn start failed';
-      if (this.activeAttemptId === attemptId) {
-        this.recordVpnFailureForAttempt(attemptId, message);
-        await this.destroyVpn();
-      } else {
-        try {
-          hopenconnectUi.failUnattachedPlatformVpnStart(attemptId, message);
-        } catch (innerErr) {
-          hilog.error(LOG_DOMAIN, LOG_TAG, 'publish unattached VPN failure failed %{public}s',
-            describeError(innerErr));
+    this.requestChain = this.requestChain
+      .then(async (): Promise<void> => {
+        await this.handleRequest(attemptId, optionsJson, generation, sharedMemory);
+      })
+      .catch(async (err: Error): Promise<void> => {
+        if (generation !== this.requestGeneration || this.inFlightAttemptId !== attemptId) {
+          return;
         }
-      }
-      hilog.error(LOG_DOMAIN, LOG_TAG, 'VPN start failed %{public}s', message);
-    }).finally((): void => {
-      if (generation === this.requestGeneration && this.inFlightAttemptId === attemptId) {
-        this.inFlightAttemptId = '';
-      }
-    });
+        const message = describeError(err) || "vpn start failed";
+        if (this.activeAttemptId === attemptId) {
+          this.recordVpnFailureForAttempt(attemptId, message);
+          await this.destroyVpn();
+        } else {
+          try {
+            hopenconnectUi.failUnattachedPlatformVpnStart(attemptId, message);
+          } catch (innerErr) {
+            hilog.error(
+              LOG_DOMAIN,
+              LOG_TAG,
+              "publish unattached VPN failure failed %{public}s",
+              describeError(innerErr),
+            );
+          }
+        }
+        hilog.error(LOG_DOMAIN, LOG_TAG, "VPN start failed %{public}s", message);
+      })
+      .finally((): void => {
+        if (generation === this.requestGeneration && this.inFlightAttemptId === attemptId) {
+          this.inFlightAttemptId = "";
+        }
+      });
   }
 
   private async handleRequest(
@@ -287,10 +318,7 @@ export default class HOpenConnectVpnExtensionAbility extends VpnExtensionAbility
       // A reused extension may still have an event waiter parked on the previous
       // UI process's notification socket. Stop it before replacing the IPC pair.
       this.stopPlatformSubscription();
-      hopenconnectUi.attachPlatformSharedMemory(
-        sharedMemory.ashmemFd,
-        sharedMemory.notificationFd,
-      );
+      hopenconnectUi.attachPlatformSharedMemory(sharedMemory.ashmemFd, sharedMemory.notificationFd);
     }
     if (this.activeAttemptId.length > 0 && this.activeAttemptId !== attemptId) {
       await this.destroyVpn();
@@ -304,7 +332,7 @@ export default class HOpenConnectVpnExtensionAbility extends VpnExtensionAbility
     hilog.info(
       LOG_DOMAIN,
       LOG_TAG,
-      'bound VPN owner attempt %{public}s process %{public}s',
+      "bound VPN owner attempt %{public}s process %{public}s",
       attemptId,
       ownerIdentity,
     );
@@ -312,24 +340,27 @@ export default class HOpenConnectVpnExtensionAbility extends VpnExtensionAbility
     this.activeAttemptId = attemptId;
 
     const boundLifecycle = this.extensionTick(attemptId);
-    if (boundLifecycle === 'failed' || boundLifecycle === 'disconnected' ||
-      boundLifecycle === 'stopping') {
+    if (
+      boundLifecycle === "failed" ||
+      boundLifecycle === "disconnected" ||
+      boundLifecycle === "stopping"
+    ) {
       await this.destroyVpn();
       return;
     }
 
     if (this.tunFd >= 0 && this.vpnConnection) {
-      if (boundLifecycle === 'connected') {
+      if (boundLifecycle === "connected") {
         this.startHeartbeat(generation, attemptId);
-        hilog.info(LOG_DOMAIN, LOG_TAG, 'healthy VPN rebound to shared memory');
+        hilog.info(LOG_DOMAIN, LOG_TAG, "healthy VPN rebound to shared memory");
         return;
       }
       await this.destroyVpn();
-      throw new Error('existing native VPN owner is no longer connected');
+      throw new Error("existing native VPN owner is no longer connected");
     }
 
     this.starting = true;
-    hilog.info(LOG_DOMAIN, LOG_TAG, 'optionsJson length=%{public}d', optionsJson.length);
+    hilog.info(LOG_DOMAIN, LOG_TAG, "optionsJson length=%{public}d", optionsJson.length);
     try {
       await this.performStart(optionsJson, attemptId, generation);
     } finally {
@@ -349,15 +380,17 @@ export default class HOpenConnectVpnExtensionAbility extends VpnExtensionAbility
       return true;
     } catch (err) {
       try {
-        if (hopenconnectUi.acknowledgeTerminalPlatformVpnStartDelivery(
-          ashmemFd,
-          notificationFd,
-          attemptId,
-        )) {
+        if (
+          hopenconnectUi.acknowledgeTerminalPlatformVpnStartDelivery(
+            ashmemFd,
+            notificationFd,
+            attemptId,
+          )
+        ) {
           hilog.info(
             LOG_DOMAIN,
             LOG_TAG,
-            'acknowledged delivery of terminal VPN request %{public}s',
+            "acknowledged delivery of terminal VPN request %{public}s",
             attemptId,
           );
         }
@@ -365,14 +398,14 @@ export default class HOpenConnectVpnExtensionAbility extends VpnExtensionAbility
         hilog.warn(
           LOG_DOMAIN,
           LOG_TAG,
-          'terminal VPN delivery acknowledgement failed %{public}s',
+          "terminal VPN delivery acknowledgement failed %{public}s",
           describeError(ackErr),
         );
       }
       hilog.warn(
         LOG_DOMAIN,
         LOG_TAG,
-        'ignored stale VPN request %{public}s %{public}s',
+        "ignored stale VPN request %{public}s %{public}s",
         attemptId,
         describeError(err),
       );
@@ -385,9 +418,11 @@ export default class HOpenConnectVpnExtensionAbility extends VpnExtensionAbility
     attemptId: string,
     connection?: vpnExtension.VpnConnection,
   ): void {
-    if (!this.isCurrentRequest(generation, attemptId) ||
-      (connection !== undefined && this.vpnConnection !== connection)) {
-      throw new Error('stale VPN request generation');
+    if (
+      !this.isCurrentRequest(generation, attemptId) ||
+      (connection !== undefined && this.vpnConnection !== connection)
+    ) {
+      throw new Error("stale VPN request generation");
     }
   }
 
@@ -408,7 +443,12 @@ export default class HOpenConnectVpnExtensionAbility extends VpnExtensionAbility
     try {
       hopenconnectUi.cancelPlatformChangeWait();
     } catch (err) {
-      hilog.warn(LOG_DOMAIN, LOG_TAG, 'cancel platform change wait failed %{public}s', describeError(err));
+      hilog.warn(
+        LOG_DOMAIN,
+        LOG_TAG,
+        "cancel platform change wait failed %{public}s",
+        describeError(err),
+      );
     }
   }
 
@@ -431,7 +471,12 @@ export default class HOpenConnectVpnExtensionAbility extends VpnExtensionAbility
           }
         }
       } catch (err) {
-        hilog.error(LOG_DOMAIN, LOG_TAG, 'platform subscription failed %{public}s', describeError(err));
+        hilog.error(
+          LOG_DOMAIN,
+          LOG_TAG,
+          "platform subscription failed %{public}s",
+          describeError(err),
+        );
         if (generation === this.platformSubscriptionGeneration) {
           this.platformSubscriptionActive = false;
         }
@@ -448,7 +493,7 @@ export default class HOpenConnectVpnExtensionAbility extends VpnExtensionAbility
     await this.waitForPendingCleanup();
     this.requireCurrentRequest(generation, attemptId);
     if (!hopenconnectUi.setPlatformVpnStarting(attemptId, true)) {
-      throw new Error('platform VPN start attempt is no longer active');
+      throw new Error("platform VPN start attempt is no longer active");
     }
 
     const connection = vpnExtension.createVpnConnection(this.context);
@@ -460,27 +505,30 @@ export default class HOpenConnectVpnExtensionAbility extends VpnExtensionAbility
     const prepared: string = await withTimeout(
       hopenconnectUi.prepareVpnInExtension(optionsJson),
       PREPARE_TIMEOUT_MS,
-      'native VPN prepare',
+      "native VPN prepare",
     );
     this.requireCurrentRequest(generation, attemptId, connection);
-    if (typeof prepared === 'string' && prepared.length > 2) {
+    if (typeof prepared === "string" && prepared.length > 2) {
       effectiveOptionsJson = prepared;
-      hilog.info(LOG_DOMAIN, LOG_TAG, 'extension prepare ok len=%{public}d', prepared.length);
+      hilog.info(LOG_DOMAIN, LOG_TAG, "extension prepare ok len=%{public}d", prepared.length);
     }
 
     const options = parseOptions(effectiveOptionsJson);
     if (!options.addresses || options.addresses.length === 0) {
-      throw new Error('extension prepare returned no VPN addresses');
+      throw new Error("extension prepare returned no VPN addresses");
     }
 
     // 2) paws-shaped system VPN config (see VpnConfig.ets).
     const config: vpnExtension.VpnConfig = buildVpnConfig(options);
-    hilog.info(LOG_DOMAIN, LOG_TAG,
-      'create VpnConfig mtu=%{public}d addresses=%{public}d routes=%{public}d dns=%{public}d',
+    hilog.info(
+      LOG_DOMAIN,
+      LOG_TAG,
+      "create VpnConfig mtu=%{public}d addresses=%{public}d routes=%{public}d dns=%{public}d",
       config.mtu ?? 0,
       config.addresses ? config.addresses.length : 0,
       config.routes ? config.routes.length : 0,
-      config.dnsAddresses ? config.dnsAddresses.length : 0);
+      config.dnsAddresses ? config.dnsAddresses.length : 0,
+    );
 
     let createSettled: boolean = false;
     let createOperation: Promise<number>;
@@ -489,11 +537,13 @@ export default class HOpenConnectVpnExtensionAbility extends VpnExtensionAbility
     } catch (err) {
       throw new Error(`VpnConnection.create rejected synchronously: ${describeError(err)}`);
     }
-    const createBarrier: Promise<void> = createOperation.then((_fd: number): void => {
-      createSettled = true;
-    }).catch((_err: Error): void => {
-      createSettled = true;
-    });
+    const createBarrier: Promise<void> = createOperation
+      .then((_fd: number): void => {
+        createSettled = true;
+      })
+      .catch((_err: Error): void => {
+        createSettled = true;
+      });
     this.pendingPlatformOperation = createBarrier;
     this.pendingPlatformOperationConnection = connection;
     let fd: number;
@@ -501,7 +551,7 @@ export default class HOpenConnectVpnExtensionAbility extends VpnExtensionAbility
       fd = await withTimeout(
         createOperation,
         PLATFORM_OPERATION_TIMEOUT_MS,
-        'VpnConnection.create',
+        "VpnConnection.create",
       );
     } finally {
       if (createSettled && this.pendingPlatformOperation === createBarrier) {
@@ -511,28 +561,30 @@ export default class HOpenConnectVpnExtensionAbility extends VpnExtensionAbility
     }
     if (!this.isCurrentRequest(generation, attemptId) || this.vpnConnection !== connection) {
       await this.destroyVpn();
-      throw new Error('stale VPN request generation after TUN create');
+      throw new Error("stale VPN request generation after TUN create");
     }
     this.tunFd = fd;
-    hilog.info(LOG_DOMAIN, LOG_TAG, 'VPN TUN fd=%{public}d', fd);
+    hilog.info(LOG_DOMAIN, LOG_TAG, "VPN TUN fd=%{public}d", fd);
 
     // 3) paws: process-wide protect after TUN is up. Per-fd protection remains
     // authoritative for every OpenConnect control socket.
-    if (typeof connection.protectProcessNet === 'function') {
+    if (typeof connection.protectProcessNet === "function") {
       let protectSettled: boolean = false;
       const protectOperation: Promise<void> = connection.protectProcessNet();
-      const protectBarrier: Promise<void> = protectOperation.then((): void => {
-        protectSettled = true;
-      }).catch((_err: Error): void => {
-        protectSettled = true;
-      });
+      const protectBarrier: Promise<void> = protectOperation
+        .then((): void => {
+          protectSettled = true;
+        })
+        .catch((_err: Error): void => {
+          protectSettled = true;
+        });
       this.pendingPlatformOperation = protectBarrier;
       this.pendingPlatformOperationConnection = connection;
       try {
         await withTimeout(
           protectOperation,
           PLATFORM_OPERATION_TIMEOUT_MS,
-          'VpnConnection.protectProcessNet',
+          "VpnConnection.protectProcessNet",
         );
       } finally {
         if (protectSettled && this.pendingPlatformOperation === protectBarrier) {
@@ -541,25 +593,23 @@ export default class HOpenConnectVpnExtensionAbility extends VpnExtensionAbility
         }
       }
       this.requireCurrentRequest(generation, attemptId, connection);
-      hilog.info(LOG_DOMAIN, LOG_TAG, 'protectProcessNet ok');
+      hilog.info(LOG_DOMAIN, LOG_TAG, "protectProcessNet ok");
     }
 
     // 4) OpenConnect packet loop.
     let startSettled: boolean = false;
     const startOperation: Promise<void> = hopenconnectUi.startVpn(fd, effectiveOptionsJson);
-    const startBarrier: Promise<void> = startOperation.then((): void => {
-      startSettled = true;
-    }).catch((_err: Error): void => {
-      startSettled = true;
-    });
+    const startBarrier: Promise<void> = startOperation
+      .then((): void => {
+        startSettled = true;
+      })
+      .catch((_err: Error): void => {
+        startSettled = true;
+      });
     this.pendingPlatformOperation = startBarrier;
     this.pendingPlatformOperationConnection = connection;
     try {
-      await withTimeout(
-        startOperation,
-        PLATFORM_OPERATION_TIMEOUT_MS,
-        'native VPN start',
-      );
+      await withTimeout(startOperation, PLATFORM_OPERATION_TIMEOUT_MS, "native VPN start");
     } finally {
       if (startSettled && this.pendingPlatformOperation === startBarrier) {
         this.pendingPlatformOperation = undefined;
@@ -567,9 +617,9 @@ export default class HOpenConnectVpnExtensionAbility extends VpnExtensionAbility
       }
     }
     this.requireCurrentRequest(generation, attemptId, connection);
-    hilog.info(LOG_DOMAIN, LOG_TAG, 'native startVpn completed fd=%{public}d', fd);
+    hilog.info(LOG_DOMAIN, LOG_TAG, "native startVpn completed fd=%{public}d", fd);
     const lifecycle = this.extensionTick(attemptId);
-    if (lifecycle !== 'connected') {
+    if (lifecycle !== "connected") {
       throw new Error(`native VPN worker entered ${lifecycle}`);
     }
     this.startHeartbeat(generation, attemptId);
@@ -579,13 +629,13 @@ export default class HOpenConnectVpnExtensionAbility extends VpnExtensionAbility
     try {
       hopenconnectUi.setPlatformVpnFailed(attemptId, message);
     } catch (err) {
-      hilog.error(LOG_DOMAIN, LOG_TAG, 'record VPN failure failed %{public}s', describeError(err));
+      hilog.error(LOG_DOMAIN, LOG_TAG, "record VPN failure failed %{public}s", describeError(err));
     }
   }
 
   private extensionTick(attemptId: string): string {
-    if (typeof (hopenconnectUi as ESObject).extensionTick !== 'function') {
-      throw new Error('native extension heartbeat is unavailable');
+    if (typeof (hopenconnectUi as ESObject).extensionTick !== "function") {
+      throw new Error("native extension heartbeat is unavailable");
     }
     return hopenconnectUi.extensionTick(attemptId);
   }
@@ -622,12 +672,12 @@ export default class HOpenConnectVpnExtensionAbility extends VpnExtensionAbility
     try {
       lifecycle = this.extensionTick(attemptId);
     } catch (err) {
-      const message = describeError(err) || 'extension heartbeat failed';
-      hilog.error(LOG_DOMAIN, LOG_TAG, 'extension heartbeat failed %{public}s', message);
+      const message = describeError(err) || "extension heartbeat failed";
+      hilog.error(LOG_DOMAIN, LOG_TAG, "extension heartbeat failed %{public}s", message);
       this.recordVpnFailureForAttempt(attemptId, message);
-      lifecycle = 'failed';
+      lifecycle = "failed";
     }
-    if (lifecycle !== 'disconnected' && lifecycle !== 'failed' && lifecycle !== 'stopping') {
+    if (lifecycle !== "disconnected" && lifecycle !== "failed" && lifecycle !== "stopping") {
       return;
     }
     this.stopHeartbeat();
@@ -638,7 +688,7 @@ export default class HOpenConnectVpnExtensionAbility extends VpnExtensionAbility
     this.stopPlatformSubscription();
     this.requestChain = this.requestChain.then(async (): Promise<void> => {
       if (this.isCurrentRequest(generation, attemptId)) {
-        hilog.warn(LOG_DOMAIN, LOG_TAG, 'terminal native session; destroying platform TUN');
+        hilog.warn(LOG_DOMAIN, LOG_TAG, "terminal native session; destroying platform TUN");
         await this.destroyVpn();
       }
     });
@@ -654,10 +704,12 @@ export default class HOpenConnectVpnExtensionAbility extends VpnExtensionAbility
       }
       // A new connection is forbidden until the previous cleanup settles, so
       // reaching this branch indicates a violated serialization invariant.
-      return Promise.resolve('a previous VpnConnection cleanup is still pending');
+      return Promise.resolve("a previous VpnConnection cleanup is still pending");
     }
-    const pendingOperation = connection !== undefined &&
-      this.pendingPlatformOperationConnection === connection ? this.pendingPlatformOperation : undefined;
+    const pendingOperation =
+      connection !== undefined && this.pendingPlatformOperationConnection === connection
+        ? this.pendingPlatformOperation
+        : undefined;
     if (pendingOperation) {
       this.pendingPlatformOperation = undefined;
       this.pendingPlatformOperationConnection = undefined;
@@ -687,13 +739,13 @@ export default class HOpenConnectVpnExtensionAbility extends VpnExtensionAbility
       if (errors.length === 0 && attemptId.length > 0) {
         try {
           if (!hopenconnectUi.completePlatformVpnCleanup(attemptId)) {
-            errors.push('platform VPN cleanup acknowledgement rejected');
+            errors.push("platform VPN cleanup acknowledgement rejected");
           }
         } catch (err) {
           errors.push(`platform VPN cleanup acknowledgement: ${describeError(err)}`);
         }
       }
-      return errors.join('; ');
+      return errors.join("; ");
     })();
     this.pendingCleanup = cleanup;
     this.pendingCleanupConnection = connection;
@@ -723,19 +775,19 @@ export default class HOpenConnectVpnExtensionAbility extends VpnExtensionAbility
     this.tunFd = -1;
     this.vpnConnection = undefined;
     this.starting = false;
-    this.activeAttemptId = '';
+    this.activeAttemptId = "";
     try {
-      if (typeof (hopenconnectUi as ESObject).clearSocketProtect === 'function') {
+      if (typeof (hopenconnectUi as ESObject).clearSocketProtect === "function") {
         hopenconnectUi.clearSocketProtect();
       }
     } catch (err) {
-      hilog.warn(LOG_DOMAIN, LOG_TAG, 'clear socket protect failed %{public}s', describeError(err));
+      hilog.warn(LOG_DOMAIN, LOG_TAG, "clear socket protect failed %{public}s", describeError(err));
     }
     const cleanup = this.beginVpnCleanup(connection, attemptId);
     try {
-      const error = await withTimeout(cleanup, PLATFORM_OPERATION_TIMEOUT_MS, 'VPN cleanup');
+      const error = await withTimeout(cleanup, PLATFORM_OPERATION_TIMEOUT_MS, "VPN cleanup");
       if (error.length > 0) {
-        hilog.error(LOG_DOMAIN, LOG_TAG, 'VPN cleanup failed %{public}s', error);
+        hilog.error(LOG_DOMAIN, LOG_TAG, "VPN cleanup failed %{public}s", error);
         return;
       }
       if (this.pendingCleanup === cleanup) {
@@ -746,7 +798,7 @@ export default class HOpenConnectVpnExtensionAbility extends VpnExtensionAbility
       // Keep pendingCleanup as a barrier. A later request waits for this same
       // Promise instead of creating a new classic VPN that a late destroy could
       // tear down.
-      hilog.error(LOG_DOMAIN, LOG_TAG, 'VPN cleanup pending %{public}s', describeError(err));
+      hilog.error(LOG_DOMAIN, LOG_TAG, "VPN cleanup pending %{public}s", describeError(err));
     }
   }
 }

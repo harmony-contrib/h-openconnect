@@ -4,20 +4,20 @@ import {
   ConfigurationConstant,
   UIAbility,
   Want,
-} from '@kit.AbilityKit';
-import { deviceInfo } from '@kit.BasicServicesKit';
-import { i18n } from '@kit.LocalizationKit';
-import { hilog } from '@kit.PerformanceAnalysisKit';
-import { initLogging } from '@nsh/harmonyos';
-import window from '@ohos.window';
-import hopenconnectUi from 'libhopenconnect_ui.so';
-import { describeError } from '../common/Errors';
-import { configureNativePlatformIdentity } from '../common/PlatformIdentity';
-import { HOpenHostServices, installHOpenHost } from '../host/HOpenHostServices';
-import { setHOpenBundleName } from '../vpnability/VpnConfig';
+} from "@kit.AbilityKit";
+import { deviceInfo } from "@kit.BasicServicesKit";
+import { i18n } from "@kit.LocalizationKit";
+import { hilog } from "@kit.PerformanceAnalysisKit";
+import { initLogging } from "@nsh/harmonyos";
+import window from "@ohos.window";
+import hopenconnectUi from "libhopenconnect_ui.so";
+import { describeError } from "../common/Errors";
+import { configureNativePlatformIdentity } from "../common/PlatformIdentity";
+import { HOpenHostServices, installHOpenHost } from "../host/HOpenHostServices";
+import { setHOpenBundleName } from "../vpnability/VpnConfig";
 
 const LOG_DOMAIN: number = 0x0000;
-const LOG_TAG: string = 'HOpenConnectEntry';
+const LOG_TAG: string = "HOpenConnectEntry";
 
 /**
  * Thin HarmonyOS Ability entry point: configures native storage/identity,
@@ -36,12 +36,12 @@ export default class EntryAbility extends UIAbility {
   private configureNativeHome(): void {
     setHOpenBundleName(this.context.applicationInfo.name);
     hopenconnectUi.configureAppHome(`${this.context.filesDir}/h-openconnect`);
-    hilog.info(LOG_DOMAIN, LOG_TAG, 'configured native home');
+    hilog.info(LOG_DOMAIN, LOG_TAG, "configured native home");
   }
 
   private configureNativeLocale(language?: string): void {
     try {
-      let locale = language ?? '';
+      let locale = language ?? "";
       if (locale.length === 0) {
         locale = i18n.System.getSystemLanguage();
       }
@@ -49,9 +49,14 @@ export default class EntryAbility extends UIAbility {
         return;
       }
       hopenconnectUi.configureUiLocale(locale);
-      hilog.info(LOG_DOMAIN, LOG_TAG, 'configured native locale %{public}s', locale);
+      hilog.info(LOG_DOMAIN, LOG_TAG, "configured native locale %{public}s", locale);
     } catch (err) {
-      hilog.info(LOG_DOMAIN, LOG_TAG, 'configure native locale skipped %{public}s', describeError(err));
+      hilog.info(
+        LOG_DOMAIN,
+        LOG_TAG,
+        "configure native locale skipped %{public}s",
+        describeError(err),
+      );
     }
   }
 
@@ -62,9 +67,14 @@ export default class EntryAbility extends UIAbility {
         this.context.config.colorMode ??
         ConfigurationConstant.ColorMode.COLOR_MODE_NOT_SET;
       hopenconnectUi.configureSystemColorMode(mode);
-      hilog.info(LOG_DOMAIN, LOG_TAG, 'configured native color mode %{public}d', mode);
+      hilog.info(LOG_DOMAIN, LOG_TAG, "configured native color mode %{public}d", mode);
     } catch (err) {
-      hilog.info(LOG_DOMAIN, LOG_TAG, 'configure native color mode skipped %{public}s', describeError(err));
+      hilog.info(
+        LOG_DOMAIN,
+        LOG_TAG,
+        "configure native color mode skipped %{public}s",
+        describeError(err),
+      );
     }
   }
 
@@ -76,8 +86,8 @@ export default class EntryAbility extends UIAbility {
       this.configureNativeAppearance();
       this.hostServices = installHOpenHost(this.context);
     } catch (err) {
-      const message = describeError(err) || 'native initialization failed';
-      hilog.error(LOG_DOMAIN, LOG_TAG, 'native initialization failed %{public}s', message);
+      const message = describeError(err) || "native initialization failed";
+      hilog.error(LOG_DOMAIN, LOG_TAG, "native initialization failed %{public}s", message);
       throw new Error(message);
     }
   }
@@ -88,16 +98,16 @@ export default class EntryAbility extends UIAbility {
 
   public onNewWant(want: Want, _launchParam: AbilityConstant.LaunchParam): void {
     this.hostServices?.onForeground();
-    const rawArgs = want.parameters?.['nsh.args'];
+    const rawArgs = want.parameters?.["nsh.args"];
     const args: string[] = [];
     if (Array.isArray(rawArgs)) {
       for (let i = 0; i < rawArgs.length; i++) {
-        if (typeof rawArgs[i] === 'string') {
+        if (typeof rawArgs[i] === "string") {
           args.push(rawArgs[i] as string);
         }
       }
     }
-    this.context.eventHub.emit('nsh.secondInstance', args);
+    this.context.eventHub.emit("nsh.secondInstance", args);
   }
 
   public onWindowStageCreate(windowStage: window.WindowStage): void {
@@ -119,18 +129,23 @@ export default class EntryAbility extends UIAbility {
     initLogging();
     const win = await windowStage.getMainWindow();
     this.hostServices?.attachMainWindow(win);
-    if (deviceInfo.deviceType !== '2in1') {
+    if (deviceInfo.deviceType !== "2in1") {
       try {
         await win.setWindowLayoutFullScreen(true);
       } catch (err) {
-        hilog.info(LOG_DOMAIN, LOG_TAG, 'full-screen layout skipped %{public}s', describeError(err));
+        hilog.info(
+          LOG_DOMAIN,
+          LOG_TAG,
+          "full-screen layout skipped %{public}s",
+          describeError(err),
+        );
       }
     }
     try {
-      await win.setUIContent('pages/Index');
+      await win.setUIContent("pages/Index");
     } catch (err) {
-      const message = describeError(err) || 'set UI content failed';
-      hilog.error(LOG_DOMAIN, LOG_TAG, 'set UI content failed %{public}s', message);
+      const message = describeError(err) || "set UI content failed";
+      hilog.error(LOG_DOMAIN, LOG_TAG, "set UI content failed %{public}s", message);
       throw new Error(message);
     }
   }

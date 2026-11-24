@@ -7,18 +7,18 @@
  * shape adapter only; changing prefixes or synthesising routes here changes
  * the policy selected by the AnyConnect group.
  */
-import { Want } from '@kit.AbilityKit';
-import { vpnExtension } from '@kit.NetworkKit';
+import { Want } from "@kit.AbilityKit";
+import { vpnExtension } from "@kit.NetworkKit";
 
-export const HOPEN_BUNDLE_NAME: string = 'com.richerfu.h_openconnect';
-export const HOPEN_MODULE_NAME: string = 'entry';
-export const HOPEN_ENTRY_ABILITY: string = 'EntryAbility';
-export const HOPEN_VPN_ABILITY: string = 'HOpenConnectVpnExtensionAbility';
+export const HOPEN_BUNDLE_NAME: string = "com.richerfu.h_openconnect";
+export const HOPEN_MODULE_NAME: string = "entry";
+export const HOPEN_ENTRY_ABILITY: string = "EntryAbility";
+export const HOPEN_VPN_ABILITY: string = "HOpenConnectVpnExtensionAbility";
 
 let hopenBundleName: string = HOPEN_BUNDLE_NAME;
 
 export function setHOpenBundleName(bundleName?: string): void {
-  const value = bundleName?.trim() ?? '';
+  const value = bundleName?.trim() ?? "";
   hopenBundleName = value.length > 0 ? value : HOPEN_BUNDLE_NAME;
 }
 
@@ -58,10 +58,10 @@ export class RouteInfo {
   public isExcludedRoute: boolean;
 
   constructor(destination: LinkAddress, isExcludedRoute: boolean = false) {
-    this.interface = 'vpn-tun';
+    this.interface = "vpn-tun";
     this.destination = destination;
     this.gateway = new NetAddress(
-      destination.address.family === 2 ? '::' : '0.0.0.0',
+      destination.address.family === 2 ? "::" : "0.0.0.0",
       destination.address.family,
     );
     this.hasGateway = false;
@@ -99,24 +99,29 @@ export class HOpenVpnConfig {
   constructor(options: VpnOptions) {
     const rawAddrs = options.addresses ?? [];
     if (rawAddrs.length === 0) {
-      throw new Error('VPN configuration has no assigned address');
+      throw new Error("VPN configuration has no assigned address");
     }
     const dnsList = options.dnsAddresses?.slice() ?? [];
 
     this.addresses = rawAddrs.map((value: string) =>
-      parseLinkAddress(value, addressDefaultPrefix(value)));
+      parseLinkAddress(value, addressDefaultPrefix(value)),
+    );
 
     const routeStrs = options.routes ?? [];
     if (routeStrs.length === 0) {
       // NetVpnImpl adds defaults for an empty list. Never turn an invalid or
       // fully-excluded policy into an accidental full tunnel.
-      throw new Error('VPN configuration has no explicit routes');
+      throw new Error("VPN configuration has no explicit routes");
     }
-    this.routes = routeStrs.map((value: string) =>
-      new RouteInfo(parseLinkAddress(value, routeDefaultPrefix(value))));
+    this.routes = routeStrs.map(
+      (value: string) => new RouteInfo(parseLinkAddress(value, routeDefaultPrefix(value))),
+    );
     const excludedRouteStrs = options.excludedRoutes ?? [];
-    this.routes.push(...excludedRouteStrs.map((value: string) =>
-      new RouteInfo(parseLinkAddress(value, routeDefaultPrefix(value)), true)));
+    this.routes.push(
+      ...excludedRouteStrs.map(
+        (value: string) => new RouteInfo(parseLinkAddress(value, routeDefaultPrefix(value)), true),
+      ),
+    );
 
     this.dnsAddresses = dnsList;
     this.searchDomains = options.searchDomains?.slice() ?? [];
@@ -128,10 +133,12 @@ export class HOpenVpnConfig {
       mtu = 1500;
     }
     this.mtu = mtu;
-    this.isIPv4Accepted = this.addresses.some((address: LinkAddress) =>
-      address.address.family === 1);
-    this.isIPv6Accepted = this.addresses.some((address: LinkAddress) =>
-      address.address.family === 2);
+    this.isIPv4Accepted = this.addresses.some(
+      (address: LinkAddress) => address.address.family === 1,
+    );
+    this.isIPv6Accepted = this.addresses.some(
+      (address: LinkAddress) => address.address.family === 2,
+    );
     this.isBlocking = false;
     this.trustedApplications = options.trustedApplications?.slice() ?? [];
     this.blockedApplications = options.blockedApplications?.slice() ?? [];
@@ -140,10 +147,10 @@ export class HOpenVpnConfig {
 
 /** paws parseLinkAddress. */
 export function parseLinkAddress(value: string, defaultPrefix: number): LinkAddress {
-  const parts = value.split('/');
+  const parts = value.split("/");
   const address = parts[0];
   const prefixLength = parts.length > 1 ? Number.parseInt(parts[1], 10) : defaultPrefix;
-  const family = address.includes(':') ? 2 : 1;
+  const family = address.includes(":") ? 2 : 1;
   return new LinkAddress(
     new NetAddress(address, family),
     Number.isFinite(prefixLength) ? prefixLength : defaultPrefix,
@@ -151,11 +158,11 @@ export function parseLinkAddress(value: string, defaultPrefix: number): LinkAddr
 }
 
 export function addressDefaultPrefix(value: string): number {
-  return value.includes(':') ? 128 : 32;
+  return value.includes(":") ? 128 : 32;
 }
 
 export function routeDefaultPrefix(value: string): number {
-  return value.includes(':') ? 128 : 32;
+  return value.includes(":") ? 128 : 32;
 }
 
 export function buildVpnConfig(options: VpnOptions, _vpnId?: string): vpnExtension.VpnConfig {
@@ -164,30 +171,30 @@ export function buildVpnConfig(options: VpnOptions, _vpnId?: string): vpnExtensi
 
 export function parseOptions(optionsJson?: string): VpnOptions {
   if (!optionsJson || optionsJson.length === 0) {
-    throw new Error('VPN options are missing');
+    throw new Error("VPN options are missing");
   }
   try {
     const options = JSON.parse(optionsJson) as VpnOptions;
     if (!options || !Array.isArray(options.addresses) || options.addresses.length === 0) {
-      throw new Error('VPN options contain no assigned address');
+      throw new Error("VPN options contain no assigned address");
     }
     if (options.routes !== undefined && !Array.isArray(options.routes)) {
-      throw new Error('VPN routes must be an array');
+      throw new Error("VPN routes must be an array");
     }
     if (options.excludedRoutes !== undefined && !Array.isArray(options.excludedRoutes)) {
-      throw new Error('VPN excluded routes must be an array');
+      throw new Error("VPN excluded routes must be an array");
     }
     if (options.dnsAddresses !== undefined && !Array.isArray(options.dnsAddresses)) {
-      throw new Error('VPN DNS addresses must be an array');
+      throw new Error("VPN DNS addresses must be an array");
     }
     return options;
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'invalid VPN options JSON';
+    const message = err instanceof Error ? err.message : "invalid VPN options JSON";
     throw new Error(`invalid VPN options: ${message}`);
   }
 }
 
-const HOPEN_SYSTEM_PARAMETERS_KEY = 'myParams';
+const HOPEN_SYSTEM_PARAMETERS_KEY = "myParams";
 
 /**
  * The VPN authorization dialog preserves the original WantParams under
@@ -200,11 +207,11 @@ function readVpnParameters(want?: Want): Record<string, Object> | undefined {
   if (!parameters) {
     return undefined;
   }
-  if (typeof parameters['optionsJson'] === 'string') {
+  if (typeof parameters["optionsJson"] === "string") {
     return parameters;
   }
   const nested = parameters[HOPEN_SYSTEM_PARAMETERS_KEY];
-  if (typeof nested === 'object' && nested !== null && !Array.isArray(nested)) {
+  if (typeof nested === "object" && nested !== null && !Array.isArray(nested)) {
     return nested as Record<string, Object>;
   }
   return parameters;
@@ -212,17 +219,17 @@ function readVpnParameters(want?: Want): Record<string, Object> | undefined {
 
 export function readOptionsJson(want?: Want): string {
   const parameters = readVpnParameters(want);
-  const value = parameters?.['optionsJson'];
-  if (typeof value === 'string' && value.length > 0) {
+  const value = parameters?.["optionsJson"];
+  if (typeof value === "string" && value.length > 0) {
     return value;
   }
-  throw new Error('VPN extension request is missing optionsJson');
+  throw new Error("VPN extension request is missing optionsJson");
 }
 
-const HOPEN_ASHMEM_FD_KEY = 'hopenconnectPlatformAshmem';
-const HOPEN_NOTIFICATION_FD_KEY = 'hopenconnectPlatformNotification';
-const HOPEN_START_ATTEMPT_ID_KEY = 'hopenconnectStartAttemptId';
-const HOPEN_HANDOFF_TOKEN_KEY = 'hopenconnectHandoffToken';
+const HOPEN_ASHMEM_FD_KEY = "hopenconnectPlatformAshmem";
+const HOPEN_NOTIFICATION_FD_KEY = "hopenconnectPlatformNotification";
+const HOPEN_START_ATTEMPT_ID_KEY = "hopenconnectStartAttemptId";
+const HOPEN_HANDOFF_TOKEN_KEY = "hopenconnectHandoffToken";
 
 export interface HOpenPlatformSharedMemoryFds {
   ashmemFd: number;
@@ -230,7 +237,7 @@ export interface HOpenPlatformSharedMemoryFds {
 }
 
 class HOpenWantFileDescriptor {
-  public type: string = 'FD';
+  public type: string = "FD";
   public value: number;
 
   constructor(value: number) {
@@ -253,17 +260,19 @@ export function buildVpnWant(
   startAttemptId?: string,
 ): Want {
   const parameters: HOpenVpnWantParameters = {
-    optionsJson: optionsJson ?? '',
+    optionsJson: optionsJson ?? "",
   };
   if (sharedMemory) {
     parameters[HOPEN_ASHMEM_FD_KEY] = new HOpenWantFileDescriptor(sharedMemory.ashmemFd);
-    parameters[HOPEN_NOTIFICATION_FD_KEY] = new HOpenWantFileDescriptor(sharedMemory.notificationFd);
+    parameters[HOPEN_NOTIFICATION_FD_KEY] = new HOpenWantFileDescriptor(
+      sharedMemory.notificationFd,
+    );
   }
   if (startAttemptId && startAttemptId.length > 0) {
     parameters[HOPEN_START_ATTEMPT_ID_KEY] = startAttemptId;
   }
   return {
-    deviceId: '',
+    deviceId: "",
     bundleName: currentHOpenBundleName(),
     moduleName: HOPEN_MODULE_NAME,
     abilityName: HOPEN_VPN_ABILITY,
@@ -285,7 +294,7 @@ export function buildVpnBootstrapWant(startAttemptId: string, handoffToken: stri
     hopenconnectHandoffToken: handoffToken,
   };
   return {
-    deviceId: '',
+    deviceId: "",
     bundleName: currentHOpenBundleName(),
     moduleName: HOPEN_MODULE_NAME,
     abilityName: HOPEN_VPN_ABILITY,
@@ -295,18 +304,18 @@ export function buildVpnBootstrapWant(startAttemptId: string, handoffToken: stri
 
 export function readPlatformStartAttemptId(want?: Want): string {
   const value = readVpnParameters(want)?.[HOPEN_START_ATTEMPT_ID_KEY];
-  if (typeof value === 'string' && value.length > 0) {
+  if (typeof value === "string" && value.length > 0) {
     return value;
   }
-  throw new Error('VPN extension request is missing start attempt id');
+  throw new Error("VPN extension request is missing start attempt id");
 }
 
 export function readPlatformHandoffToken(want?: Want): string {
   const value = readVpnParameters(want)?.[HOPEN_HANDOFF_TOKEN_KEY];
-  if (typeof value === 'string' && value.length > 0) {
+  if (typeof value === "string" && value.length > 0) {
     return value;
   }
-  throw new Error('VPN extension request is missing handoff token');
+  throw new Error("VPN extension request is missing handoff token");
 }
 
 export function readPlatformSharedMemoryFds(want: Want): HOpenPlatformSharedMemoryFds | undefined {
@@ -331,12 +340,12 @@ function readFileDescriptorParameter(
   key: string,
 ): number | undefined {
   const descriptor = parameters?.[key] as HOpenWantFileDescriptor | undefined;
-  if (!descriptor || descriptor.type !== 'FD' || !isValidFileDescriptor(descriptor.value)) {
+  if (!descriptor || descriptor.type !== "FD" || !isValidFileDescriptor(descriptor.value)) {
     return undefined;
   }
   return descriptor.value;
 }
 
 function isValidFileDescriptor(value?: number): boolean {
-  return typeof value === 'number' && Number.isInteger(value) && value >= 0;
+  return typeof value === "number" && Number.isInteger(value) && value >= 0;
 }
