@@ -27,3 +27,10 @@ entry/libs/**/*.so
 
 sign-info/
 output/
+__pycache__/
+**/__pycache__/
+ui/nsh/.nsh/
+entry/src/main/resources/rawfile/hopenconnect.bundle.js
+entry/src/main/resources/rawfile/hopenconnect.bundle.nshc
+entry/src/main/resources/rawfile/app.json
+entry/src/main/resources/rawfile/capabilities.json

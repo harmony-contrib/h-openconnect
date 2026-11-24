@@ -32,6 +32,9 @@ jobs:
       - name: Run AnyConnect protocol tests
         run: ./scripts/e2e-host-anyconnect.sh
 
+      - name: Run app runtime unit tests
+        run: cargo test -p hopenconnect_app --all-targets
+
   arm64-qemu:
     name: ARM64 OpenHarmony QEMU VPN E2E
     needs: protocol-tests
@@ -50,20 +53,23 @@ jobs:
       HDC: /Applications/DevEco-Studio.app/Contents/sdk/default/openharmony/toolchains/hdc
       OHOS_QEMU_RELEASE: v20260728
       OHOS_QEMU_INSTALLER_COMMIT: ada7288
-      OHOS_QEMU_PREFIX: ${{ runner.tool_cache }}/ohos-qemu/v20260728
-      QEMU_PACKAGE_DIR: ${{ runner.tool_cache }}/ohos-qemu/v20260728/openharmony-qemu-arm64-arm64_virt
       QEMU_HDC_HOST_PORT: "5560"
       QEMU_ACCEL: hvf
       HDC_TARGET: 127.0.0.1:5560
       OCSERV_PORT: "14433"
-      ARTIFACT_DIR: ${{ github.workspace }}/smoke-logs/qemu-ci
 
     steps:
       - name: Check out source
         uses: actions/checkout@v6
 
-      - name: Add Apple Silicon tools to PATH
-        run: echo /opt/homebrew/bin >> "$GITHUB_PATH"
+      - name: Configure runner paths
+        run: |
+          echo /opt/homebrew/bin >> "$GITHUB_PATH"
+          {
+            echo "OHOS_QEMU_PREFIX=${{ runner.tool_cache }}/ohos-qemu/${OHOS_QEMU_RELEASE}"
+            echo "QEMU_PACKAGE_DIR=${{ runner.tool_cache }}/ohos-qemu/${OHOS_QEMU_RELEASE}/openharmony-qemu-arm64-arm64_virt"
+            echo "ARTIFACT_DIR=${{ github.workspace }}/smoke-logs/qemu-ci"
+          } >> "$GITHUB_ENV"
 
       - name: Verify dedicated runner prerequisites
         run: |
@@ -96,9 +102,8 @@ jobs:
         run: |
           cp build-profile.json5 "$RUNNER_TEMP/hopenconnect-build-profile.json5"
           python3 scripts/configure-ci-signing.py
-          "$OHPM" install --all
-          "$HVIGORW" test --mode module -p module=entry@default --no-daemon
           SIGN_HAP=1 ./scripts/package-hap.sh
+          "$HVIGORW" test --mode module -p module=entry@default --no-daemon
 
       - name: Run full production-path VPN test
         id: qemu

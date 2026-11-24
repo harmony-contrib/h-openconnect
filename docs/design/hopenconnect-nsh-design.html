@@ -1,0 +1,2691 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>H-OpenConnect 三端交互设计稿 · NSH Gallery 规范对齐版</title>
+<style>
+/* ==========================================================================
+   H-OpenConnect · 基于 nsh-platform-harmonyos 的三端完整设计稿 (Phone · Pad · PC)
+   - 视觉体系对齐 Paws / NSH Gallery：Paper / Graphite + Citrus Lime + Solid Stop Red
+   - 尺度双档：Touch（Phone & Pad）vs Pointer（HarmonyOS 2-in-1 / PC）
+   - 同心圆角、1pt 扁平描边表面、外置焦点环、严格零 "VPN" 用户可见文案红线
+   - 实时切换：交互原型台 / 全景审计画板 · 系统/浅色/深色 · 标准/减弱动效 · 100%/125% · 中文/EN
+   ========================================================================== */
+:root{
+  --bg:#f6f6f9; --fg:#101319; --card:#ffffff; --popover:#f8f8fb;
+  --muted:#5f636a; --faint:#9a9da3; --muted-bg:#eeeff2; --accent-bg:#e8eaec;
+  --sidebar:#ecedf0; --sidebar-border:#dedee1; --sidebar-sel:#ffffff;
+  --inset:#f1f2f5; --raised:#f3f4f7; --field:#ffffff; --track:#e9eaed; --knob:#ffffff;
+  --line:#e4e4e7; --border:#cacbcd; --input:#c1c2c4; --on-fill:#dbdce0; --thumb-bg:#ffffff;
+  --brand-fill:#c6ef6a; --brand-hover:#cef27a; --brand-active:#b6e058; --on-brand:#13160c;
+  --brand:#4a840a; --brand-tint:color-mix(in srgb,#8cc01d 16%,transparent);
+  --stop-fill:#d43a4a; --stop-hover:#db4353; --stop-active:#c33140; --on-stop:#ffffff; --edge-stop:#b32837;
+  --up:#138a5a; --up-tint:color-mix(in srgb,#138a5a 11%,transparent);
+  --warn:#b26a00; --warn-tint:color-mix(in srgb,#b26a00 12%,transparent);
+  --danger:#d43a4a; --danger-tint:color-mix(in srgb,#d43a4a 10%,transparent);
+  --info:#3d63d1; --info-tint:color-mix(in srgb,#3d63d1 10%,transparent);
+  --ring:#4a840a; --ring-halo:rgba(74,132,10,.18);
+  --edge-raised:#cacbcd; --edge-primary:#9cc43a;
+  --choice-off-bg:#ffffff; --choice-off-border:#c1c2c4;
+  --sh-card:none;
+  --sh-inset:inset 0 1px 1px rgba(10,15,25,.04);
+  --sh-raised:inset 0 1px 0 #fff,inset 0 2px 0 rgba(255,255,255,.6),0 1px 0 rgba(10,15,25,.05);
+  --sh-pressed:inset 0 1px 1px rgba(10,15,25,.10);
+  --sh-primary:inset 0 1px 0 rgba(255,255,255,.55),inset 0 -1px 0 rgba(60,90,0,.12),0 1px 0 rgba(60,90,0,.14);
+  --sh-stop:inset 0 1px 0 rgba(255,255,255,.32),inset 0 -1px 0 rgba(90,10,20,.18),0 1px 0 rgba(90,10,20,.16);
+  --sh-sunk:inset 0 1px 1px rgba(10,15,25,.05);
+  --sh-thumb:0 1px 2px rgba(10,15,25,.10),0 1px 0 rgba(10,15,25,.04);
+  --sh-menu:0 1px 0 rgba(10,15,25,.04),0 12px 28px -10px rgba(10,15,25,.22);
+  --sh-overlay:0 1px 0 rgba(10,15,25,.04),0 16px 40px -10px rgba(10,15,25,.24);
+  --wash-hover:color-mix(in srgb,var(--fg) 5%,transparent);
+  --wash-press:color-mix(in srgb,var(--fg) 10%,transparent);
+  --scrim:rgba(0,0,0,.45); --frame:#1b1c1f; --code:#2a2d33;
+  --sans:-apple-system,BlinkMacSystemFont,"SF Pro Text","HarmonyOS Sans SC","PingFang SC","Noto Sans SC","Inter",system-ui,sans-serif;
+  --mono:"SF Mono",ui-monospace,"JetBrains Mono",Menlo,Consolas,monospace;
+  --dur-instant:120ms; --dur-fast:160ms; --dur-base:220ms;
+  --ease-out:cubic-bezier(.16,1,.3,1);
+  --fscale:1;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#16191f; --fg:#eeeff1; --card:#1f2228; --popover:#1f2228;
+  --muted:#9a9ea5; --faint:#6b6f76; --muted-bg:#2a2d33; --accent-bg:#303339;
+  --sidebar:#101319; --sidebar-border:#24272d; --sidebar-sel:#25282e;
+  --inset:#1a1d23; --raised:#33353b; --field:#16191f; --track:#33363c; --knob:#e4e5e8;
+  --line:#2d3036; --border:#31343a; --input:#393c42; --on-fill:#4b4f57; --thumb-bg:#33353b;
+  --brand-fill:#c4ec6a; --brand-hover:#ccf079; --brand-active:#b5de5a; --on-brand:#13160c;
+  --brand:#c8f26d; --brand-tint:color-mix(in srgb,#c8f26d 14%,transparent);
+  --stop-fill:#e04352; --stop-hover:#e6505e; --stop-active:#cc3644; --on-stop:#ffffff; --edge-stop:rgba(80,10,18,.65);
+  --up:#45d49a; --up-tint:color-mix(in srgb,#45d49a 16%,transparent);
+  --warn:#ffb547; --warn-tint:color-mix(in srgb,#ffb547 16%,transparent);
+  --danger:#ff6170; --danger-tint:color-mix(in srgb,#ff6170 16%,transparent);
+  --info:#7ea8ff; --info-tint:color-mix(in srgb,#7ea8ff 16%,transparent);
+  --ring:#c8f26d; --ring-halo:rgba(200,242,109,.20);
+  --edge-raised:rgba(0,0,0,.5); --edge-primary:rgba(40,60,0,.55);
+  --choice-off-bg:color-mix(in srgb,#393c42 30%,transparent); --choice-off-border:color-mix(in srgb,#eeeff1 20%,transparent);
+  --sh-inset:inset 0 1px 1px rgba(0,0,0,.22);
+  --sh-raised:inset 0 0 0 1px rgba(255,255,255,.06),inset 0 1px 1px rgba(255,255,255,.08),0 1px 0 rgba(0,0,0,.14);
+  --sh-pressed:inset 0 1px 1px rgba(0,0,0,.22);
+  --sh-primary:inset 0 0 0 1px rgba(255,255,255,.22),inset 0 1px 1px rgba(255,255,255,.35),0 1px 1px rgba(0,0,0,.14);
+  --sh-stop:inset 0 0 0 1px rgba(255,255,255,.16),inset 0 1px 1px rgba(255,255,255,.26),0 1px 1px rgba(0,0,0,.22);
+  --sh-sunk:inset 0 1px 1px rgba(0,0,0,.25);
+  --sh-thumb:inset 0 0 0 1px rgba(255,255,255,.06),inset 0 1px 1px rgba(255,255,255,.08),0 1px 1px rgba(0,0,0,.14);
+  --sh-menu:0 1px 0 rgba(0,0,0,.4),0 16px 32px -10px rgba(0,0,0,.6);
+  --sh-overlay:0 1px 0 rgba(0,0,0,.4),0 16px 40px -10px rgba(0,0,0,.65);
+  --scrim:rgba(0,0,0,.6); --frame:#3a3c41; --code:#d9dde3; color-scheme:dark;
+}}
+:root[data-theme="dark"]{
+  --bg:#16191f; --fg:#eeeff1; --card:#1f2228; --popover:#1f2228;
+  --muted:#9a9ea5; --faint:#6b6f76; --muted-bg:#2a2d33; --accent-bg:#303339;
+  --sidebar:#101319; --sidebar-border:#24272d; --sidebar-sel:#25282e;
+  --inset:#1a1d23; --raised:#33353b; --field:#16191f; --track:#33363c; --knob:#e4e5e8;
+  --line:#2d3036; --border:#31343a; --input:#393c42; --on-fill:#4b4f57; --thumb-bg:#33353b;
+  --brand-fill:#c4ec6a; --brand-hover:#ccf079; --brand-active:#b5de5a; --on-brand:#13160c;
+  --brand:#c8f26d; --brand-tint:color-mix(in srgb,#c8f26d 14%,transparent);
+  --stop-fill:#e04352; --stop-hover:#e6505e; --stop-active:#cc3644; --on-stop:#ffffff; --edge-stop:rgba(80,10,18,.65);
+  --up:#45d49a; --up-tint:color-mix(in srgb,#45d49a 16%,transparent);
+  --warn:#ffb547; --warn-tint:color-mix(in srgb,#ffb547 16%,transparent);
+  --danger:#ff6170; --danger-tint:color-mix(in srgb,#ff6170 16%,transparent);
+  --info:#7ea8ff; --info-tint:color-mix(in srgb,#7ea8ff 16%,transparent);
+  --ring:#c8f26d; --ring-halo:rgba(200,242,109,.20);
+  --edge-raised:rgba(0,0,0,.5); --edge-primary:rgba(40,60,0,.55);
+  --choice-off-bg:color-mix(in srgb,#393c42 30%,transparent); --choice-off-border:color-mix(in srgb,#eeeff1 20%,transparent);
+  --sh-inset:inset 0 1px 1px rgba(0,0,0,.22);
+  --sh-raised:inset 0 0 0 1px rgba(255,255,255,.06),inset 0 1px 1px rgba(255,255,255,.08),0 1px 0 rgba(0,0,0,.14);
+  --sh-pressed:inset 0 1px 1px rgba(0,0,0,.22);
+  --sh-primary:inset 0 0 0 1px rgba(255,255,255,.22),inset 0 1px 1px rgba(255,255,255,.35),0 1px 1px rgba(0,0,0,.14);
+  --sh-stop:inset 0 0 0 1px rgba(255,255,255,.16),inset 0 1px 1px rgba(255,255,255,.26),0 1px 1px rgba(0,0,0,.22);
+  --sh-sunk:inset 0 1px 1px rgba(0,0,0,.25);
+  --sh-thumb:inset 0 0 0 1px rgba(255,255,255,.06),inset 0 1px 1px rgba(255,255,255,.08),0 1px 1px rgba(0,0,0,.14);
+  --sh-menu:0 1px 0 rgba(0,0,0,.4),0 16px 32px -10px rgba(0,0,0,.6);
+  --sh-overlay:0 1px 0 rgba(0,0,0,.4),0 16px 40px -10px rgba(0,0,0,.65);
+  --scrim:rgba(0,0,0,.6); --frame:#3a3c41; --code:#d9dde3; color-scheme:dark;
+}
+:root[data-reduce-motion="true"],:root[data-reduce-motion="true"] *{
+  --dur-instant:0ms!important; --dur-fast:0ms!important; --dur-base:0ms!important;
+  transition-duration:0ms!important; animation-duration:0ms!important;
+}
+:root[data-font-scale="125"]{ --fscale:1.25; }
+
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--fg);font-family:var(--sans);font-size:14px;line-height:1.55;padding:18px 20px 80px}
+button,input,textarea,select{font-family:inherit;color:inherit}
+button{cursor:default}
+a.ext-link,[role="link"]{cursor:pointer}
+:focus-visible{outline:2px solid var(--ring);outline-offset:2px;box-shadow:0 0 0 4px var(--ring-halo)}
+
+.wrap{max-width:1380px;margin:0 auto;display:flex;flex-direction:column;gap:40px}
+.eyebrow{font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+h1{margin:0;font-size:26px;line-height:1.25;font-weight:600;letter-spacing:-.015em}
+h2{margin:0;font-size:19px;line-height:1.3;font-weight:600}
+h3{margin:0;font-size:14px;line-height:1.35;font-weight:600}
+p{margin:0}
+.lede{color:var(--muted);max-width:92ch;font-size:13.5px;line-height:1.65}
+code{font-family:var(--mono);font-size:.9em;background:var(--inset);border:1px solid var(--line);border-radius:5px;padding:1px 5px}
+
+/* 顶部审阅悬浮工具栏 */
+.audit-bar{position:sticky;top:10px;z-index:80;display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px 14px;
+  padding:8px 12px;border-radius:12px;border:1px solid var(--border);
+  background:color-mix(in srgb,var(--popover) 88%,transparent);
+  backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);box-shadow:var(--sh-menu)}
+.bar-group{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.bar-seg{display:inline-flex;height:30px;padding:2px;border-radius:9px;background:var(--inset);border:1px solid var(--border);box-shadow:var(--sh-sunk);gap:2px}
+.bar-seg button{border:1px solid transparent;background:transparent;color:var(--muted);font:500 12px/1 var(--sans);padding:0 10px;border-radius:6px;display:inline-flex;align-items:center;gap:5px;transition:background var(--dur-instant) ease-out,color var(--dur-instant)}
+.bar-seg button:hover{background:var(--wash-hover);color:var(--fg)}
+.bar-seg button[aria-pressed="true"]{background:var(--thumb-bg);border-color:var(--input);box-shadow:var(--sh-thumb);color:var(--fg);font-weight:600}
+.bar-links{display:flex;flex-wrap:wrap;gap:4px}
+.bar-links a{color:var(--muted);text-decoration:none;font-size:12px;font-weight:500;padding:5px 9px;border-radius:7px;transition:background var(--dur-instant)}
+.bar-links a:hover{background:var(--wash-hover);color:var(--fg)}
+
+.hidden{display:none!important}
+.sec{display:flex;flex-direction:column;gap:18px;scroll-margin-top:78px}
+.sec-head{display:flex;flex-direction:column;gap:6px}
+
+/* 审计对照网格 */
+.audit-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(310px,1fr));gap:12px}
+.audit-card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:14px 16px;display:flex;flex-direction:column;gap:6px}
+.audit-card .code-tag{font-family:var(--mono);font-size:11px;font-weight:600;color:var(--brand);background:var(--brand-tint);padding:2px 7px;border-radius:6px;align-self:flex-start}
+.audit-card .old{font-size:12.5px;color:var(--muted)}
+.audit-card .fix{font-size:12.5px;color:var(--fg);border-top:1px solid var(--line);padding-top:6px;margin-top:2px}
+.audit-card .fix b{color:var(--brand)}
+
+/* 交互原型台外壳 */
+.stage-shell{display:flex;flex-direction:column;gap:14px;background:var(--card);border:1px solid var(--border);border-radius:16px;padding:16px}
+.stage-controls{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px;padding-bottom:12px;border-bottom:1px solid var(--line)}
+.quick-chains{display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding:10px 12px;border-radius:10px;background:var(--inset);border:1px solid var(--line);box-shadow:var(--sh-inset)}
+.quick-chains .ql{font-size:12px;font-weight:600;color:var(--muted);margin-right:4px}
+.qbtn{height:26px;padding:0 10px;border-radius:7px;border:1px solid var(--edge-raised);background:var(--raised);box-shadow:var(--sh-raised);font-size:12px;font-weight:500;color:var(--fg);display:inline-flex;align-items:center;gap:5px;transition:transform var(--dur-instant),background var(--dur-instant)}
+.qbtn:hover{filter:brightness(1.03)}
+.qbtn:active{transform:scale(.97);box-shadow:var(--sh-pressed)}
+.stage-canvas{display:flex;flex-direction:column;align-items:center;gap:12px;padding:16px 8px;background:repeating-radial-gradient(circle at 1px 1px,color-mix(in srgb,var(--fg) 7%,transparent) 1px,transparent 0) 0 0/18px 18px;border-radius:12px;border:1px solid var(--line);overflow-x:auto}
+.stage-hint{display:flex;flex-wrap:wrap;gap:8px 16px;font-size:12px;color:var(--muted);align-items:center;justify-content:center}
+.kbd-pill{font-family:var(--mono);font-size:11px;padding:1px 6px;border-radius:5px;background:var(--raised);border:1px solid var(--border);color:var(--fg)}
+
+/* ==========================================================================
+   核心 H-OpenConnect UI 组件系统（Touch 档默认；.tier-pointer 为 PC 指针档）
+   ========================================================================== */
+svg.i{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.85;stroke-linecap:round;stroke-linejoin:round;flex:none}
+svg.i.s{width:15px;height:15px}
+svg.i.xs{width:13px;height:13px}
+
+/* 设备壳体 */
+.dev-frame{position:relative;background:var(--bg);color:var(--fg);overflow:hidden;display:flex;flex-direction:column;flex:none;
+  font-size:calc(15px * var(--fscale));line-height:calc(20px * var(--fscale));user-select:none}
+.dev-phone{width:390px;height:812px;border-radius:42px;border:8px solid var(--frame);box-shadow:var(--sh-overlay)}
+.dev-pad-p{width:768px;height:860px;border-radius:28px;border:8px solid var(--frame);box-shadow:var(--sh-overlay)}
+.dev-pad-l{width:1080px;height:720px;border-radius:28px;border:8px solid var(--frame);box-shadow:var(--sh-overlay);flex-direction:row}
+.dev-pc{width:1220px;height:740px;border-radius:12px;border:1px solid var(--border);box-shadow:var(--sh-overlay);flex-direction:row}
+.dev-pc.narrow{width:840px;height:660px}
+
+/* 状态栏 & 手机页头 & 底栏 */
+.sb{height:28px;flex:none;display:flex;align-items:center;justify-content:space-between;padding:0 22px;font-size:12px;font-weight:600;color:var(--fg)}
+.hdr{height:52px;flex:none;display:flex;align-items:center;gap:8px;padding:0 16px;border-bottom:1px solid var(--line);background:var(--bg)}
+.hdr .t{font-size:calc(17px * var(--fscale));font-weight:600;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.hdr .back-btn{height:36px;padding:0 8px 0 4px;margin-left:-6px;border:0;background:transparent;border-radius:9px;display:inline-flex;align-items:center;gap:3px;font-size:15px;font-weight:500;color:var(--fg)}
+.hdr .back-btn:hover{background:var(--wash-hover)}
+.hdr .act{display:flex;align-items:center;gap:6px;flex:none}
+.btabs{height:64px;flex:none;border-top:1px solid var(--line);display:flex;padding:5px 8px 10px;gap:4px;background:var(--bg)}
+.btab{flex:1;border:0;background:transparent;border-radius:12px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;color:var(--muted);font-size:12px;font-weight:500;transition:background var(--dur-instant)}
+.btab .ti{width:48px;height:28px;border-radius:14px;display:flex;align-items:center;justify-content:center;transition:background var(--dur-instant)}
+.btab:active .ti{background:var(--wash-press)}
+.btab.on{color:var(--fg);font-weight:600}
+.btab.on svg{stroke:var(--brand);stroke-width:2.2}
+.home-ind{position:absolute;bottom:4px;left:50%;transform:translateX(-50%);width:118px;height:4px;border-radius:999px;background:var(--fg);opacity:.22;pointer-events:none;z-index:2}
+
+/* Pad / PC 侧栏（无缝通顶） */
+.side{width:232px;flex:none;background:var(--sidebar);border-right:1px solid var(--sidebar-border);display:flex;flex-direction:column;min-height:0}
+.side.rail{width:64px;align-items:center}
+.side-top{height:48px;flex:none;display:flex;align-items:center;gap:9px;padding:0 12px;width:100%}
+.side.rail .side-top{justify-content:center;padding:0 8px}
+.brand-btn{flex:1;height:36px;border:0;background:transparent;border-radius:8px;padding:0 6px;display:flex;align-items:center;gap:9px;color:var(--fg);font-size:15px;font-weight:600;transition:background var(--dur-instant)}
+.side.rail .brand-btn{flex:none;width:40px;height:40px;justify-content:center;padding:0}
+.brand-btn:hover{background:var(--wash-hover)}
+.logo-sq{width:26px;height:26px;border-radius:8px;background:var(--raised);border:1px solid var(--edge-raised);box-shadow:var(--sh-raised);color:var(--brand);display:flex;align-items:center;justify-content:center;flex:none}
+.logo-sq svg{width:17px;height:17px}
+.logo-sq.lg{width:56px;height:56px;border-radius:16px}
+.logo-sq.lg svg{width:34px;height:34px}
+/* 图标设计展板样式 */
+.icon-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(310px,1fr));gap:16px}
+.icon-card{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:16px;display:flex;flex-direction:column;gap:14px}
+.icon-card.active{border-color:var(--brand);box-shadow:0 0 0 2px var(--brand-tint)}
+.icon-hero-row{display:flex;align-items:center;gap:14px}
+.app-squircle{width:88px;height:88px;border-radius:21px;display:flex;align-items:center;justify-content:center;flex:none;border:1px solid var(--line)}
+.app-squircle.light{background:linear-gradient(180deg,#f8f9fb 0%,#f3f4f7 50%,#eceef2 100%);color:#4a840a;box-shadow:0 4px 12px -4px rgba(10,15,25,.12)}
+.app-squircle.dark{background:linear-gradient(180deg,#23272f 0%,#16191f 100%);color:#c8f26d;border-color:#2d3036;box-shadow:0 4px 12px -4px rgba(0,0,0,.45)}
+.app-squircle svg{width:46px;height:46px}
+.icon-scale-strip{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 12px;border-radius:10px;background:var(--inset);border:1px solid var(--line)}
+.icon-scale-item{display:flex;flex-direction:column;align-items:center;gap:4px;font-size:11px;color:var(--muted)}
+.layer-strip{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+.layer-cell{display:flex;flex-direction:column;align-items:center;gap:4px;padding:8px 6px;border-radius:9px;background:var(--inset);border:1px solid var(--line);font-size:11px;color:var(--muted)}
+.layer-box{width:38px;height:38px;border-radius:9px;display:flex;align-items:center;justify-content:center;border:1px solid var(--border)}
+.layer-box.checker{background:repeating-conic-gradient(var(--muted-bg) 0% 25%,var(--card) 0% 50%) 50%/10px 10px;color:#4a840a}
+.layer-box.bg-only{background:linear-gradient(180deg,#f8f9fb 0%,#eceef2 100%)}
+.layer-box.sp-l{background:#f6f6f9;color:#4a840a}
+.layer-box.sp-d{background:#16191f;color:#c8f26d;border-color:#2d3036}
+.side-scroll{flex:1;min-height:0;overflow-y:auto;padding:4px 8px 10px;display:flex;flex-direction:column;gap:8px;width:100%;scrollbar-width:thin}
+.side.rail .side-scroll{align-items:center;gap:6px}
+.nav-sec{display:flex;flex-direction:column;gap:2px;width:100%}
+.side.rail .nav-sec{align-items:center}
+.nav-sep{height:1px;width:28px;background:var(--sidebar-border);margin:2px 0}
+.nav-item{width:100%;height:36px;border:1px solid transparent;background:transparent;border-radius:9px;padding:0 10px;display:flex;align-items:center;gap:10px;color:var(--muted);font-size:14px;font-weight:500;text-align:left;transition:background var(--dur-instant),color var(--dur-instant)}
+.nav-item:hover{background:var(--wash-hover);color:var(--fg)}
+.nav-item:active{background:var(--wash-press)}
+.nav-item.on{background:var(--sidebar-sel);border-color:var(--border);color:var(--fg);font-weight:600}
+.nav-item.on svg{color:var(--fg)}
+.side.rail .nav-item{width:42px;height:42px;justify-content:center;padding:0;border-radius:10px}
+.nav-kbd{margin-left:auto;font-family:var(--mono);font-size:11px;color:var(--faint);font-variant-numeric:tabular-nums}
+.side-spacer{flex:1;min-height:8px}
+.side-pin{display:flex;flex-direction:column;gap:6px;width:100%}
+.side.rail .side-pin{align-items:center}
+.side-pin .nav-sep{width:auto;margin:0 4px}
+.side.rail .side-pin .nav-sep{width:28px;margin:0}
+.side-foot{flex:none;width:100%;padding:10px 14px;border-top:1px solid var(--sidebar-border);display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:12px;color:var(--muted)}
+
+/* 主工作区 & 统一自绘标题工具栏 */
+.ws-main{flex:1;min-width:0;display:flex;flex-direction:column;background:var(--bg);min-height:0}
+.ws-tool{height:48px;flex:none;display:flex;align-items:center;gap:8px;padding:0 20px;border-bottom:1px solid var(--line);background:var(--bg)}
+.ws-crumb{display:inline-flex;align-items:center;gap:4px;font-size:13px;color:var(--muted);flex:none}
+.ws-title{font-size:16px;font-weight:600;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ws-acts{display:flex;align-items:center;gap:6px;flex:none}
+.win-ctrls{display:flex;align-items:center;gap:4px;margin-left:10px;padding-left:10px;border-left:1px solid var(--line);flex:none}
+.wc{width:26px;height:26px;border-radius:6px;display:inline-flex;align-items:center;justify-content:center;color:var(--muted)}
+.wc:hover{background:var(--wash-hover);color:var(--fg)}
+.wc.close:hover{background:var(--danger);color:#fff}
+
+/* 滚动主体与分栏 */
+.scroll-body{flex:1 1 auto;min-height:0;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:20px;scrollbar-width:thin}
+.scroll-body>*{flex-shrink:0}
+.pad-center{width:100%;max-width:640px;margin:0 auto;display:flex;flex-direction:column;gap:20px}
+.pc-center{width:100%;max-width:720px;margin:0 auto;display:flex;flex-direction:column;gap:18px}
+.cols2{flex:1;min-height:0;overflow-y:auto;padding:20px;display:grid;grid-template-columns:1.05fr 0.95fr;gap:18px;align-content:start}
+.col-pane{display:flex;flex-direction:column;gap:18px;min-width:0}
+.split-pane{flex:1;min-height:0;display:flex;overflow:hidden}
+.split-master{width:330px;flex:none;border-right:1px solid var(--line);padding:14px;display:flex;flex-direction:column;gap:10px;overflow-y:auto;background:color-mix(in srgb,var(--inset) 42%,var(--bg))}
+.split-detail{flex:1;min-width:0;padding:16px 20px;display:flex;flex-direction:column;gap:16px;overflow-y:auto}
+.inspector{width:330px;flex:none;border-left:1px solid var(--line);background:var(--card);padding:16px;display:flex;flex-direction:column;gap:14px;overflow-y:auto}
+.settings-tabs-bar{flex:none;width:100%;max-width:720px;margin:0 auto;padding:12px 20px 2px}
+.dev-pad-l .settings-tabs-bar{max-width:640px}
+
+/* 分组与平面卡片 */
+.grp{display:flex;flex-direction:column;gap:8px;min-width:0}
+.ghead{display:flex;align-items:baseline;justify-content:space-between;gap:8px;padding:0 4px}
+.ghead .gt{font-size:calc(15px * var(--fscale));font-weight:600;color:var(--fg)}
+.ghead .gm{font-size:13px;color:var(--muted);font-variant-numeric:tabular-nums}
+.surf{background:var(--card);border:1px solid var(--border);border-radius:16px;box-shadow:var(--sh-card);overflow:hidden}
+.surf.padded{padding:16px;display:flex;flex-direction:column;gap:12px}
+.well{background:var(--inset);border:1px solid var(--line);border-radius:12px;box-shadow:var(--sh-inset);padding:12px;display:flex;flex-direction:column;gap:8px}
+
+/* 列表行 */
+.lrow{min-height:48px;display:flex;align-items:center;gap:12px;padding:10px 16px;position:relative;border:0;background:transparent;width:100%;text-align:left;transition:background var(--dur-instant)}
+.lrow.click:hover{background:var(--wash-hover)}
+.lrow.click:active{background:var(--wash-press)}
+.lrow.sel{background:var(--brand-tint)}
+.lrow+.lrow::before,.surf>.fld+.lrow::before,.surf>.lrow+.fld::before,.surf>.fld+.fld::before{content:"";position:absolute;top:0;left:16px;right:16px;height:1px;background:var(--line)}
+.lrow .ic{width:28px;height:28px;border-radius:8px;background:var(--raised);border:1px solid var(--edge-raised);box-shadow:var(--sh-raised);display:flex;align-items:center;justify-content:center;color:var(--fg);flex:none}
+.lrow .tx{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.lrow .tx b{font-size:calc(15px * var(--fscale));line-height:20px;font-weight:500;color:var(--fg);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:flex;align-items:center;gap:6px}
+.lrow.sel .tx b{font-weight:600}
+.lrow .tx small{font-size:13px;line-height:18px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lrow .tr{display:flex;align-items:center;gap:6px;color:var(--muted);font-size:13px;font-variant-numeric:tabular-nums;flex:none}
+
+/* 按钮家族 */
+.btn{height:40px;padding:0 16px;border-radius:10px;border:1px solid var(--edge-raised);background:var(--raised);box-shadow:var(--sh-raised);color:var(--fg);
+  font-size:15px;font-weight:500;display:inline-flex;align-items:center;justify-content:center;gap:8px;white-space:nowrap;
+  transition:transform var(--dur-instant) var(--ease-out),background var(--dur-instant),opacity var(--dur-instant)}
+.btn:hover:not(:disabled){filter:brightness(1.03)}
+.btn:active:not(:disabled){transform:scale(.97);box-shadow:var(--sh-pressed)}
+.btn:disabled{opacity:.48}
+.btn.pri{background:var(--brand-fill);border-color:var(--edge-primary);box-shadow:var(--sh-primary);color:var(--on-brand)}
+.btn.pri:disabled{background:var(--raised);border-color:var(--edge-raised);box-shadow:var(--sh-raised);color:var(--muted)}
+.btn.stop{background:var(--stop-fill);border-color:var(--edge-stop);box-shadow:var(--sh-stop);color:var(--on-stop)}
+.btn.danger{background:var(--danger-tint);border-color:color-mix(in srgb,var(--danger) 35%,var(--border));box-shadow:var(--sh-raised);color:var(--danger)}
+.btn.danger-solid{background:var(--danger);border-color:transparent;box-shadow:var(--sh-stop);color:#fff}
+.btn.ghost{background:transparent;border-color:transparent;box-shadow:none;color:var(--muted)}
+.btn.ghost:hover:not(:disabled){background:var(--wash-hover);color:var(--fg)}
+.btn.on{background:var(--on-fill);border-color:var(--input)}
+.btn.sm{height:36px;padding:0 12px;font-size:14px;gap:6px}
+.btn.full{width:100%}
+.ibtn{width:40px;height:40px;border-radius:10px;border:1px solid transparent;background:transparent;color:var(--fg);display:inline-flex;align-items:center;justify-content:center;flex:none;transition:transform var(--dur-instant),background var(--dur-instant)}
+.ibtn:hover:not(:disabled){background:var(--wash-hover)}
+.ibtn:active:not(:disabled){transform:scale(.95);background:var(--wash-press)}
+.ibtn.on{background:var(--on-fill)}
+.ibtn.sm{width:34px;height:34px}
+
+/* 分段控件 */
+.seg{height:36px;padding:2px;border-radius:10px;background:var(--inset);border:1px solid var(--border);box-shadow:var(--sh-sunk);display:flex;gap:2px;flex:none;max-width:100%;overflow:hidden}
+.seg button,.seg span{flex:1;min-width:0;border:1px solid transparent;background:transparent;border-radius:7px;padding:0 6px;display:inline-flex;align-items:center;justify-content:center;gap:4px;
+  font-size:13.5px;font-weight:500;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;transition:background var(--dur-instant),color var(--dur-instant)}
+.seg button:hover:not(.on){background:var(--wash-hover);color:var(--fg)}
+.seg .on{background:var(--thumb-bg);border-color:var(--input);box-shadow:var(--sh-thumb);color:var(--fg)}
+.seg.sm{height:32px}
+.seg.sm button,.seg.sm span{font-size:12.5px;padding:0 4px}
+.seg em{font-style:normal;font-size:11.5px;color:var(--faint);font-variant-numeric:tabular-nums}
+.seg .on em{color:var(--muted)}
+/* 日志状态信息行 & PC 内联工具条（对齐 Paws logs.tsx） */
+.log-status{min-height:20px;flex:none;display:flex;align-items:center;flex-wrap:wrap;gap:6px;padding:0 2px;font-size:12.5px;color:var(--muted);font-variant-numeric:tabular-nums}
+.log-status .sdot{width:8px;height:8px;border-radius:999px;background:var(--faint);flex:none}
+.log-status .sdot.on{background:var(--up)}
+.log-status .clr-link{border:0;background:transparent;color:var(--brand);font-size:12.5px;font-weight:500;padding:2px 4px;border-radius:5px;cursor:pointer}
+.log-status .clr-link:hover{background:var(--wash-hover)}
+.log-inline-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.about-comp{display:flex;flex-direction:column;gap:6px;padding:12px 16px;position:relative}
+.about-comp+.about-comp::before{content:"";position:absolute;top:0;left:16px;right:16px;height:1px;background:var(--line)}
+.about-comp b{font-size:14.5px;font-weight:500;color:var(--fg)}
+.about-comp .ver{font-size:13px;color:var(--muted);font-variant-numeric:tabular-nums}
+.about-comp .links{display:flex;flex-wrap:wrap;gap:10px;margin-top:2px}
+.tier-pointer .about-comp{padding:10px 14px}
+.tier-pointer .about-comp b{font-size:14px}
+
+/* 输入框 / 选择器 / 文件选择器 */
+.fld{display:flex;flex-direction:column;gap:5px;padding:10px 16px;position:relative}
+.fld.bare{padding:0}
+.fld-lbl{display:flex;align-items:center;justify-content:space-between;gap:6px;font-size:13px;font-weight:500;color:var(--fg)}
+.inp,.sel-trig{height:46px;width:100%;border-radius:10px;background:var(--field);border:1px solid var(--input);padding:0 14px;
+  font-size:15px;color:var(--fg);display:flex;align-items:center;justify-content:space-between;gap:8px;transition:border-color var(--dur-instant)}
+.inp:hover,.sel-trig:hover{border-color:var(--faint)}
+.inp:focus,.sel-trig.open{border-color:var(--ring);outline:2px solid var(--ring-halo);outline-offset:-1px}
+.inp.err{border-color:var(--danger);outline:2px solid var(--danger-tint);outline-offset:-1px}
+.inp.ro{background:var(--inset);border-color:var(--line);color:var(--muted)}
+textarea.inp{height:76px;padding:10px 14px;resize:none;line-height:1.45;font-family:var(--mono);font-size:13px}
+.inp-row{display:flex;align-items:center;gap:8px}
+.inp-row .inp{flex:1;min-width:0}
+.inp-row .btn.sm{flex:none;padding:0 10px}
+.help{font-size:13px;line-height:18px;color:var(--muted)}
+.help.err{color:var(--danger)}
+.search-box{position:relative;display:flex;align-items:center;flex:none;width:100%}
+.search-box.inline{flex:1;width:auto;min-width:180px}
+.search-box svg{position:absolute;left:12px;color:var(--muted);pointer-events:none}
+.search-box input{padding-left:36px}
+.chip-row{display:flex;flex-wrap:wrap;gap:6px;margin-top:4px}
+.chip{height:26px;padding:0 10px;border-radius:999px;border:1px solid var(--border);background:var(--inset);font-size:12px;color:var(--fg);display:inline-flex;align-items:center;gap:4px}
+.chip.on{background:var(--brand-tint);border-color:color-mix(in srgb,var(--brand) 40%,var(--border));color:var(--brand);font-weight:600}
+
+/* 开关 / 单选 / 复选 / 徽章 */
+.sw{width:42px;height:24px;border-radius:999px;background:var(--track);border:1px solid var(--border);box-shadow:var(--sh-sunk);padding:1px;display:inline-flex;align-items:center;flex:none;transition:background var(--dur-fast)}
+.sw::after{content:"";width:20px;height:20px;border-radius:50%;background:var(--knob);border:1px solid var(--input);box-shadow:0 1px 1px rgba(10,15,25,.14);transition:transform var(--dur-fast) var(--ease-out)}
+.sw.on{background:var(--brand-fill);border-color:var(--edge-primary)}
+.sw.on::after{background:#fff;border-color:#8fb536;transform:translateX(18px)}
+.rad{width:22px;height:22px;border-radius:50%;background:var(--choice-off-bg);border:1px solid var(--choice-off-border);display:inline-flex;align-items:center;justify-content:center;flex:none}
+.rad.on{background:var(--brand-fill);border-color:var(--edge-primary);box-shadow:var(--sh-primary)}
+.rad.on::after{content:"";width:8px;height:8px;border-radius:50%;background:var(--on-brand)}
+.bdg{display:inline-flex;align-items:center;gap:4px;height:24px;padding:0 9px;border-radius:999px;font-size:12px;font-weight:500;font-variant-numeric:tabular-nums;white-space:nowrap;background:var(--muted-bg);color:var(--fg)}
+.bdg.brand{background:var(--brand-tint);color:var(--brand)}
+.bdg.ok{background:var(--up-tint);color:var(--up)}
+.bdg.warn{background:var(--warn-tint);color:var(--warn)}
+.bdg.err{background:var(--danger-tint);color:var(--danger)}
+.bdg.info{background:var(--info-tint);color:var(--info)}
+
+/* Hero 状态卡 & 速率格 & 柱状图 */
+.hero{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:16px;display:flex;flex-direction:column;gap:12px}
+.dot{width:10px;height:10px;border-radius:50%;background:var(--faint);flex:none}
+.dot.ok{background:var(--up);box-shadow:0 0 0 4px var(--up-tint)}
+.dot.warn{background:var(--warn);box-shadow:0 0 0 4px var(--warn-tint)}
+.dot.bad{background:var(--danger);box-shadow:0 0 0 4px var(--danger-tint)}
+.dot.info{background:var(--info);box-shadow:0 0 0 4px var(--info-tint)}
+.stat-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.stat-tile{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:12px 14px;display:flex;flex-direction:column;gap:4px}
+.stat-tile small{font-size:12px;color:var(--muted);display:flex;align-items:center;gap:5px}
+.stat-tile b{font-size:18px;line-height:23px;font-weight:600;font-variant-numeric:tabular-nums;font-family:var(--mono)}
+.stat-tile .u{font-size:12px;color:var(--muted);font-weight:500;font-family:var(--sans);margin-left:3px}
+.speed{display:grid;grid-template-columns:1fr 1fr;background:var(--card);border:1px solid var(--border);border-radius:16px;overflow:hidden}
+.speed>div{padding:12px 14px;display:flex;flex-direction:column;gap:4px}
+.speed>div+div{border-left:1px solid var(--line)}
+.speed small{font-size:12px;color:var(--muted);display:flex;align-items:center;gap:4px}
+.speed b{font-size:20px;line-height:24px;font-weight:600;font-variant-numeric:tabular-nums}
+.speed .u{font-size:12.5px;color:var(--muted);font-weight:500;margin-left:3px}
+.bars{height:98px;display:flex;align-items:flex-end;gap:3px;padding:8px 4px 0;border-bottom:1px solid var(--line)}
+.bar-pair{flex:1;height:100%;display:flex;align-items:flex-end;gap:1px}
+.bar-pair i{flex:1;border-radius:2px 2px 0 0;display:block}
+.bar-pair .dl{background:var(--brand)} .bar-pair .ul{background:var(--info)}
+.chart-legend{display:flex;align-items:center;justify-content:space-between;font-size:12px;color:var(--muted);padding-top:6px}
+.lg-dot{display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:5px}
+
+/* Alert / Banner / Empty / KV / Logs */
+.alert{display:flex;align-items:flex-start;gap:9px;padding:11px 13px;border-radius:12px;border:1px solid color-mix(in srgb,var(--warn) 38%,var(--border));background:var(--warn-tint);font-size:13px;line-height:18px;color:var(--fg)}
+.alert.err{border-color:color-mix(in srgb,var(--danger) 38%,var(--border));background:var(--danger-tint)}
+.alert.info{border-color:color-mix(in srgb,var(--info) 35%,var(--border));background:var(--info-tint)}
+.alert svg{margin-top:2px;flex:none}
+.alert.warn svg{color:var(--warn)} .alert.err svg{color:var(--danger)} .alert.info svg{color:var(--info)}
+.global-banner{flex:none;display:flex;align-items:center;justify-content:space-between;gap:10px;padding:9px 14px;background:var(--warn-tint);border-bottom:1px solid color-mix(in srgb,var(--warn) 35%,var(--border));font-size:12.5px;line-height:18px}
+.empty{display:flex;flex-direction:column;align-items:center;text-align:center;gap:10px;padding:38px 18px}
+.empty .eic{width:46px;height:46px;border-radius:14px;background:var(--raised);border:1px solid var(--border);box-shadow:var(--sh-raised);display:flex;align-items:center;justify-content:center;color:var(--muted)}
+.kv{display:grid;grid-template-columns:96px 1fr;gap:8px 12px;font-size:13.5px;line-height:19px}
+.kv .k{color:var(--muted)}
+.kv .v{min-width:0;word-break:break-all;font-variant-numeric:tabular-nums;color:var(--fg);font-weight:500;font-family:var(--mono);font-size:12.5px}
+.sticky-foot{flex:none;border-top:1px solid var(--line);padding:12px 16px 16px;background:var(--bg);display:flex;align-items:center;justify-content:space-between;gap:10px}
+.log-row{display:flex;align-items:flex-start;gap:9px;padding:9px 14px;border-top:1px solid var(--line);border-left:0;border-right:0;border-bottom:0;background:transparent;width:100%;text-align:left;font-family:var(--mono)}
+.log-row:first-child{border-top:0}
+.log-row:hover{background:var(--wash-hover)}
+.log-row.sel{background:var(--brand-tint)}
+.log-row .tm{font-size:12px;line-height:20px;color:var(--faint);font-variant-numeric:tabular-nums;flex:none}
+.log-row .msg{font-size:12.5px;line-height:19px;color:var(--code);flex:1;min-width:0;word-break:break-word}
+.follow-pill{position:absolute;left:50%;transform:translateX(-50%);bottom:12px;height:34px;padding:0 14px;border-radius:999px;background:var(--raised);border:1px solid var(--border);box-shadow:var(--sh-menu);font-size:12.5px;font-weight:600;color:var(--fg);display:inline-flex;align-items:center;justify-content:center;gap:6px;white-space:nowrap;width:max-content;max-width:calc(100% - 24px);overflow:hidden;text-overflow:ellipsis;z-index:4}
+.follow-pill svg{flex:none;color:var(--brand)}
+.sel-trig .sel-val{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:left}
+.sel-trig svg{flex:none;color:var(--muted)}
+.mi.sel-opt{justify-content:space-between}
+.mi.sel-opt .opt-tx{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px}
+.mi.sel-opt .opt-tx b{font-size:14.5px;font-weight:500;color:var(--fg)}
+.mi.sel-opt .opt-tx small{font-size:12px;color:var(--muted);line-height:16px}
+.pop-menu .mi.sel-opt{height:auto;min-height:30px;padding:6px 10px}
+.sheet .mi.sel-opt{height:auto;min-height:50px;padding:8px 12px}
+.acc-head{width:100%;display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border:0;background:transparent;font-size:14px;font-weight:600;color:var(--fg);text-align:left}
+.acc-head:hover{background:var(--wash-hover)}
+.star-ic{color:var(--warn)}
+
+/* ==========================================================================
+   多级浮层系统（L2 Menu/Sheet → L3 Auth/Error Dialog → L4 AlertDialog → Top Toast）
+   ========================================================================== */
+.ov-layer{position:absolute;inset:0;z-index:20;display:flex}
+.ov-layer.l3{z-index:30}
+.ov-layer.l4{z-index:40}
+.scrim{position:absolute;inset:0;background:var(--scrim);animation:fadeIn var(--dur-fast) ease-out}
+.sheet{position:absolute;left:0;right:0;bottom:0;z-index:2;background:var(--card);border:1px solid var(--border);border-bottom:0;border-radius:20px 20px 0 0;box-shadow:var(--sh-overlay);
+  max-height:86%;display:flex;flex-direction:column;animation:sheetUp var(--dur-base) var(--ease-out)}
+.grab{width:36px;height:5px;border-radius:999px;background:var(--raised);border:1px solid var(--line);margin:8px auto 4px;flex:none}
+.sh-head{display:flex;align-items:flex-start;justify-content:space-between;gap:8px;padding:4px 10px 10px 16px;border-bottom:1px solid var(--line);flex:none}
+.sh-head b{font-size:17px;line-height:23px;font-weight:600}
+.sh-head small{font-size:13px;color:var(--muted);display:block}
+.sh-body{flex:1;min-height:0;overflow-y:auto;padding:14px 16px;display:flex;flex-direction:column;gap:12px}
+.sh-foot{flex:none;padding:12px 16px 20px;border-top:1px solid var(--line);display:flex;gap:8px}
+
+.dlg-wrap{position:relative;z-index:2;flex:1;display:flex;align-items:center;justify-content:center;padding:18px}
+.dlg{width:100%;max-width:460px;max-height:90%;background:var(--card);border:1px solid var(--border);border-radius:16px;box-shadow:var(--sh-overlay);
+  display:flex;flex-direction:column;overflow:hidden;animation:popIn var(--dur-fast) var(--ease-out)}
+.dlg-head{display:flex;align-items:flex-start;justify-content:space-between;gap:8px;padding:14px 12px 12px 20px;border-bottom:1px solid var(--line);flex:none}
+.dlg-head b{font-size:18px;line-height:24px;font-weight:600}
+.dlg-head small{font-size:13px;color:var(--muted);display:block;margin-top:2px}
+.dlg-body{flex:1;min-height:0;overflow-y:auto;padding:16px 20px;display:flex;flex-direction:column;gap:12px}
+.dlg-foot{flex:none;padding:12px 20px 16px;border-top:1px solid var(--line);display:flex;justify-content:flex-end;gap:8px}
+
+.alert-dlg{width:100%;max-width:340px;background:var(--card);border:1px solid var(--border);border-radius:16px;box-shadow:var(--sh-overlay);padding:20px;display:flex;flex-direction:column;gap:10px;animation:popIn var(--dur-fast) var(--ease-out)}
+.alert-dlg b{font-size:17px;line-height:23px;font-weight:600}
+.alert-dlg p{font-size:13.5px;line-height:20px;color:var(--muted)}
+.alert-dlg .acts{display:flex;gap:8px;justify-content:flex-end;margin-top:6px}
+
+.mi{width:100%;height:46px;padding:0 12px;border:0;border-radius:10px;background:transparent;display:flex;align-items:center;gap:10px;font-size:16px;color:var(--fg);text-align:left;transition:background var(--dur-instant)}
+.mi svg{color:var(--muted)}
+.mi:hover:not(:disabled){background:var(--accent-bg)}
+.mi:active:not(:disabled){background:var(--wash-press)}
+.mi.danger,.mi.danger svg{color:var(--danger)}
+.mi:disabled{opacity:.45}
+.mi .reason{margin-left:auto;font-size:11.5px;color:var(--muted)}
+.msep{height:1px;background:var(--line);margin:4px 8px}
+.pop-menu{position:absolute;min-width:215px;max-width:270px;background:var(--popover);border:1px solid var(--border);border-radius:10px;padding:4px;box-shadow:var(--sh-menu);z-index:2;animation:popMenu var(--dur-fast) var(--ease-out)}
+.pop-menu .mi{height:26px;border-radius:6px;padding:0 8px;gap:8px;font-size:13px}
+.pop-menu .mi svg{width:14px;height:14px}
+.pop-menu.touch-pop{border-radius:12px}
+.pop-menu.touch-pop .mi{height:36px;border-radius:7px;padding:0 10px;gap:8px;font-size:14px}
+.pop-menu.touch-pop .mi svg{width:16px;height:16px}
+
+.toast-deck{position:absolute;top:14px;left:50%;transform:translateX(-50%);width:min(380px,calc(100% - 28px));z-index:60;display:flex;flex-direction:column;gap:8px;pointer-events:none}
+.toast-card{pointer-events:auto;background:var(--card);border:1px solid var(--border);border-radius:12px;box-shadow:var(--sh-overlay);padding:10px 10px 10px 12px;display:flex;align-items:center;gap:10px;animation:toastIn var(--dur-base) var(--ease-out)}
+.toast-card.warn{border-color:var(--warn)} .toast-card.danger{border-color:var(--danger)}
+.toast-card span{flex:1;font-size:13px;font-weight:600;line-height:18px}
+
+.spin{width:14px;height:14px;border-radius:50%;border:2px solid color-mix(in srgb,currentColor 28%,transparent);border-top-color:currentColor;animation:rot .8s linear infinite;flex:none}
+.ext-link{display:inline-flex;align-items:center;gap:4px;color:var(--brand);font-size:13.5px;font-weight:500;text-decoration:underline;text-underline-offset:2px;background:transparent;border:0;padding:4px 6px;border-radius:6px}
+.ext-link:hover{background:var(--wash-hover)}
+.err-pre{font-family:var(--mono);font-size:12px;line-height:19px;background:var(--inset);border:1px solid var(--line);border-radius:10px;padding:12px;white-space:pre-wrap;word-break:break-all;color:var(--code);max-height:240px;overflow:auto}
+
+@keyframes fadeIn{from{opacity:0}to{opacity:1}}
+@keyframes popIn{from{opacity:0;transform:scale(.96) translateY(6px)}to{opacity:1;transform:none}}
+@keyframes popMenu{from{opacity:0;transform:scale(.96) translateY(-4px)}to{opacity:1;transform:none}}
+@keyframes sheetUp{from{transform:translateY(24px)}to{transform:none}}
+@keyframes toastIn{from{opacity:0;transform:translateY(-20px)}to{opacity:1;transform:none}}
+@keyframes rot{to{transform:rotate(360deg)}}
+
+/* ==========================================================================
+   PC 指针档精确覆盖（platform.desktop === true）
+   ========================================================================== */
+.tier-pointer{font-size:calc(13.5px * var(--fscale));line-height:calc(19px * var(--fscale))}
+.tier-pointer .surf,.tier-pointer .hero,.tier-pointer .speed,.tier-pointer .stat-tile{border-radius:10px}
+.tier-pointer .ghead .gt{font-size:13px}
+.tier-pointer .ghead .gm{font-size:12px}
+.tier-pointer .lrow{min-height:40px;padding:6px 14px;gap:10px}
+.tier-pointer .lrow+.lrow::before{left:14px;right:14px}
+.tier-pointer .lrow .tx b{font-size:14px}
+.tier-pointer .lrow .tx small,.tier-pointer .lrow .tr{font-size:12px}
+.tier-pointer .btn{height:28px;padding:0 12px;border-radius:7px;font-size:13px;gap:6px}
+.tier-pointer .btn.sm{height:24px;padding:0 8px;font-size:12px;gap:5px}
+.tier-pointer .btn svg.i{width:14px;height:14px}
+.tier-pointer .btn.sm svg.i{width:12px;height:12px}
+.tier-pointer .ibtn{width:28px;height:28px;border-radius:7px}
+.tier-pointer .ibtn.sm{width:24px;height:24px}
+.tier-pointer .ibtn svg.i{width:15px;height:15px}
+.tier-pointer .inp,.tier-pointer .sel-trig{height:32px;padding:0 10px;border-radius:7px;font-size:13.5px}
+.tier-pointer .search-box svg{left:9px;width:14px;height:14px}
+.tier-pointer .search-box input{padding-left:30px}
+.tier-pointer .seg{height:30px;border-radius:9px}
+.tier-pointer .seg:not(.fill){align-self:flex-start}
+.tier-pointer .seg:not(.fill) button,.tier-pointer .seg:not(.fill) span{flex:0 0 auto;padding:0 10px}
+.tier-pointer .seg button,.tier-pointer .seg span{font-size:12px;border-radius:6px}
+.tier-pointer .seg.sm{height:24px;border-radius:8px}
+.tier-pointer .seg.sm button,.tier-pointer .seg.sm span{font-size:12px;padding:0 8px}
+.tier-pointer .sw{width:28px;height:16px}
+.tier-pointer .sw::after{width:12px;height:12px}
+.tier-pointer .sw.on::after{transform:translateX(12px)}
+.tier-pointer .rad{width:16px;height:16px}
+.tier-pointer .rad.on::after{width:6px;height:6px}
+.tier-pointer .nav-item{height:28px;border-radius:6px;padding:0 8px;gap:9px;font-size:13px;font-weight:400}
+.tier-pointer .nav-item.on{border-color:var(--border);font-weight:500}
+.tier-pointer .side.rail .nav-item{width:36px;height:36px;padding:0;border-radius:8px}
+.tier-pointer .dlg-head b{font-size:17px;line-height:23px}
+.tier-pointer .help{font-size:12px}
+.tier-pointer .fld{padding:8px 14px}
+.tier-pointer .kv{font-size:13px}
+
+/* 全景审计画板带与表格 */
+.strip{display:flex;gap:24px;overflow-x:auto;padding:4px 2px 16px;align-items:flex-start;scroll-snap-type:x proximity}
+.shot{display:flex;flex-direction:column;gap:10px;flex:none;scroll-snap-align:start}
+.shot .cap{display:flex;flex-direction:column;gap:2px;max-width:390px}
+.shot.wide .cap{max-width:740px}
+.shot .cap b{font-size:14px;font-weight:600}
+.shot .cap span{font-size:12.5px;color:var(--muted);line-height:1.5}
+.rules-tbl{background:var(--card);border:1px solid var(--border);border-radius:12px;overflow-x:auto}
+.rules-tbl table{width:100%;border-collapse:collapse;font-size:12.5px;min-width:720px}
+.rules-tbl th,.rules-tbl td{padding:9px 12px;text-align:left;border-top:1px solid var(--line);vertical-align:top}
+.rules-tbl th{border-top:0;border-bottom:1px solid var(--border);background:color-mix(in srgb,var(--muted-bg) 70%,var(--card));color:var(--muted);font-weight:600}
+.rules-tbl td.num{font-variant-numeric:tabular-nums;white-space:nowrap}
+.chain-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(390px,1fr));gap:14px}
+.chain-card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:14px 16px;display:flex;flex-direction:column;gap:10px}
+.steps{display:flex;flex-wrap:wrap;align-items:center;gap:6px}
+.step-pill{font-size:12px;font-weight:500;padding:4px 9px;border-radius:7px;background:var(--inset);border:1px solid var(--line)}
+.step-pill.lv2{background:var(--info-tint);border-color:color-mix(in srgb,var(--info) 30%,var(--border));color:var(--info)}
+.step-pill.lv3{background:var(--brand-tint);border-color:color-mix(in srgb,var(--brand) 30%,var(--border));color:var(--brand)}
+.step-pill.lv4{background:var(--danger-tint);border-color:color-mix(in srgb,var(--danger) 30%,var(--border));color:var(--danger)}
+.state-demo{display:inline-flex;align-items:center;gap:6px}
+</style>
+</head>
+<body>
+
+<!-- Lucide 线性图标精灵（1.85pt 统一描边，与 NSH Canvas Path 1:1 对齐） -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+<symbol id="power" viewBox="0 0 24 24"><path d="M12 2v10"/><path d="M18.4 6.6a9 9 0 1 1-12.77.04"/></symbol>
+<symbol id="stop" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2.5" fill="currentColor" stroke="none"/></symbol>
+<symbol id="shield" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></symbol>
+<symbol id="server" viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="8" rx="2"/><rect x="2" y="13" width="20" height="8" rx="2"/><path d="M6 7h.01M6 17h.01"/></symbol>
+<symbol id="activity" viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></symbol>
+<symbol id="file-text" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M16 13H8M16 17H8M10 9H8"/></symbol>
+<symbol id="sliders" viewBox="0 0 24 24"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/></symbol>
+<symbol id="gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></symbol>
+<symbol id="info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></symbol>
+<symbol id="globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15 15 0 0 1 0 20a15 15 0 0 1 0-20"/></symbol>
+<symbol id="search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></symbol>
+<symbol id="plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+<symbol id="more" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="19" cy="12" r="1.2"/></symbol>
+<symbol id="grid" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/></symbol>
+<symbol id="star" viewBox="0 0 24 24"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></symbol>
+<symbol id="star-fill" viewBox="0 0 24 24"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" fill="currentColor"/></symbol>
+<symbol id="key" viewBox="0 0 24 24"><circle cx="7.5" cy="15.5" r="5.5"/><path d="m21 2-9.6 9.6M15.5 7.5l3 3L22 7l-3-3"/></symbol>
+<symbol id="lock" viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></symbol>
+<symbol id="upload" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/></symbol>
+<symbol id="download" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></symbol>
+<symbol id="refresh" viewBox="0 0 24 24"><path d="M21 12a9 9 0 0 1-15.5 6.2L3 16"/><path d="M3 12A9 9 0 0 1 18.5 5.8L21 8"/><path d="M21 3v5h-5"/><path d="M3 21v-5h5"/></symbol>
+<symbol id="up" viewBox="0 0 24 24"><path d="M12 19V5M5 12l7-7 7 7"/></symbol>
+<symbol id="down" viewBox="0 0 24 24"><path d="M12 5v14M19 12l-7 7-7-7"/></symbol>
+<symbol id="chev" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></symbol>
+<symbol id="chev-d" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+<symbol id="chev-u" viewBox="0 0 24 24"><path d="m18 15-6-6-6 6"/></symbol>
+<symbol id="back" viewBox="0 0 24 24"><path d="M19 12H5M12 19l-7-7 7-7"/></symbol>
+<symbol id="edit" viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></symbol>
+<symbol id="trash" viewBox="0 0 24 24"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/></symbol>
+<symbol id="copy" viewBox="0 0 24 24"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/></symbol>
+<symbol id="check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
+<symbol id="alert" viewBox="0 0 24 24"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4M12 17h.01"/></symbol>
+<symbol id="x" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></symbol>
+<symbol id="eye" viewBox="0 0 24 24"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></symbol>
+<symbol id="sidebar" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/></symbol>
+<symbol id="ext" viewBox="0 0 24 24"><path d="M7 17 17 7M7 7h10v10"/></symbol>
+<symbol id="sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></symbol>
+<symbol id="moon" viewBox="0 0 24 24"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></symbol>
+<symbol id="monitor" viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></symbol>
+<symbol id="minus" viewBox="0 0 24 24"><path d="M5 12h14"/></symbol>
+<symbol id="square" viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="14" rx="1.5"/></symbol>
+<symbol id="play" viewBox="0 0 24 24"><polygon points="6 4 20 12 6 20 6 4"/></symbol>
+<symbol id="pause" viewBox="0 0 24 24"><path d="M6 4h4v16H6zM14 4h4v16h-4z"/></symbol>
+<symbol id="folder" viewBox="0 0 24 24"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></symbol>
+<!-- 品牌图标候选（与 Paws 一致的 24x24, stroke-width:1.9 圆角线性风格） -->
+<symbol id="brand-paws" viewBox="0 0 24 24"><circle cx="11" cy="4" r="2"/><circle cx="18" cy="8" r="2"/><circle cx="20" cy="16" r="2"/><path d="M9 10a5 5 0 0 1 5 5v3.5a3.5 3.5 0 0 1-6.84 1.045Q6.52 17.48 4.46 16.84A3.5 3.5 0 0 1 5.5 10Z"/></symbol>
+<symbol id="brand-a" viewBox="0 0 24 24"><path d="M 18.39 6.47 A 8.6 8.6 0 1 0 18.39 17.53"/><path d="M 15.71 8.72 A 5.1 5.1 0 1 0 15.71 15.28"/><circle cx="11.8" cy="12" r="1.65"/><path d="M 13.45 12 H 20.6"/></symbol>
+<symbol id="brand-b" viewBox="0 0 24 24"><path d="M 9.92 6.46 A 5.9 5.9 0 1 0 9.92 17.54"/><path d="M 14.08 6.46 A 5.9 5.9 0 1 1 14.08 17.54"/><circle cx="7.9" cy="12" r="1.85"/><circle cx="16.1" cy="12" r="1.85"/><path d="M 9.75 12 H 14.25"/></symbol>
+<symbol id="brand-c" viewBox="0 0 24 24"><path d="M 3.6 19.4 V 11.4 A 8.4 8.4 0 0 1 20.4 11.4 V 19.4"/><path d="M 7.4 19.4 V 11.6 A 4.6 4.6 0 0 1 16.6 11.6 V 19.4"/><circle cx="12" cy="12" r="1.5"/><path d="M 12 13.5 V 19.4"/></symbol>
+<symbol id="brand-d" viewBox="0 0 24 24"><path d="M 10.2 13.8 a 4.6 4.6 0 0 0 6.5 0 l 2.5 -2.5 a 4.6 4.6 0 0 0 -6.5 -6.5 l -1.4 1.4"/><path d="M 13.8 10.2 a 4.6 4.6 0 0 0 -6.5 0 l -2.5 2.5 a 4.6 4.6 0 0 0 6.5 6.5 l 1.4 -1.4"/></symbol>
+</svg>
+
+<div class="wrap">
+  <!-- 顶部审阅悬浮工具栏 -->
+  <div class="audit-bar" role="region" aria-label="设计稿审阅控制栏">
+    <div class="bar-group">
+      <div class="bar-seg" role="group" aria-label="切换视图模式">
+        <button type="button" data-mode="stage" aria-pressed="true">交互原型台（可点多级弹窗）</button>
+        <button type="button" data-mode="boards" aria-pressed="false">全景审计画板（全端展开）</button>
+        <button type="button" data-mode="icons" aria-pressed="false">图标设计方案（4 款对比）</button>
+      </div>
+      <nav class="bar-links hidden" id="board-anchors" aria-label="画板快捷跳转">
+        <a href="#sec-audit">架构升级</a>
+        <a href="#sec-chains">多级链路</a>
+        <a href="#sec-states">组件状态</a>
+        <a href="#sec-phone">Phone</a>
+        <a href="#sec-pad">Pad</a>
+        <a href="#sec-pc">PC</a>
+        <a href="#sec-tokens">令牌与动效</a>
+      </nav>
+    </div>
+    <div class="bar-group">
+      <div class="bar-seg" role="group" aria-label="界面语言">
+        <button type="button" data-lang-set="zh" aria-pressed="true">中文</button>
+        <button type="button" data-lang-set="en" aria-pressed="false">EN</button>
+      </div>
+      <div class="bar-seg" role="group" aria-label="外观主题">
+        <button type="button" data-theme-set="system" aria-pressed="true"><svg class="i xs"><use href="#monitor"/></svg>系统</button>
+        <button type="button" data-theme-set="light" aria-pressed="false"><svg class="i xs"><use href="#sun"/></svg>浅色</button>
+        <button type="button" data-theme-set="dark" aria-pressed="false"><svg class="i xs"><use href="#moon"/></svg>深色</button>
+      </div>
+      <div class="bar-seg" role="group" aria-label="动效偏好">
+        <button type="button" data-motion-set="normal" aria-pressed="true">标准动效</button>
+        <button type="button" data-motion-set="reduce" aria-pressed="false">减弱动效</button>
+      </div>
+      <div class="bar-seg" role="group" aria-label="字体缩放">
+        <button type="button" data-scale-set="100" aria-pressed="true">100%</button>
+        <button type="button" data-scale-set="125" aria-pressed="false">125%</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 标题区 -->
+  <header class="sec">
+    <div class="sec-head">
+      <span class="eyebrow">H-OpenConnect · 基于 nsh-platform-harmonyos 重新设计 · 对标 Paws / NSH Gallery</span>
+      <h1>H-OpenConnect 三端交互设计稿（Phone · Pad 触屏档 · HarmonyOS 2-in-1 指针档）</h1>
+      <p class="lede">
+        参考 <code>Paws</code> 三层架构与 <code>nsh-platform-harmonyos</code>（<code>NshSurface</code> + <code>nsh/host</code>），重构原 Arkit + Dioxus 客户端：
+        <b>① 三端原生壳层</b>（Phone 4 底栏 + 更多枢纽；Pad 宽屏主从分栏与锚定 Popover；PC 2-in-1 无缝通顶侧栏 + 单条 48pt 标题工具栏 + 指针档尺寸）；
+        <b>② 全量企业安全连接能力无损保留</b>（7 态生命周期、严格按 <code>AuthFieldKey</code> 绑定的多轮 MFA 浮层、外部浏览器 SSO-v2、700ms 防抖分组探测、证书文件选择与全量高级协议选项、双序列实时速率图、opt-in 日志录制与归档导出）；
+        <b>③ 上架文案合规红线</b>（应用内全部中英文静态与动态文本严格不含禁用缩写，统一使用「安全连接 / 隧道」与 <code>Connection / Tunnel</code>）。
+      </p>
+    </div>
+  </header>
+
+  <!-- ==================== 模式 1：交互原型台 ==================== -->
+  <section class="sec" id="view-stage">
+    <div class="stage-shell">
+      <div class="stage-controls">
+        <div class="bar-group">
+          <span style="font-size:12px;font-weight:600;color:var(--muted)">设备形态：</span>
+          <div class="bar-seg" id="device-seg" role="group" aria-label="选择设备">
+            <button type="button" data-dev="phone" aria-pressed="true">Phone 390pt</button>
+            <button type="button" data-dev="pad-p" aria-pressed="false">Pad 竖屏 768pt</button>
+            <button type="button" data-dev="pad-l" aria-pressed="false">Pad 横屏 1080pt</button>
+            <button type="button" data-dev="pc-n" aria-pressed="false">PC 窄窗 840pt</button>
+            <button type="button" data-dev="pc" aria-pressed="false">PC 桌面 1220pt</button>
+          </div>
+        </div>
+        <div class="bar-group">
+          <span style="font-size:12px;font-weight:600;color:var(--muted)">品牌图标：</span>
+          <div class="bar-seg" id="icon-seg" role="group" aria-label="切换品牌图标">
+            <button type="button" data-icon-set="a" aria-pressed="true">A 同心隧道</button>
+            <button type="button" data-icon-set="b" aria-pressed="false">B 双环桥</button>
+            <button type="button" data-icon-set="c" aria-pressed="false">C 隧道拱门</button>
+            <button type="button" data-icon-set="d" aria-pressed="false">D 交织双环</button>
+          </div>
+        </div>
+        <div class="bar-group">
+          <span style="font-size:12px;font-weight:600;color:var(--muted)">连接状态：</span>
+          <div class="bar-seg" id="conn-seg" role="group" aria-label="切换连接状态">
+            <button type="button" data-conn="connected" aria-pressed="true">已连接</button>
+            <button type="button" data-conn="disconnected" aria-pressed="false">未连接</button>
+            <button type="button" data-conn="connecting" aria-pressed="false">连接中</button>
+            <button type="button" data-conn="authenticating" aria-pressed="false">等待验证</button>
+            <button type="button" data-conn="failed" aria-pressed="false">失败</button>
+            <button type="button" data-conn="unconfirmed" aria-pressed="false">待确认</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="quick-chains" role="region" aria-label="一键体验多级交互链">
+        <span class="ql">多级交互一键直达：</span>
+        <button class="qbtn" data-chain="c1">链1 多轮 MFA 认证浮层(2轮推进)</button>
+        <button class="qbtn" data-chain="c2">链2 配置菜单 → 编辑 + 分组探测</button>
+        <button class="qbtn" data-chain="c3">链3 编辑脏草稿 → 离开确认 Alert</button>
+        <button class="qbtn" data-chain="c4">链4 证书选择 + 高级选项展开</button>
+        <button class="qbtn" data-chain="c5">链5 活跃配置保护 / 删除 Alert</button>
+        <button class="qbtn" data-chain="c6">链6 日志流 → 详情 Sheet/检查器</button>
+        <button class="qbtn" data-chain="c7">链7 历史归档 → 导出 / 删除保护</button>
+        <button class="qbtn" data-chain="c8">链8 关于页 → 隐私说明子页</button>
+      </div>
+
+      <div class="stage-canvas">
+        <div id="live-stage"></div>
+        <div class="stage-hint">
+          <span>支持直接点击页面、连接/断开、提交多轮验证、编辑配置、右键配置/归档行呼出上下文菜单</span>
+          <span><span class="kbd-pill">Esc</span> 逐级关闭顶层浮层</span>
+          <span><span class="kbd-pill">⌘/Ctrl+1~4</span> 桌面切工作区</span>
+          <span><span class="kbd-pill">⌘/Ctrl+,</span> 打开设置</span>
+          <span><span class="kbd-pill">⌘/Ctrl+B</span> 折叠侧栏</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ==================== 模式 3：图标设计方案展板 ==================== -->
+  <section class="sec hidden" id="view-icons">
+    <div class="sec-head">
+      <span class="eyebrow">Brand Identity &amp; HarmonyOS Layered Icon · 对标 Paws 家族视觉语言</span>
+      <h2>H-OpenConnect 应用图标重新设计（4 款矢量方案对比）</h2>
+      <p class="lede">
+        弃用旧版深蓝盾牌挂锁图标，全面对齐 <code>Paws</code> 的极简工业几何体系：统一采用 <code>24×24</code> 画布、<code>stroke-width: 1.9</code> 圆端单线、
+        Paper 柔纸垂直渐变底色（<code>#f8f9fb → #eceef2</code>）搭配品牌绿描边（浅色 <code>#4a840a</code> / 深色启动图 <code>#c8f26d</code>），
+        满足 HarmonyOS 分层图标安全区（<code>50%</code> 视觉占比，适配圆角矩形/圆形裁切）且在 <code>16pt–1024px</code> 全尺寸清晰可辨。点击任意方案可实时套用至交互原型台。
+      </p>
+    </div>
+    <div id="icon-lab"></div>
+  </section>
+
+  <!-- ==================== 模式 2：全景审计画板 ==================== -->
+  <div id="view-boards" class="hidden" style="display:flex;flex-direction:column;gap:44px">
+
+    <section class="sec" id="sec-audit">
+      <div class="sec-head">
+        <span class="eyebrow">01 · 架构与规范升级对照</span>
+        <h2>相对旧版 Arkit + Dioxus 实现的 10 项核心架构与设计升级</h2>
+        <p class="lede">完整保留双进程 OpenConnect + ashmem + <code>SCM_RIGHTS</code> 安全移交内核，全面升级表现层、宿主层与状态观测链路。</p>
+      </div>
+      <div class="audit-grid" id="audit-cards"></div>
+    </section>
+
+    <section class="sec" id="sec-chains">
+      <div class="sec-head">
+        <span class="eyebrow">02 · 多级浮层状态机（L0 → L4）</span>
+        <h2>8 条核心交互闭环与三端载体映射</h2>
+        <p class="lede">严格遵循菜单先关后开（<code>afterClose</code>）、<code>Escape</code> / 系统返回键逐级退栈并归还焦点、以及模态感知顶层 Toast 规则。</p>
+      </div>
+      <div class="chain-cards" id="chain-cards"></div>
+    </section>
+
+    <section class="sec" id="sec-states">
+      <div class="sec-head">
+        <span class="eyebrow">03 · 受控组件层全状态矩阵（ui/nsh/src/ui/*）</span>
+        <h2>按钮、导航、列表行、输入与选择控件的完整状态规范</h2>
+        <p class="lede">业务页面严禁直接导入 <code>nsh/base</code> 或写死色值；每个交互态均具清晰视觉与无障碍反馈。</p>
+      </div>
+      <div class="rules-tbl" id="state-matrix"></div>
+    </section>
+
+    <section class="sec" id="sec-phone">
+      <div class="sec-head">
+        <span class="eyebrow">04 · Phone 全景画板（390pt · Gallery 触屏档）</span>
+        <h2>手机端核心工作区、多轮认证浮层与二级页面全览</h2>
+        <p class="lede">52pt 页头 + 64pt 底部 4 Tab（连接 / 配置 / 统计 / 更多）；认证挑战采用键盘感知 BottomSheet；删除与丢弃草稿统一使用结果动词 AlertDialog。</p>
+      </div>
+      <div class="strip" id="board-phone-1"></div>
+      <div class="strip" id="board-phone-2"></div>
+      <div class="strip" id="board-phone-3"></div>
+    </section>
+
+    <section class="sec" id="sec-pad">
+      <div class="sec-head">
+        <span class="eyebrow">05 · Pad 全景画板（触屏档 · 横屏 1080pt / 竖屏 768pt）</span>
+        <h2>平板端主从分栏、居中认证弹窗与 ≥768pt 锚定 Popover 菜单</h2>
+        <p class="lede">Pad 保持触屏档舒适尺度（40pt 按钮 / 46pt 输入框 / 42pt 图标轨块）；宽度 ≥768pt 起所有菜单与选择器改用触发器锚定 Popover（无全屏暗色遮罩），表单与认证浮层升格为 460pt 居中 Dialog。</p>
+      </div>
+      <div class="strip" id="board-pad-1"></div>
+      <div class="strip" id="board-pad-2"></div>
+    </section>
+
+    <section class="sec" id="sec-pc">
+      <div class="sec-head">
+        <span class="eyebrow">06 · HarmonyOS 2-in-1 / PC 全景画板（指针档 · 1220pt / 840pt 窄窗）</span>
+        <h2>电脑端无缝通顶侧栏、48pt 标题工具栏、右侧 330pt 检查器与窄窗回退</h2>
+        <p class="lede">侧栏与内容区双通顶，左侧收敛为 4 主工作区（连接 / 配置 / 统计 / 日志）+ 底部固定设置（<code>⌘,</code>）；单条 48pt 工具栏预留右侧窗口控制槽；840pt 窄窗自动收起为 64pt 图标轨，绝不退回手机底栏。</p>
+      </div>
+      <div class="strip" id="board-pc-1"></div>
+      <div class="strip" id="board-pc-2"></div>
+    </section>
+
+    <section class="sec" id="sec-tokens">
+      <div class="sec-head">
+        <span class="eyebrow">07 · 实施硬约束：双档令牌、Motion Inventory 与文案合规红线</span>
+        <h2>尺寸令牌表、动效清单与零敏感词替换表</h2>
+        <p class="lede">实施阶段通过 Rust 契约测试与 NSH 无头渲染树扫描双重校验，确保文案与视觉 100% 对齐本稿。</p>
+      </div>
+      <div class="rules-tbl" id="token-table"></div>
+      <div class="rules-tbl" id="motion-table"></div>
+      <div class="rules-tbl" id="vocab-table"></div>
+    </section>
+
+  </div>
+</div>
+
+<script>
+(() => {
+  const I = (n, cls = "") => `<svg class="i ${cls}" aria-hidden="true"><use href="#${n}"/></svg>`;
+  const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;" }[c]));
+
+  /* ---------------- 双语词典（面向终端用户，零禁用词、零内部实现术语） ---------------- */
+  const T = {
+    zh: {
+      appName: "H-OpenConnect",
+      tagline: "HarmonyOS 安全隧道客户端",
+      navHome: "连接", navProfiles: "配置", navStats: "统计", navLogs: "日志", navMore: "更多", navSettings: "设置",
+      appearance: "外观与语言", about: "关于", privacy: "隐私说明", back: "返回",
+      stConnected: "已连接", stDisconnected: "未连接", stConnecting: "正在连接", stAuth: "等待身份验证",
+      stEstablishing: "正在建立隧道", stFailed: "连接失败", stDisconnecting: "正在断开",
+      btnConnect: "连接", btnDisconnect: "断开连接", btnCancelConnect: "取消连接", btnRetry: "重试",
+      btnNewProfile: "新建配置…", btnEditProfile: "编辑…", btnSave: "保存", btnCancel: "取消",
+      btnCopy: "复制", btnDetail: "查看详情…", btnOpenStats: "查看统计", btnGoHome: "前往连接",
+      activeProfile: "当前配置", switchProfile: "切换配置", noProfile: "暂无连接配置",
+      busySwitchHint: "请先断开当前连接再切换配置",
+      unconfirmedTitle: "连接状态尚未确认",
+      unconfirmedBody: "上次操作尚未完成，请先重新同步或重置状态。",
+      btnConfirmSync: "重新同步", btnResetState: "重置状态",
+      liveMetrics: "实时会话", assignedIp: "分配 IP", duration: "连接时长", gateway: "网关地址",
+      mtu: "MTU", dlSpeed: "下行速率", ulSpeed: "上行速率", sent: "已发送", received: "已接收",
+      speedChart: "实时速率",
+      searchProfiles: "搜索配置名称或服务器地址",
+      authPassword: "密码", authCert: "证书", authBoth: "密码与证书", authSaml: "浏览器登录",
+      miSelect: "设为当前配置", miFav: "收藏", miUnfav: "取消收藏", miEdit: "编辑配置…", miDelete: "删除配置…",
+      miActiveReason: "使用中", miBusyReason: "连接中",
+      editorNew: "新建配置", editorEdit: "编辑配置",
+      secBasic: "基本信息", secAuth: "身份认证", secRouting: "网络与分流", secAdvanced: "高级选项",
+      fName: "名称", fServer: "服务器地址", fGroup: "认证分组", btnDiscover: "探测分组",
+      fAuthMethod: "认证方式", fUser: "用户名", fPass: "密码", fExtBrowser: "通过系统浏览器登录",
+      fClientCert: "客户端证书", fPrivKey: "客户端私钥", fCaCert: "自定义 CA 证书",
+      btnChooseFile: "选择文件…", certImported: "已导入",
+      fSplitMode: "分流模式", splitAll: "全局", splitLan: "排除局域网", splitInclude: "仅指定网段", splitExclude: "排除指定网段",
+      fCidrs: "网段列表（每行一条 CIDR）", fOnDemand: "意外中断时自动重连",
+      fMtu: "MTU（留空自动）", fProto: "协议", fTotp: "动态口令密钥（TOTP）",
+      fOs: "报告系统类型", fDpd: "心跳检测间隔（秒）",
+      fDtls: "启用 DTLS", fPfs: "完美前向保密（PFS）",
+      authTitle1: "身份验证", authTitle2: "二次验证",
+      authPrompt1: "请输入凭据以继续连接", authPrompt2: "请输入 6 位动态口令",
+      authSubmit: "验证并连接", authNext: "继续",
+      statsEmptyTitle: "未建立连接", statsEmptyBody: "连接建立后，此处将显示实时速率、分配地址与路由信息。",
+      txCounters: "流量统计", netParams: "网络详情", routeTable: "路由表",
+      dnsServers: "DNS 服务器", searchDomains: "搜索域", routes: "隧道路由", excludes: "排除网段",
+      logCurrent: "当前日志", logArchives: "历史归档",
+      logListening: "正在记录", logPausedBadge: "已关闭",
+      logPauseBtn: "暂停", logResumeBtn: "开始",
+      logRecOn: "正在按日保存", logRecOff: "日志记录已关闭",
+      logFilesCount: "个日志文件", logEntriesCount: "条", logClearFilter: "清除筛选",
+      btnClearLogs: "清空…", searchLogs: "搜索日志内容、域名或错误码",
+      lvAll: "全部", lvInfo: "信息", lvWarn: "警告", lvError: "错误", lvDebug: "调试",
+      followPaused: "3 条新日志", logDetail: "日志详情", logInspector: "日志详情",
+      logEmptyTitle: "暂无日志", logEmptyFiltered: "没有匹配日志",
+      logEmptyHint: "连接与隧道事件会显示在这里。", logFilteredHint: "调整筛选条件后继续查看。",
+      copyLog: "复制此条日志", metaTime: "时间戳", metaLevel: "级别", metaModule: "模块", metaTarget: "关联地址",
+      miExportLog: "导出日志文件…", miDeleteArch: "删除归档…", archActive: "正在写入", archActiveReason: "正在写入，不可删除",
+      langLabel: "显示语言", langSys: "跟随系统", langZh: "简体中文", langEn: "English",
+      themeLabel: "界面主题", themeSys: "跟随系统", themeLight: "浅色", themeDark: "深色",
+      verCard: "版本", appVerLabel: "应用版本", copyVer: "复制版本信息",
+      engineCard: "连接引擎", ackCard: "开源致谢", srcCode: "源代码", license: "许可证",
+      privacyCard: "隐私与数据", privacyBtn: "隐私说明", privacySection: "隐私与数据处理", disclaimerSection: "免责声明",
+      privacyLines: [
+        "所有连接配置、认证证书与可选日志均仅保存在本机，不会上传至第三方服务器。",
+        "日志记录默认关闭，仅在您手动开启后按日保存在本地，并可随时导出或删除。"
+      ],
+      disclaimerText: "H-OpenConnect 为独立开源客户端，与 Cisco Systems 无关联，亦未获得其背书。",
+      discardTitle: "丢弃未保存的修改？", discardBody: "当前修改尚未保存，离开后会丢失。",
+      keepEdit: "继续编辑", discardAct: "丢弃修改",
+      delProfTitle: "删除配置？", delProfAct: "删除配置",
+      delArchAct: "删除日志",
+      clrLogTitle: "清空当前内存日志？", clrLogAct: "清空当前日志"
+    },
+    en: {
+      appName: "H-OpenConnect",
+      tagline: "A native secure tunnel client for HarmonyOS",
+      navHome: "Connect", navProfiles: "Profiles", navStats: "Stats", navLogs: "Logs", navMore: "More", navSettings: "Settings",
+      appearance: "Appearance", about: "About", privacy: "Privacy notice", back: "Back",
+      stConnected: "Connected", stDisconnected: "Disconnected", stConnecting: "Connecting", stAuth: "Sign-in required",
+      stEstablishing: "Establishing tunnel", stFailed: "Connection failed", stDisconnecting: "Disconnecting",
+      btnConnect: "Connect", btnDisconnect: "Disconnect", btnCancelConnect: "Cancel", btnRetry: "Retry",
+      btnNewProfile: "New profile…", btnEditProfile: "Edit…", btnSave: "Save", btnCancel: "Cancel",
+      btnCopy: "Copy", btnDetail: "View details…", btnOpenStats: "Statistics", btnGoHome: "Go to Connect",
+      activeProfile: "Active profile", switchProfile: "Profile", noProfile: "No connection profiles",
+      busySwitchHint: "Disconnect before switching profiles",
+      unconfirmedTitle: "Connection state unconfirmed",
+      unconfirmedBody: "The last action has not been confirmed yet. Re-sync or reset state first.",
+      btnConfirmSync: "Re-sync", btnResetState: "Reset",
+      liveMetrics: "Session", assignedIp: "Assigned IP", duration: "Duration", gateway: "Gateway",
+      mtu: "MTU", dlSpeed: "Download", ulSpeed: "Upload", sent: "Sent", received: "Received",
+      speedChart: "Throughput",
+      searchProfiles: "Search name or server",
+      authPassword: "Password", authCert: "Certificate", authBoth: "Password & Cert", authSaml: "Browser SSO",
+      miSelect: "Set as active", miFav: "Pin", miUnfav: "Unpin", miEdit: "Edit profile…", miDelete: "Delete profile…",
+      miActiveReason: "Active", miBusyReason: "Busy",
+      editorNew: "New profile", editorEdit: "Edit profile",
+      secBasic: "General", secAuth: "Authentication", secRouting: "Network & Routing", secAdvanced: "Advanced",
+      fName: "Name", fServer: "Server", fGroup: "Group", btnDiscover: "Discover",
+      fAuthMethod: "Method", fUser: "Username", fPass: "Password", fExtBrowser: "Sign in with system browser",
+      fClientCert: "Client certificate", fPrivKey: "Private key", fCaCert: "CA certificate",
+      btnChooseFile: "Choose file…", certImported: "Imported",
+      fSplitMode: "Routing", splitAll: "All traffic", splitLan: "Bypass LAN", splitInclude: "Include", splitExclude: "Exclude",
+      fCidrs: "Subnets (one CIDR per line)", fOnDemand: "Reconnect on unexpected drop",
+      fMtu: "MTU (blank for auto)", fProto: "Protocol", fTotp: "TOTP secret",
+      fOs: "Reported OS", fDpd: "DPD interval (sec)",
+      fDtls: "Enable DTLS", fPfs: "Perfect forward secrecy (PFS)",
+      authTitle1: "Sign in", authTitle2: "Verification",
+      authPrompt1: "Enter your credentials to continue", authPrompt2: "Enter your 6-digit verification code",
+      authSubmit: "Sign in", authNext: "Continue",
+      statsEmptyTitle: "Not connected", statsEmptyBody: "Live throughput, assigned address, and routes appear while connected.",
+      txCounters: "Transfer", netParams: "Network details", routeTable: "Routes",
+      dnsServers: "DNS servers", searchDomains: "Search domains", routes: "Tunnel routes", excludes: "Excluded",
+      logCurrent: "Current logs", logArchives: "Archives",
+      logListening: "Recording", logPausedBadge: "Off",
+      logPauseBtn: "Pause", logResumeBtn: "Start",
+      logRecOn: "Recording daily", logRecOff: "Log recording off",
+      logFilesCount: "log files", logEntriesCount: "entries", logClearFilter: "Clear filters",
+      btnClearLogs: "Clear…", searchLogs: "Search keyword, host or error",
+      lvAll: "All", lvInfo: "Info", lvWarn: "Warn", lvError: "Error", lvDebug: "Debug",
+      followPaused: "3 new logs", logDetail: "Log details", logInspector: "Log details",
+      logEmptyTitle: "No logs", logEmptyFiltered: "No matching logs",
+      logEmptyHint: "Connection and tunnel events appear here.", logFilteredHint: "Adjust the filters to continue.",
+      copyLog: "Copy log entry", metaTime: "Timestamp", metaLevel: "Level", metaModule: "Module", metaTarget: "Target",
+      miExportLog: "Export log…", miDeleteArch: "Delete archive…", archActive: "Recording", archActiveReason: "Active file",
+      langLabel: "Language", langSys: "Follow system", langZh: "简体中文", langEn: "English",
+      themeLabel: "Appearance", themeSys: "Follow system", themeLight: "Light", themeDark: "Dark",
+      verCard: "Version", appVerLabel: "App version", copyVer: "Copy version info",
+      engineCard: "Tunnel engine", ackCard: "Open source acknowledgements", srcCode: "Source code", license: "License",
+      privacyCard: "Privacy & data", privacyBtn: "Privacy notice", privacySection: "Privacy & data handling", disclaimerSection: "Disclaimer",
+      privacyLines: [
+        "All profiles, certificates, and optional logs remain stored locally on this device and are never uploaded.",
+        "Log recording is off by default. When enabled, daily log files are saved locally and can be exported or deleted at any time."
+      ],
+      disclaimerText: "H-OpenConnect is an independent open-source client and is not affiliated with or endorsed by Cisco Systems.",
+      discardTitle: "Discard unsaved changes?", discardBody: "Unsaved changes will be lost if you leave.",
+      keepEdit: "Continue editing", discardAct: "Discard changes",
+      delProfTitle: "Delete profile?", delProfAct: "Delete profile",
+      delArchAct: "Delete log",
+      clrLogTitle: "Clear current in-memory logs?", clrLogAct: "Clear current logs"
+    }
+  };
+  const tr = k => (T[S.lang] || T.zh)[k] || k;
+
+  /* ---------------- 真实领域模拟数据 ---------------- */
+  const DATA = {
+    profiles: [
+      { id:"c1", name:"总部研发网关", server:"gw.corp.example.com:443", group:"Corp-Employees", groups:["Corp-Employees","Corp-Contractors","Corp-SAML"],
+        auth:"password", proto:"AnyConnect", fav:true, user:"alex.chen", split:"exclude-lan", mtu:"1380", dtls:true, pfs:true, onDemand:true,
+        clientCert:"", privKey:"", caCert:"", cidrs:"10.20.0.0/16\n172.16.40.0/24", reportedOs:"linux-64", dpd:"30" },
+      { id:"c2", name:"生产运维通道", server:"ops-edge.example.net:8443", group:"Ops-mTLS", groups:["Ops-mTLS","Ops-Emergency"],
+        auth:"both", proto:"AnyConnect", fav:true, user:"ops-admin", split:"include", mtu:"1360", dtls:true, pfs:true, onDemand:false,
+        clientCert:"ops-client.p12", privKey:"ops-client.key", caCert:"corp-root-ca.pem", cidrs:"10.88.0.0/16", reportedOs:"linux-64", dpd:"20" },
+      { id:"c3", name:"云端单点登录", server:"sso-access.example.org", group:"SSO-OAuth2", groups:["SSO-OAuth2"],
+        auth:"saml", proto:"AnyConnect", fav:false, user:"", split:"all", mtu:"", dtls:true, pfs:false, onDemand:false,
+        clientCert:"", privKey:"", caCert:"", cidrs:"", reportedOs:"linux-64", dpd:"30" },
+      { id:"c4", name:"海外灾备节点", server:"dr-eu.example.com", group:"DR-Global", groups:["DR-Global"],
+        auth:"cert", proto:"GlobalProtect", fav:false, user:"", split:"exclude", mtu:"1320", dtls:false, pfs:true, onDemand:false,
+        clientCert:"dr-device.pem", privKey:"dr-device.key", caCert:"", cidrs:"192.168.0.0/16", reportedOs:"linux-64", dpd:"45" }
+    ],
+    network: {
+      ipv4: "10.208.14.92/24",
+      ipv6: "fd00:208:14::92/64",
+      gateway: "203.0.113.48:443",
+      mtu: "1380",
+      dns: ["10.20.0.53", "10.20.0.54"],
+      domains: ["corp.example.com", "internal.example.net"],
+      routes: ["10.20.0.0/16", "10.208.0.0/16", "172.16.40.0/24", "198.51.100.0/24"],
+      excludes: ["192.168.0.0/16", "10.0.0.0/8", "fe80::/10"]
+    },
+    logs: [
+      { id:"l1", ts:"10:41:02", fullTs:"2026-11-23 10:41:02", lv:"info", mod:"session", target:"gw.corp.example.com:443", msg:"Connected to gw.corp.example.com:443 (TLS 1.3)" },
+      { id:"l2", ts:"10:41:03", fullTs:"2026-11-23 10:41:03", lv:"info", mod:"auth", target:"gw.corp.example.com", msg:"Authentication succeeded for group Corp-Employees" },
+      { id:"l3", ts:"10:41:03", fullTs:"2026-11-23 10:41:03", lv:"debug", mod:"tunnel", target:"10.208.14.92", msg:"Assigned IPv4 10.208.14.92/24, MTU 1380, DNS 10.20.0.53, 10.20.0.54" },
+      { id:"l4", ts:"10:41:05", fullTs:"2026-11-23 10:41:05", lv:"info", mod:"dtls", target:"203.0.113.48:443", msg:"DTLS 1.2 channel established (ECDHE-RSA-AES256-GCM-SHA384)" },
+      { id:"l5", ts:"10:41:18", fullTs:"2026-11-23 10:41:18", lv:"warn", mod:"dpd", target:"203.0.113.48:443", msg:"DPD response delayed 412 ms; keeping primary channel active" },
+      { id:"l6", ts:"10:41:27", fullTs:"2026-11-23 10:41:27", lv:"error", mod:"tls", target:"dr-eu.example.com:443", msg:"Certificate verification failed for dr-eu.example.com:443 (untrusted issuer)" }
+    ],
+    archives: [
+      { file:"hopenconnect-2026-11-23.log", size:"428 KB", time:"10:41", active:true },
+      { file:"hopenconnect-2026-11-22.log", size:"1.9 MB", time:"昨天 23:58", active:false },
+      { file:"hopenconnect-2026-11-21.log", size:"864 KB", time:"11-21 22:14", active:false }
+    ],
+    bars: [
+      [22,6],[30,8],[44,11],[38,9],[56,14],[48,12],[72,18],[64,15],[84,22],[68,16],[52,11],[46,10],
+      [60,15],[78,19],[90,24],[70,16],[58,12],[42,9],[54,13],[82,20],[66,14],[74,17],[62,13],[70,16]
+    ],
+    lastErrorDetail: "TLS certificate verification failed (untrusted issuer)\nServer: gw.corp.example.com:443\nVerify depth: 0"
+  };
+
+  /* ---------------- 交互原型台全局状态 ---------------- */
+  const S = {
+    viewMode: "stage",
+    iconVariant: "a",     // a | b | c | d
+    lang: "zh",
+    themePref: "system",
+    device: "phone",      // phone | pad-p | pad-l | pc-n | pc
+    sidebarExpanded: null,
+    conn: "connected",    // connected | disconnected | connecting | authenticating | establishing | failed | unconfirmed
+    activeId: "c1",
+    page: "home",         // home | profiles | profile-editor | statistics | logs | more | settings | appearance | about | privacy
+    stack: ["home"],
+    selectedProfileId: "c1",
+    profileSearch: "",
+    editorMode: "edit",   // new | edit
+    editorDirty: false,
+    editorAdvOpen: false,
+    editorDraft: null,
+    discovering: false,
+    discoveredGroups: null,
+    editorMtuErr: "",
+    logTab: "current",    // current | archives
+    logLevel: "all",      // all | info | warn | error | debug
+    logSearch: "",
+    logPaused: true,
+    recording: true,
+    selectedLogId: "",    // PC 默认不选中不展开检查器；点击单条展开（对齐 Paws）
+    settingsTab: "appearance", // appearance | about
+    // 多级浮层状态
+    menu: null,
+    sheet: null,
+    dialog: null,
+    alert: null,
+    toasts: []
+  };
+
+  const isDesktop = (dev = S.device) => dev === "pc" || dev === "pc-n";
+  const isWide = (dev = S.device) => dev === "pad-l" || dev === "pc" || dev === "pc-n";
+  const isAnchoredMenu = (dev = S.device) => dev !== "phone"; // >=768pt 全部锚定 Popover/Menu
+  const isExpandedSide = (dev = S.device) => {
+    if (S.sidebarExpanded !== null) return S.sidebarExpanded;
+    return dev === "pc";
+  };
+  const isBusy = () => ["connecting","authenticating","establishing","disconnecting"].includes(S.conn);
+  const isActive = () => S.conn === "connected" || isBusy();
+  const activeProfile = () => DATA.profiles.find(p => p.id === S.activeId) || DATA.profiles[0];
+
+  function pushToast(text, tone = "info") {
+    const id = Date.now() + Math.random();
+    S.toasts = [{ id, text, tone }, ...S.toasts].slice(0, 3);
+    renderStage();
+    setTimeout(() => {
+      S.toasts = S.toasts.filter(t => t.id !== id);
+      renderStage();
+    }, 3400);
+  }
+
+  function popOverlay() {
+    if (S.alert) { S.alert = null; renderStage(); return true; }
+    if (S.dialog) {
+      if (S.dialog.kind === "auth") {
+        S.dialog = null;
+        if (S.conn === "authenticating") { S.conn = "disconnected"; syncConnButtons(); pushToast(S.lang === "zh" ? "已取消身份验证与本次连接" : "Authentication and connection cancelled", "warn"); }
+        renderStage(); return true;
+      }
+      S.dialog = null; renderStage(); return true;
+    }
+    if (S.sheet) {
+      if (S.sheet.kind === "auth") {
+        S.sheet = null;
+        if (S.conn === "authenticating") { S.conn = "disconnected"; syncConnButtons(); pushToast(S.lang === "zh" ? "已取消身份验证与本次连接" : "Authentication and connection cancelled", "warn"); }
+        renderStage(); return true;
+      }
+      S.sheet = null; renderStage(); return true;
+    }
+    if (S.menu) { S.menu = null; renderStage(); return true; }
+    if (S.page === "logs" && isDesktop() && S.selectedLogId) { S.selectedLogId = ""; renderStage(); return true; }
+    if (S.stack.length > 1) { attemptBack(); return true; }
+    return false;
+  }
+
+  function openAuthChallenge(round = 1) {
+    S.conn = "authenticating";
+    syncConnButtons();
+    const payload = { kind:"auth", round, group: activeProfile().group || "Corp-Employees", pass:"••••••••••••", otp:"" };
+    S.menu = null;
+    if (S.device === "phone") { S.sheet = payload; S.dialog = null; }
+    else { S.dialog = payload; S.sheet = null; }
+  }
+
+  function openEditor(mode, profileId) {
+    const src = mode === "edit" ? DATA.profiles.find(p => p.id === profileId) : null;
+    S.editorMode = mode;
+    S.editorDirty = false;
+    S.editorMtuErr = "";
+    S.discovering = false;
+    S.discoveredGroups = src ? [...src.groups] : null;
+    S.editorDraft = src ? { ...src } : {
+      id: "new-" + Date.now(), name: "", server: "", group: "", groups: [],
+      auth: "password", proto: "AnyConnect", fav: false, user: "", split: "exclude-lan",
+      mtu: "", dtls: true, pfs: true, onDemand: false, clientCert: "", privKey: "", caCert: "",
+      cidrs: "", reportedOs: "linux-64", dpd: "30"
+    };
+    pushPage("profile-editor");
+  }
+
+  function navigateTo(page) {
+    const go = () => {
+      S.menu = null; S.sheet = null;
+      if (S.dialog && S.dialog.kind !== "auth") S.dialog = null;
+      S.page = page;
+      S.stack = [page];
+      renderStage();
+    };
+    if (S.page === "profile-editor" && S.editorDirty) {
+      confirmDiscard(go);
+      return;
+    }
+    go();
+  }
+
+  function pushPage(page) {
+    S.menu = null; S.sheet = null;
+    S.page = page;
+    S.stack = [...S.stack.filter(p => p !== page), page];
+    renderStage();
+  }
+
+  function attemptBack() {
+    if (S.page === "profile-editor" && S.editorDirty) {
+      confirmDiscard(() => {
+        S.editorDirty = false;
+        S.stack.pop();
+        S.page = S.stack[S.stack.length - 1] || "profiles";
+        renderStage();
+      });
+      return;
+    }
+    if (S.stack.length > 1) {
+      S.stack.pop();
+      S.page = S.stack[S.stack.length - 1];
+      renderStage();
+    }
+  }
+
+  function confirmDiscard(onDiscard) {
+    S.alert = {
+      title: tr("discardTitle"),
+      body: tr("discardBody"),
+      cancelLabel: tr("keepEdit"),
+      actionLabel: tr("discardAct"),
+      destructive: true,
+      onConfirm: () => { S.editorDirty = false; S.alert = null; onDiscard(); }
+    };
+    renderStage();
+  }
+
+  /* ---------------- 公共微件渲染 ---------------- */
+  function statusMeta(st = S.conn) {
+    if (st === "connected") return { dot:"ok", bdg:"ok", label:tr("stConnected") };
+    if (st === "connecting") return { dot:"warn", bdg:"warn", label:tr("stConnecting") };
+    if (st === "authenticating") return { dot:"info", bdg:"info", label:tr("stAuth") };
+    if (st === "establishing") return { dot:"warn", bdg:"warn", label:tr("stEstablishing") };
+    if (st === "failed") return { dot:"bad", bdg:"err", label:tr("stFailed") };
+    if (st === "unconfirmed") return { dot:"warn", bdg:"warn", label:tr("unconfirmedTitle") };
+    return { dot:"", bdg:"", label:tr("stDisconnected") };
+  }
+
+  function authLabel(code) {
+    return code === "cert" ? tr("authCert")
+      : code === "both" ? tr("authBoth")
+      : code === "saml" ? tr("authSaml")
+      : tr("authPassword");
+  }
+
+  function splitLabel(code) {
+    return code === "all" ? tr("splitAll")
+      : code === "include" ? tr("splitInclude")
+      : code === "exclude" ? tr("splitExclude")
+      : tr("splitLan");
+  }
+
+  function authOptions() {
+    return S.lang === "zh" ? [
+      { value: "password", label: tr("authPassword"), desc: "使用账号与密码登录" },
+      { value: "cert", label: tr("authCert"), desc: "使用客户端证书进行双向认证" },
+      { value: "both", label: tr("authBoth"), desc: "同时校验客户端证书与账号密码" },
+      { value: "saml", label: tr("authSaml"), desc: "通过系统安全浏览器完成单点登录" }
+    ] : [
+      { value: "password", label: tr("authPassword"), desc: "Sign in with username and password" },
+      { value: "cert", label: tr("authCert"), desc: "Mutual TLS with client certificate" },
+      { value: "both", label: tr("authBoth"), desc: "Client certificate plus credentials" },
+      { value: "saml", label: tr("authSaml"), desc: "Sign in via system secure auth session" }
+    ];
+  }
+
+  function splitOptions() {
+    return S.lang === "zh" ? [
+      { value: "all", label: tr("splitAll"), desc: "全部流量经由安全隧道转发" },
+      { value: "exclude-lan", label: tr("splitLan"), desc: "保留局域网直连，其余流量走隧道" },
+      { value: "include", label: tr("splitInclude"), desc: "仅下方指定网段走隧道" },
+      { value: "exclude", label: tr("splitExclude"), desc: "下方指定网段直连，其余走隧道" }
+    ] : [
+      { value: "all", label: tr("splitAll"), desc: "Route all device traffic through the tunnel" },
+      { value: "exclude-lan", label: tr("splitLan"), desc: "Keep local LAN direct, tunnel everything else" },
+      { value: "include", label: tr("splitInclude"), desc: "Only tunnel the subnets listed below" },
+      { value: "exclude", label: tr("splitExclude"), desc: "Bypass the subnets listed below" }
+    ];
+  }
+
+  function renderBarsHtml() {
+    return `<div class="bars" aria-label="Throughput chart">${DATA.bars.map(([d,u]) =>
+      `<div class="bar-pair"><i class="dl" style="height:${d}%"></i><i class="ul" style="height:${u}%"></i></div>`
+    ).join("")}</div>
+    <div class="chart-legend">
+      <span><i class="lg-dot" style="background:var(--brand)"></i>${tr("dlSpeed")} 14.8 MB/s</span>
+      <span><i class="lg-dot" style="background:var(--info)"></i>${tr("ulSpeed")} 2.4 MB/s</span>
+    </div>`;
+  }
+
+  /* ---------------- 各页面渲染 ---------------- */
+  function renderHome(dev) {
+    const p = activeProfile();
+    const sm = statusMeta();
+    const wide = isWide(dev);
+    const connected = S.conn === "connected";
+    const busy = isBusy();
+
+    const mainBtn = connected
+      ? `<button class="btn stop full" data-act="disconnect">${I("stop","s")}${tr("btnDisconnect")}</button>`
+      : busy
+      ? `<button class="btn full" data-act="cancel-connect"><span class="spin"></span>${tr("btnCancelConnect")}</button>`
+      : `<button class="btn pri full" data-act="connect">${I("power","s")}${tr("btnConnect")}</button>`;
+
+    const heroCard = `<div class="hero">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:10px">
+        <div style="display:flex;align-items:center;gap:10px;min-width:0">
+          <span class="dot ${sm.dot}"></span>
+          <div style="min-width:0">
+            <div style="font-weight:600;font-size:16px;line-height:22px">${sm.label}</div>
+            <div class="help" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${connected ? `${DATA.network.ipv4} · 01:24:18` : esc(p.server)}</div>
+          </div>
+        </div>
+        <span class="bdg ${sm.bdg}">${esc(p.proto)}</span>
+      </div>
+      ${mainBtn}
+      ${S.conn === "authenticating" ? `<div class="alert info">${I("lock","s")}<div style="flex:1"><b>${tr("stAuth")}</b></div><button class="btn sm" data-act="reopen-auth">${S.lang==="zh"?"打开验证":"Sign in"}</button></div>` : ""}
+      ${S.conn === "failed" ? `<div class="alert err">${I("alert","s")}<div style="flex:1"><b>${tr("stFailed")}</b><br>${S.lang==="zh"?"服务器证书校验失败":"Server certificate verification failed"}</div><button class="btn sm" data-act="open-err-detail">${tr("btnDetail")}</button></div>` : ""}
+    </div>`;
+
+    const profileCard = `<div class="grp">
+      <div class="ghead"><span class="gt">${tr("activeProfile")}</span><button class="btn ghost sm" data-act="edit-active">${tr("btnEditProfile")}</button></div>
+      <div class="surf">
+        <button class="lrow ${!isActive()?"click":""}" data-act="open-profile-picker" ${isActive()?"disabled":""}>
+          <span class="ic">${I("server","s")}</span>
+          <div class="tx">
+            <b>${esc(p.name)} <span class="bdg">${authLabel(p.auth)}</span></b>
+            <small>${esc(p.server)}${p.group ? ` · ${esc(p.group)}` : ""}</small>
+          </div>
+          <span class="tr">${I("chev-d","s")}</span>
+        </button>
+      </div>
+    </div>`;
+
+    const metricsCard = connected ? `<div class="grp">
+      <div class="ghead"><span class="gt">${tr("liveMetrics")}</span><button class="btn ghost sm" data-act="go-stats">${tr("btnOpenStats")}</button></div>
+      <div class="speed">
+        <div><small>${I("down","xs")} ${tr("dlSpeed")}</small><b>14.8<span class="u">MB/s</span></b></div>
+        <div><small>${I("up","xs")} ${tr("ulSpeed")}</small><b>2.4<span class="u">MB/s</span></b></div>
+      </div>
+      <div class="surf padded">
+        ${renderBarsHtml()}
+        <div class="kv" style="padding-top:6px;border-top:1px solid var(--line)">
+          <span class="k">${tr("assignedIp")}</span><span class="v">${DATA.network.ipv4}</span>
+          <span class="k">${tr("gateway")}</span><span class="v">${DATA.network.gateway}</span>
+          <span class="k">${tr("sent")} / ${tr("received")}</span><span class="v">186 MB / 1.42 GB</span>
+          <span class="k">${tr("mtu")}</span><span class="v">${DATA.network.mtu}</span>
+        </div>
+      </div>
+    </div>` : "";
+
+    if (wide) {
+      return connected
+        ? `<div class="cols2"><div class="col-pane">${heroCard}${profileCard}</div><div class="col-pane">${metricsCard}</div></div>`
+        : `<div class="scroll-body"><div class="${isDesktop(dev)?"pc-center":"pad-center"}">${heroCard}${profileCard}</div></div>`;
+    }
+    return `<div class="scroll-body"><div class="${dev==="pad-p"?"pad-center":""}" style="display:flex;flex-direction:column;gap:20px">${heroCard}${profileCard}${metricsCard}</div></div>`;
+  }
+
+  function renderProfiles(dev) {
+    const q = S.profileSearch.trim().toLowerCase();
+    const list = DATA.profiles
+      .filter(p => !q || p.name.toLowerCase().includes(q) || p.server.toLowerCase().includes(q))
+      .sort((a,b) => Number(b.fav) - Number(a.fav));
+
+    const rowHtml = p => {
+      const isAct = p.id === S.activeId;
+      const isSel = isWide(dev) ? p.id === S.selectedProfileId : isAct;
+      return `<div class="lrow click ${isSel?"sel":""}" data-act="select-profile-row" data-id="${p.id}" data-ctx="profile">
+        <span class="ic">${p.fav ? `<span class="star-ic">${I("star-fill","s")}</span>` : I("server","s")}</span>
+        <div class="tx">
+          <b>${esc(p.name)} ${isAct ? `<span class="bdg brand">${S.lang==="zh"?"当前":"Active"}</span>` : ""}</b>
+          <small>${esc(p.server)} · ${authLabel(p.auth)}</small>
+        </div>
+        <div class="tr">
+          <button class="ibtn sm" data-act="open-profile-menu" data-id="${p.id}" aria-label="More actions">${I("more","s")}</button>
+        </div>
+      </div>`;
+    };
+
+    const listBlock = `
+      <div class="search-box">
+        ${I("search","s")}
+        <input class="inp" type="text" data-bind="profileSearch" value="${esc(S.profileSearch)}" placeholder="${tr("searchProfiles")}">
+      </div>
+      <div class="surf">${list.length ? list.map(rowHtml).join("") : `<div class="empty"><span class="help">${tr("noProfile")}</span></div>`}</div>`;
+
+    if (isWide(dev)) {
+      const sel = DATA.profiles.find(p => p.id === S.selectedProfileId) || DATA.profiles[0];
+      const isAct = sel.id === S.activeId;
+      return `<div class="split-pane">
+        <div class="split-master">${listBlock}</div>
+        <div class="split-detail">
+          <div class="surf padded">
+            <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px">
+              <div>
+                <div style="font-size:18px;font-weight:600;display:flex;align-items:center;gap:8px">${esc(sel.name)} ${isAct?`<span class="bdg brand">${S.lang==="zh"?"当前配置":"Active"}</span>`:""}</div>
+                <div class="help" style="margin-top:3px">${esc(sel.server)}</div>
+              </div>
+              <div style="display:flex;gap:6px">
+                ${!isAct ? `<button class="btn sm pri" data-act="activate-profile" data-id="${sel.id}" ${isActive()?"disabled":""}>${tr("miSelect")}</button>` : ""}
+                <button class="btn sm" data-act="edit-profile" data-id="${sel.id}">${I("edit","xs")}${tr("btnEditProfile")}</button>
+                <button class="ibtn sm" data-act="open-profile-menu" data-id="${sel.id}" aria-label="More">${I("more","s")}</button>
+              </div>
+            </div>
+            ${isActive() && !isAct ? `<div class="alert warn">${I("alert","s")}<span>${tr("busySwitchHint")}</span></div>` : ""}
+            <div class="kv" style="padding-top:8px;border-top:1px solid var(--line)">
+              <span class="k">${tr("fProto")}</span><span class="v">${esc(sel.proto)}</span>
+              <span class="k">${tr("fGroup")}</span><span class="v">${esc(sel.group || "—")}</span>
+              <span class="k">${tr("fAuthMethod")}</span><span class="v">${authLabel(sel.auth)}</span>
+              <span class="k">${tr("fUser")}</span><span class="v">${esc(sel.user || "—")}</span>
+              <span class="k">${tr("fSplitMode")}</span><span class="v">${esc(splitLabel(sel.split))}</span>
+              <span class="k">${tr("mtu")}</span><span class="v">${esc(sel.mtu || "Auto")}</span>
+              <span class="k">DTLS / PFS</span><span class="v">${sel.dtls?"ON":"OFF"} / ${sel.pfs?"ON":"OFF"}</span>
+              <span class="k">${tr("fOnDemand")}</span><span class="v">${sel.onDemand?(S.lang==="zh"?"开启":"Enabled"):(S.lang==="zh"?"关闭":"Off")}</span>
+            </div>
+          </div>
+          ${sel.clientCert ? `<div class="surf padded">
+            <h3>${tr("secAuth")}</h3>
+            <div class="kv">
+              <span class="k">${tr("fClientCert")}</span><span class="v">${esc(sel.clientCert)}</span>
+              <span class="k">${tr("fPrivKey")}</span><span class="v">${esc(sel.privKey || "—")}</span>
+              <span class="k">${tr("fCaCert")}</span><span class="v">${esc(sel.caCert || "—")}</span>
+            </div>
+          </div>` : ""}
+        </div>
+      </div>`;
+    }
+
+    return `<div class="scroll-body"><div class="${dev==="pad-p"?"pad-center":""}" style="display:flex;flex-direction:column;gap:14px">
+      ${listBlock}
+    </div></div>`;
+  }
+
+  function renderProfileEditor(dev) {
+    const d = S.editorDraft || DATA.profiles[0];
+    const showCert = d.auth === "cert" || d.auth === "both";
+    const showPass = d.auth === "password" || d.auth === "both";
+    const showCidr = d.split === "include" || d.split === "exclude";
+    const groups = S.discoveredGroups || d.groups || [];
+
+    const form = `<div class="${isWide(dev)?(isDesktop(dev)?"pc-center":"pad-center"):(dev==="pad-p"?"pad-center":"")}" style="display:flex;flex-direction:column;gap:18px">
+      <div class="grp">
+        <div class="ghead"><span class="gt">${tr("secBasic")}</span>${S.editorDirty?`<span class="bdg warn">${S.lang==="zh"?"未保存草稿":"Unsaved"}</span>`:""}</div>
+        <div class="surf">
+          <div class="fld">
+            <span class="fld-lbl"><span>${tr("fName")}</span></span>
+            <input class="inp" data-draft="name" value="${esc(d.name)}" placeholder="e.g. 总部研发网关">
+          </div>
+          <div class="fld">
+            <span class="fld-lbl"><span>${tr("fServer")}</span></span>
+            <div class="inp-row">
+              <input class="inp" data-draft="server" value="${esc(d.server)}" placeholder="https://gw.example.com:443">
+              <button class="btn sm" data-act="discover-groups">${S.discovering?`<span class="spin"></span>`:I("refresh","xs")}${tr("btnDiscover")}</button>
+            </div>
+          </div>
+          <div class="fld">
+            <span class="fld-lbl"><span>${tr("fGroup")}</span></span>
+            <input class="inp" data-draft="group" value="${esc(d.group)}" placeholder="Corp-Employees">
+            ${groups.length ? `<div class="chip-row">${groups.map(g =>
+              `<button class="chip ${d.group===g?"on":""}" data-act="pick-group" data-val="${esc(g)}">${esc(g)}</button>`
+            ).join("")}</div>` : ""}
+          </div>
+        </div>
+      </div>
+
+      <div class="grp">
+        <div class="ghead"><span class="gt">${tr("secAuth")}</span></div>
+        <div class="surf">
+          <div class="fld">
+            <span class="fld-lbl"><span>${tr("fAuthMethod")}</span></span>
+            <button type="button" class="sel-trig ${S.menu?.kind==="select" && S.menu.field==="auth"?"open":""}" data-act="open-select" data-field="auth">
+              <span class="sel-val">${esc(authLabel(d.auth))}</span>
+              ${I("chev-d","s")}
+            </button>
+          </div>
+          ${showPass ? `
+          <div class="fld"><span class="fld-lbl"><span>${tr("fUser")}</span></span><input class="inp" data-draft="user" value="${esc(d.user)}" placeholder="username"></div>
+          <div class="fld"><span class="fld-lbl"><span>${tr("fPass")}</span></span><input class="inp" type="password" value="••••••••" data-draft="pass"></div>` : ""}
+          ${d.auth === "saml" ? `<div class="lrow"><div class="tx"><b>${tr("fExtBrowser")}</b></div><span class="sw on"></span></div>` : ""}
+          ${showCert ? `
+          <div class="fld">
+            <span class="fld-lbl"><span>${tr("fClientCert")}</span>${d.clientCert?`<span class="bdg ok">${tr("certImported")}</span>`:""}</span>
+            <div class="inp-row">
+              <input class="inp ro" readonly value="${esc(d.clientCert || "—")}">
+              <button class="btn sm" data-act="pick-cert" data-kind="clientCert">${I("folder","xs")}${tr("btnChooseFile")}</button>
+            </div>
+          </div>
+          <div class="fld">
+            <span class="fld-lbl"><span>${tr("fPrivKey")}</span></span>
+            <div class="inp-row">
+              <input class="inp ro" readonly value="${esc(d.privKey || "—")}">
+              <button class="btn sm" data-act="pick-cert" data-kind="privKey">${I("folder","xs")}${tr("btnChooseFile")}</button>
+            </div>
+          </div>
+          <div class="fld">
+            <span class="fld-lbl"><span>${tr("fCaCert")}</span></span>
+            <div class="inp-row">
+              <input class="inp ro" readonly value="${esc(d.caCert || "—")}">
+              <button class="btn sm" data-act="pick-cert" data-kind="caCert">${I("folder","xs")}${tr("btnChooseFile")}</button>
+            </div>
+          </div>` : ""}
+        </div>
+      </div>
+
+      <div class="grp">
+        <div class="ghead"><span class="gt">${tr("secRouting")}</span></div>
+        <div class="surf">
+          <div class="fld">
+            <span class="fld-lbl"><span>${tr("fSplitMode")}</span></span>
+            <button type="button" class="sel-trig ${S.menu?.kind==="select" && S.menu.field==="split"?"open":""}" data-act="open-select" data-field="split">
+              <span class="sel-val">${esc(splitLabel(d.split))}</span>
+              ${I("chev-d","s")}
+            </button>
+          </div>
+          ${showCidr ? `<div class="fld"><span class="fld-lbl"><span>${tr("fCidrs")}</span></span><textarea class="inp" data-draft="cidrs">${esc(d.cidrs)}</textarea></div>` : ""}
+          <div class="fld">
+            <span class="fld-lbl"><span>${tr("fMtu")}</span></span>
+            <input class="inp ${S.editorMtuErr?"err":""}" data-draft="mtu" value="${esc(d.mtu)}" placeholder="1380">
+            ${S.editorMtuErr ? `<span class="help err">${esc(S.editorMtuErr)}</span>` : ""}
+          </div>
+          <button class="lrow click" data-act="toggle-draft-bool" data-key="onDemand">
+            <div class="tx"><b>${tr("fOnDemand")}</b></div>
+            <span class="sw ${d.onDemand?"on":""}"></span>
+          </button>
+        </div>
+      </div>
+
+      <div class="grp">
+        <div class="surf">
+          <button class="acc-head" data-act="toggle-adv">
+            <span>${tr("secAdvanced")}</span>
+            ${I(S.editorAdvOpen ? "chev-u" : "chev-d", "s")}
+          </button>
+          ${S.editorAdvOpen ? `
+          <div class="fld"><span class="fld-lbl"><span>${tr("fProto")}</span></span><input class="inp" data-draft="proto" value="${esc(d.proto)}"></div>
+          <div class="fld"><span class="fld-lbl"><span>${tr("fOs")}</span></span><input class="inp" data-draft="reportedOs" value="${esc(d.reportedOs)}"></div>
+          <div class="fld"><span class="fld-lbl"><span>${tr("fDpd")}</span></span><input class="inp" data-draft="dpd" value="${esc(d.dpd)}"></div>
+          <div class="fld"><span class="fld-lbl"><span>${tr("fTotp")}</span></span><input class="inp" placeholder="JBSWY3DPEHPK3PXP"></div>
+          <button class="lrow click" data-act="toggle-draft-bool" data-key="dtls">
+            <div class="tx"><b>${tr("fDtls")}</b></div>
+            <span class="sw ${d.dtls?"on":""}"></span>
+          </button>
+          <button class="lrow click" data-act="toggle-draft-bool" data-key="pfs">
+            <div class="tx"><b>${tr("fPfs")}</b></div>
+            <span class="sw ${d.pfs?"on":""}"></span>
+          </button>` : ""}
+        </div>
+      </div>
+    </div>`;
+
+    return `<div class="scroll-body">${form}</div>
+      <div class="sticky-foot">
+        <button class="btn" data-act="back">${tr("btnCancel")}</button>
+        <button class="btn pri" data-act="save-profile">${I("check","s")}${tr("btnSave")}</button>
+      </div>`;
+  }
+
+  function renderStatistics(dev) {
+    if (S.conn !== "connected") {
+      return `<div class="scroll-body"><div class="surf"><div class="empty">
+        <span class="eic">${I("activity")}</span>
+        <b>${tr("statsEmptyTitle")}</b>
+        <span class="help">${tr("statsEmptyBody")}</span>
+        <button class="btn pri sm" data-act="go-home">${tr("btnGoHome")}</button>
+      </div></div></div>`;
+    }
+
+    const tiles = `<div class="stat-grid">
+      <div class="stat-tile"><small>${tr("duration")}</small><b>01:24:18</b></div>
+      <div class="stat-tile"><small>${I("down","xs")} ${tr("dlSpeed")}</small><b>14.8<span class="u">MB/s</span></b></div>
+      <div class="stat-tile"><small>${I("up","xs")} ${tr("ulSpeed")}</small><b>2.4<span class="u">MB/s</span></b></div>
+      <div class="stat-tile"><small>${tr("received")}</small><b>1.42<span class="u">GB</span></b></div>
+    </div>`;
+
+    const chartCard = `<div class="grp">
+      <div class="ghead"><span class="gt">${tr("speedChart")}</span></div>
+      <div class="surf padded">${renderBarsHtml()}</div>
+    </div>`;
+
+    const countersCard = `<div class="grp">
+      <div class="ghead"><span class="gt">${tr("txCounters")}</span></div>
+      <div class="surf padded"><div class="kv">
+        <span class="k">${tr("sent")}</span><span class="v">186.4 MB (218,420 pkts)</span>
+        <span class="k">${tr("received")}</span><span class="v">1.42 GB (1,104,892 pkts)</span>
+      </div></div>
+    </div>`;
+
+    const netCard = `<div class="grp">
+      <div class="ghead"><span class="gt">${tr("netParams")}</span></div>
+      <div class="surf">
+        ${[
+          ["IPv4", DATA.network.ipv4],
+          ["IPv6", DATA.network.ipv6],
+          [tr("gateway"), DATA.network.gateway],
+          [tr("mtu"), DATA.network.mtu],
+          [tr("dnsServers"), DATA.network.dns.join(", ")],
+          [tr("searchDomains"), DATA.network.domains.join(", ")]
+        ].map(([k,v]) => `<div class="lrow">
+          <div class="tx"><small>${k}</small><b style="font-family:var(--mono);font-size:13px">${esc(v)}</b></div>
+          <button class="ibtn sm" data-act="copy-text" data-val="${esc(v)}" aria-label="${tr("btnCopy")}">${I("copy","xs")}</button>
+        </div>`).join("")}
+      </div>
+    </div>`;
+
+    const routeCard = `<div class="grp">
+      <div class="ghead"><span class="gt">${tr("routeTable")}</span><span class="gm">${DATA.network.routes.length} / ${DATA.network.excludes.length}</span></div>
+      <div class="surf padded">
+        <div class="kv">
+          <span class="k">${tr("routes")}</span><span class="v">${DATA.network.routes.join("\n")}</span>
+          <span class="k">${tr("excludes")}</span><span class="v">${DATA.network.excludes.join("\n")}</span>
+        </div>
+      </div>
+    </div>`;
+
+    if (isWide(dev)) {
+      return `<div class="cols2"><div class="col-pane">${tiles}${chartCard}${countersCard}</div><div class="col-pane">${netCard}${routeCard}</div></div>`;
+    }
+    return `<div class="scroll-body"><div class="${dev==="pad-p"?"pad-center":""}" style="display:flex;flex-direction:column;gap:18px">${tiles}${chartCard}${countersCard}${netCard}${routeCard}</div></div>`;
+  }
+
+  function renderLogs(dev) {
+    const q = S.logSearch.trim().toLowerCase();
+    const filtered = DATA.logs.filter(l =>
+      (S.logLevel === "all" || l.lv === S.logLevel) &&
+      (!q || l.msg.toLowerCase().includes(q) || l.mod.toLowerCase().includes(q) || (l.target || "").toLowerCase().includes(q))
+    );
+    const isFiltered = !!q || S.logLevel !== "all";
+    const lvTone = lv => lv === "error" ? "err" : lv === "warn" ? "warn" : lv === "debug" ? "" : "info";
+    const lvLabel = lv => lv === "error" ? tr("lvError") : lv === "warn" ? tr("lvWarn") : lv === "debug" ? tr("lvDebug") : tr("lvInfo");
+    const splitPad = dev === "pad-l";
+    const inlineBar = isDesktop(dev);
+    const activeLog = DATA.logs.find(l => l.id === S.selectedLogId) || (splitPad ? filtered[filtered.length - 1] : null);
+    const showDesktopInspector = isDesktop(dev) && !!S.selectedLogId && !!activeLog;
+
+    const tabsControl = (inline = false) => `<div class="seg ${inline?"":"fill"}">
+      <button class="${S.logTab==="current"?"on":""}" data-act="set-log-tab" data-val="current">${tr("logCurrent")}</button>
+      <button class="${S.logTab==="archives"?"on":""}" data-act="set-log-tab" data-val="archives">${tr("logArchives")} <em>${DATA.archives.length}</em></button>
+    </div>`;
+
+    const levelControl = (inline = false) => `<div class="seg sm ${inline?"":"fill"}">
+      ${[["all",tr("lvAll")],["info",tr("lvInfo")],["warn",tr("lvWarn")],["error",tr("lvError")],["debug",tr("lvDebug")]].map(([k,lbl]) =>
+        `<button class="${S.logLevel===k?"on":""}" data-act="set-log-level" data-val="${k}">${lbl}</button>`
+      ).join("")}
+    </div>`;
+
+    const statusRow = `<div class="log-status">
+      <span class="sdot ${S.recording?"on":""}"></span>
+      <span>${S.recording ? tr("logRecOn") : tr("logRecOff")}</span>
+      <span style="color:var(--faint)">·</span>
+      <span>${DATA.archives.length} ${tr("logFilesCount")}</span>
+      <span style="flex:1"></span>
+      ${S.logTab === "current" ? `<span>${filtered.length} ${tr("logEntriesCount")}</span>` : ""}
+      ${S.logTab === "current" && isFiltered ? `<button class="clr-link" data-act="clear-log-filters">${tr("logClearFilter")}</button>` : ""}
+    </div>`;
+
+    const searchBox = (inline = false) => `<div class="search-box ${inline ? "inline" : ""}">
+      ${I("search","s")}<input class="inp" data-bind="logSearch" value="${esc(S.logSearch)}" placeholder="${tr("searchLogs")}">
+    </div>`;
+
+    const renderInspectorBody = (entry, canClose) => `<div style="display:flex;flex-direction:column;gap:12px">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+        <h3>${tr("logInspector")}</h3>
+        <div style="display:flex;align-items:center;gap:6px">
+          <span class="bdg ${lvTone(entry.lv)}">${lvLabel(entry.lv)}</span>
+          ${canClose ? `<button class="ibtn sm" data-act="close-inspector" aria-label="Close">${I("x","s")}</button>` : ""}
+        </div>
+      </div>
+      <div class="well" style="padding:10px 12px"><div style="font-family:var(--mono);font-size:12.5px;line-height:19px;color:var(--code);word-break:break-word">${esc(entry.msg)}</div></div>
+      <div class="surf padded" style="padding:12px 14px">
+        <div class="kv">
+          <span class="k">${tr("metaTime")}</span><span class="v">${esc(entry.fullTs)}</span>
+          <span class="k">${tr("metaLevel")}</span><span class="v">${lvLabel(entry.lv)}</span>
+          <span class="k">${tr("metaModule")}</span><span class="v">${esc(entry.mod)}</span>
+          <span class="k">${tr("metaTarget")}</span><span class="v">${esc(entry.target || "—")}</span>
+        </div>
+      </div>
+      <div>
+        <button class="btn sm" data-act="copy-text" data-val="${esc(entry.msg)}">${I("copy","xs")}${tr("copyLog")}</button>
+      </div>
+    </div>`;
+
+    const logStream = `<div class="surf" style="position:relative;flex:1;min-height:180px;display:flex;flex-direction:column">
+      <div style="overflow-y:auto;flex:1;padding-bottom:${S.logPaused && filtered.length ? 56 : 4}px">
+        ${filtered.length ? filtered.map(l => {
+          const sel = activeLog && activeLog.id === l.id && (!!S.selectedLogId || splitPad);
+          return `<button class="log-row ${sel?"sel":""}" data-act="select-log" data-id="${l.id}">
+            <span class="tm">${l.ts}</span>
+            <span class="bdg ${lvTone(l.lv)}" style="height:20px;font-size:11px;padding:0 6px">${lvLabel(l.lv)}</span>
+            <span class="msg">${esc(l.msg)}</span>
+          </button>`;
+        }).join("") : `<div class="empty">
+          <span class="eic">${I("file-text")}</span>
+          <b>${isFiltered ? tr("logEmptyFiltered") : tr("logEmptyTitle")}</b>
+          <span class="help">${isFiltered ? tr("logFilteredHint") : tr("logEmptyHint")}</span>
+          ${isFiltered ? `<button class="btn sm" data-act="clear-log-filters">${tr("logClearFilter")}</button>` : ""}
+        </div>`}
+      </div>
+      ${S.logPaused && filtered.length ? `<button class="follow-pill" data-act="resume-follow">${I("down","xs")}${tr("followPaused")}</button>` : ""}
+    </div>`;
+
+    const archiveList = `<div class="surf">${DATA.archives.map(a => `
+      <div class="lrow click" data-act="open-arch-menu" data-file="${esc(a.file)}" data-ctx="archive">
+        <span class="ic">${I("file-text","s")}</span>
+        <div class="tx">
+          <b>${esc(a.file)} ${a.active && S.recording ? `<span class="bdg brand">${tr("archActive")}</span>` : ""}</b>
+          <small>${esc(a.size)} · ${esc(a.time)}</small>
+        </div>
+        <div class="tr"><button class="ibtn sm" data-act="open-arch-menu" data-file="${esc(a.file)}" aria-label="More">${I("more","s")}</button></div>
+      </div>`).join("")}</div>`;
+
+    // Pad 横屏「当前日志」主从分栏（1.15fr : 0.85fr，对齐 Paws）
+    if (S.logTab === "current" && splitPad) {
+      return `<div class="split-pane">
+        <div class="split-detail" style="flex:1.15;gap:10px;overflow:hidden">
+          ${tabsControl(false)}${statusRow}${searchBox(false)}${levelControl(false)}${logStream}
+        </div>
+        <div style="flex:0.85;min-width:300px;border-left:1px solid var(--line);padding:16px;overflow-y:auto">
+          ${activeLog ? renderInspectorBody(activeLog, !!S.selectedLogId) : `<div class="surf"><div class="empty"><span class="eic">${I("file-text")}</span><b>${tr("logEmptyTitle")}</b></div></div>`}
+        </div>
+      </div>`;
+    }
+
+    // PC 桌面内联工具条 + 按需展开右侧 330pt 检查器（对齐 Paws）
+    if (inlineBar) {
+      const topControls = S.logTab === "current"
+        ? `<div style="display:flex;flex-direction:column;gap:8px;flex:none">
+            <div class="log-inline-row">${tabsControl(true)}${searchBox(true)}</div>
+            <div class="log-inline-row" style="justify-content:space-between">${levelControl(true)}<div style="flex:1;min-width:180px">${statusRow}</div></div>
+          </div>`
+        : `<div style="display:flex;flex-direction:column;gap:8px;flex:none">
+            <div class="log-inline-row">${tabsControl(true)}</div>
+            ${statusRow}
+          </div>`;
+
+      if (S.logTab === "archives") {
+        return `<div class="scroll-body" style="gap:12px">${topControls}${archiveList}</div>`;
+      }
+      return `<div style="flex:1;min-height:0;display:flex;flex-direction:column;padding:16px 20px;gap:12px">
+        ${topControls}
+        <div style="flex:1;min-height:0;display:flex;gap:14px">
+          <div style="flex:1;min-width:0;display:flex">${logStream}</div>
+          ${showDesktopInspector ? `<aside class="surf padded" style="width:330px;flex:none;overflow-y:auto">${renderInspectorBody(activeLog, true)}</aside>` : ""}
+        </div>
+      </div>`;
+    }
+
+    // Phone & Pad Portrait（以及 Pad 横屏「历史归档」）
+    if (S.logTab === "archives") {
+      return `<div class="scroll-body" style="gap:10px"><div class="${dev==="pad-p"?"pad-center":""}" style="display:flex;flex-direction:column;gap:10px">${tabsControl(false)}${statusRow}${archiveList}</div></div>`;
+    }
+    return `<div style="flex:1;min-height:0;display:flex;flex-direction:column;padding:12px 16px 14px;gap:10px">
+      ${tabsControl(false)}${statusRow}${searchBox(false)}${levelControl(false)}${logStream}
+    </div>`;
+  }
+
+  function renderMore() {
+    const themeName = S.themePref === "light" ? tr("themeLight") : S.themePref === "dark" ? tr("themeDark") : tr("themeSys");
+    return `<div class="scroll-body"><div class="grp">
+      <div class="surf">
+        <button class="lrow click" data-act="push-page" data-page="logs">
+          <span class="ic">${I("file-text","s")}</span>
+          <div class="tx"><b>${tr("navLogs")}</b><small>${S.recording ? tr("logRecOn") : tr("logRecOff")}</small></div>
+          <span class="tr">${I("chev","s")}</span>
+        </button>
+        <button class="lrow click" data-act="push-page" data-page="appearance">
+          <span class="ic">${I("sliders","s")}</span>
+          <div class="tx"><b>${tr("appearance")}</b><small>${S.lang==="zh"?"简体中文":"English"} · ${themeName}</small></div>
+          <span class="tr">${I("chev","s")}</span>
+        </button>
+        <button class="lrow click" data-act="push-page" data-page="about">
+          <span class="ic">${I("info","s")}</span>
+          <div class="tx"><b>${tr("about")}</b><small>1.0.1</small></div>
+          <span class="tr">${I("chev","s")}</span>
+        </button>
+      </div>
+    </div></div>`;
+  }
+
+  function renderAppearanceContent() {
+    return `<div class="grp">
+      <div class="ghead"><span class="gt">${tr("langLabel")}</span></div>
+      <div class="surf">
+        ${[["zh",tr("langZh")],["en",tr("langEn")]].map(([k,lbl]) => `
+          <button class="lrow click" data-act="app-set-lang" data-val="${k}">
+            <span class="rad ${S.lang===k?"on":""}"></span>
+            <div class="tx"><b>${lbl}</b></div>
+          </button>`).join("")}
+      </div>
+    </div>
+    <div class="grp">
+      <div class="ghead"><span class="gt">${tr("themeLabel")}</span></div>
+      <div class="surf">
+        ${[["system",tr("themeSys")],["light",tr("themeLight")],["dark",tr("themeDark")]].map(([k,lbl]) => `
+          <button class="lrow click" data-act="app-set-theme" data-val="${k}">
+            <span class="rad ${S.themePref===k?"on":""}"></span>
+            <div class="tx"><b>${lbl}</b></div>
+          </button>`).join("")}
+      </div>
+    </div>`;
+  }
+
+  function renderAboutContent() {
+    const verSummary = "H-OpenConnect 1.0.1\nOpenConnect 9.12";
+    const compItem = (name, ver, srcUrl, licLabel, licUrl) => `<div class="about-comp">
+      <b>${name}</b>
+      ${ver ? `<span class="ver">${ver}</span>` : ""}
+      <div class="links">
+        <button class="ext-link" role="link" data-act="open-ext" data-url="${srcUrl}">${tr("srcCode")}${I("ext","xs")}</button>
+        <button class="ext-link" role="link" data-act="open-ext" data-url="${licUrl}">${licLabel}${I("ext","xs")}</button>
+      </div>
+    </div>`;
+
+    return `<div style="display:flex;flex-direction:column;align-items:center;text-align:center;gap:8px;padding:8px 0 6px">
+      <div class="logo-sq lg">${I("brand-" + S.iconVariant)}</div>
+      <div style="font-size:20px;font-weight:600;margin-top:2px">${tr("appName")}</div>
+      <div class="help">${tr("tagline")}</div>
+    </div>
+    <div class="grp">
+      <div class="ghead"><span class="gt">${tr("verCard")}</span></div>
+      <div class="surf padded">
+        <div style="display:flex;flex-direction:column;gap:2px">
+          <span class="help">${tr("appVerLabel")}</span>
+          <span style="font-size:15px;font-weight:500;font-variant-numeric:tabular-nums">1.0.1</span>
+        </div>
+        <div><button class="btn sm" data-act="copy-text" data-val="${esc(verSummary)}">${I("copy","xs")}${tr("copyVer")}</button></div>
+      </div>
+    </div>
+    <div class="grp">
+      <div class="ghead"><span class="gt">${tr("engineCard")}</span></div>
+      <div class="surf">
+        ${compItem("OpenConnect", "9.12", "https://www.infradead.org/openconnect/", "LGPL-2.1", "https://www.gnu.org/licenses/old-licenses/lgpl-2.1.html")}
+        ${compItem("anyconnect-rs", "", "https://github.com/", "MIT / Apache-2.0", "https://opensource.org/licenses/MIT")}
+      </div>
+    </div>
+    <div class="grp">
+      <div class="ghead"><span class="gt">${tr("ackCard")}</span></div>
+      <div class="surf">
+        ${compItem("Native Shell", "", "https://github.com/longbridge/nsh", tr("license"), "https://github.com/longbridge/nsh")}
+      </div>
+    </div>
+    <div class="grp">
+      <div class="ghead"><span class="gt">${tr("privacyCard")}</span></div>
+      <div class="surf padded">
+        <div><button class="btn sm" data-act="push-page" data-page="privacy">${I("shield","xs")}${tr("privacyBtn")}</button></div>
+      </div>
+    </div>`;
+  }
+
+  function renderPrivacyContent(dev) {
+    const lines = (T[S.lang] || T.zh).privacyLines;
+    return `<div class="scroll-body"><div class="${isWide(dev)?(isDesktop(dev)?"pc-center":"pad-center"):(dev==="pad-p"?"pad-center":"")}" style="display:flex;flex-direction:column;gap:18px">
+      <div class="grp">
+        <div class="ghead"><span class="gt">${tr("privacySection")}</span></div>
+        <div class="surf padded" style="gap:10px">
+          ${lines.map(line => `<p style="font-size:14px;line-height:23px;color:var(--fg)">${esc(line)}</p>`).join("")}
+        </div>
+      </div>
+      <div class="grp">
+        <div class="ghead"><span class="gt">${tr("disclaimerSection")}</span></div>
+        <div class="surf padded">
+          <p style="font-size:14px;line-height:23px;color:var(--muted)">${esc(tr("disclaimerText"))}</p>
+        </div>
+      </div>
+    </div></div>`;
+  }
+
+  function renderSettings(dev) {
+    const inner = S.settingsTab === "appearance" ? renderAppearanceContent() : renderAboutContent();
+    return `<div class="settings-tabs-bar">
+      <div class="seg fill">
+        <button class="${S.settingsTab==="appearance"?"on":""}" data-act="set-settings-tab" data-val="appearance">${tr("appearance")}</button>
+        <button class="${S.settingsTab==="about"?"on":""}" data-act="set-settings-tab" data-val="about">${tr("about")}</button>
+      </div>
+    </div>
+    <div class="scroll-body"><div class="${isDesktop(dev)?"pc-center":"pad-center"}">${inner}</div></div>`;
+  }
+
+  /* ---------------- 浮层渲染（L2 / L3 / L4 / Toast） ---------------- */
+  function renderAuthFormInner(p) {
+    const round = p.round || 1;
+    if (round === 1) {
+      return `<p class="help">${tr("authPrompt1")}</p>
+        <div class="fld bare">
+          <span class="fld-lbl"><span>${tr("fGroup")}</span></span>
+          <select class="inp" data-auth-field="group">
+            ${["Corp-Employees","Corp-Contractors","Corp-SAML"].map(g => `<option value="${g}" ${p.group===g?"selected":""}>${g}</option>`).join("")}
+          </select>
+        </div>
+        <div class="fld bare">
+          <span class="fld-lbl"><span>${tr("fUser")}</span></span>
+          <input class="inp" value="alex.chen">
+        </div>
+        <div class="fld bare">
+          <span class="fld-lbl"><span>${tr("fPass")}</span></span>
+          <input class="inp" type="password" value="${esc(p.pass || "••••••••••••")}" data-auth-field="pass">
+        </div>`;
+    }
+    return `<p class="help">${tr("authPrompt2")}</p>
+      <div class="fld bare">
+        <span class="fld-lbl"><span>${S.lang==="zh"?"动态口令":"Verification code"}</span></span>
+        <input class="inp" style="font-family:var(--mono);letter-spacing:.14em;font-size:16px" value="${esc(p.otp || "482910")}" data-auth-field="otp" placeholder="000000">
+      </div>`;
+  }
+
+  function renderOverlays(dev) {
+    let html = "";
+    const anchored = isAnchoredMenu(dev);
+
+    // L2: ObjectMenu / ProfilePicker
+    if (S.menu) {
+      if (S.menu.kind === "profile") {
+        const p = DATA.profiles.find(x => x.id === S.menu.id) || DATA.profiles[0];
+        const isAct = p.id === S.activeId;
+        const cantSwitch = isActive();
+        const cantDel = isAct && isActive();
+        const items = `
+          ${!isAct ? `<button class="mi" data-act="menu-activate" data-id="${p.id}" ${cantSwitch?"disabled":""}>${I("check","s")}<span>${tr("miSelect")}</span>${cantSwitch?`<span class="reason">${tr("miBusyReason")}</span>`:""}</button>` : ""}
+          <button class="mi" data-act="menu-fav" data-id="${p.id}">${I("star","s")}<span>${p.fav?tr("miUnfav"):tr("miFav")}</span></button>
+          <button class="mi" data-act="menu-edit" data-id="${p.id}">${I("edit","s")}<span>${tr("miEdit")}</span></button>
+          <div class="msep"></div>
+          <button class="mi danger" data-act="menu-delete" data-id="${p.id}" ${cantDel?"disabled":""}>${I("trash","s")}<span>${tr("miDelete")}</span>${cantDel?`<span class="reason">${tr("miActiveReason")}</span>`:""}</button>`;
+
+        if (anchored) {
+          html += `<div class="ov-layer"><div style="position:absolute;inset:0" data-act="close-menu"></div>
+            <div class="pop-menu ${!isDesktop(dev)?"touch-pop":""}" style="top:${S.menu.y||140}px;right:${S.menu.right||24}px">${items}</div></div>`;
+        } else {
+          html += `<div class="ov-layer"><div class="scrim" data-act="close-menu"></div>
+            <div class="sheet"><div class="grab"></div>
+              <div class="sh-head"><div><b>${esc(p.name)}</b><small>${esc(p.server)}</small></div><button class="ibtn sm" data-act="close-menu">${I("x","s")}</button></div>
+              <div class="sh-body" style="gap:2px">${items}</div>
+            </div></div>`;
+        }
+      } else if (S.menu.kind === "archive") {
+        const a = DATA.archives.find(x => x.file === S.menu.file) || DATA.archives[0];
+        const busyRec = a.active && S.recording;
+        const items = `
+          <button class="mi" data-act="menu-export-arch" data-file="${esc(a.file)}">${I("download","s")}<span>${tr("miExportLog")}</span></button>
+          <div class="msep"></div>
+          <button class="mi danger" data-act="menu-del-arch" data-file="${esc(a.file)}" ${busyRec?"disabled":""}>${I("trash","s")}<span>${tr("miDeleteArch")}</span>${busyRec?`<span class="reason">${tr("archActiveReason")}</span>`:""}</button>`;
+        if (anchored) {
+          html += `<div class="ov-layer"><div style="position:absolute;inset:0" data-act="close-menu"></div>
+            <div class="pop-menu ${!isDesktop(dev)?"touch-pop":""}" style="top:${S.menu.y||180}px;right:28px">${items}</div></div>`;
+        } else {
+          html += `<div class="ov-layer"><div class="scrim" data-act="close-menu"></div>
+            <div class="sheet"><div class="grab"></div>
+              <div class="sh-head"><div><b>${esc(a.file)}</b><small>${esc(a.size)}</small></div><button class="ibtn sm" data-act="close-menu">${I("x","s")}</button></div>
+              <div class="sh-body" style="gap:2px">${items}</div>
+            </div></div>`;
+        }
+      } else if (S.menu.kind === "picker") {
+        const items = DATA.profiles.map(p => `<button class="mi" data-act="pick-active-profile" data-id="${p.id}">
+          ${p.id===S.activeId ? I("check","s") : `<span style="width:16px"></span>`}<span>${esc(p.name)}</span>
+        </button>`).join("");
+        if (anchored) {
+          html += `<div class="ov-layer"><div style="position:absolute;inset:0" data-act="close-menu"></div>
+            <div class="pop-menu ${!isDesktop(dev)?"touch-pop":""}" style="top:290px;left:44px;min-width:250px">${items}</div></div>`;
+        } else {
+          html += `<div class="ov-layer"><div class="scrim" data-act="close-menu"></div>
+            <div class="sheet"><div class="grab"></div>
+              <div class="sh-head"><div><b>${tr("switchProfile")}</b></div><button class="ibtn sm" data-act="close-menu">${I("x","s")}</button></div>
+              <div class="sh-body" style="gap:2px">${items}</div>
+            </div></div>`;
+        }
+      } else if (S.menu.kind === "select") {
+        const isAuth = S.menu.field === "auth";
+        const title = isAuth ? tr("fAuthMethod") : tr("fSplitMode");
+        const opts = isAuth ? authOptions() : splitOptions();
+        const cur = S.editorDraft ? S.editorDraft[S.menu.field] : "";
+        const items = opts.map(o => `<button class="mi sel-opt" data-act="pick-select" data-field="${S.menu.field}" data-val="${o.value}">
+          <span class="opt-tx"><b>${esc(o.label)}</b><small>${esc(o.desc)}</small></span>
+          ${cur === o.value ? `<span style="color:var(--brand);flex:none">${I("check","s")}</span>` : `<span style="width:16px;flex:none"></span>`}
+        </button>`).join("");
+        if (anchored) {
+          html += `<div class="ov-layer"><div style="position:absolute;inset:0" data-act="close-menu"></div>
+            <div class="pop-menu ${!isDesktop(dev)?"touch-pop":""}" style="top:${S.menu.y||240}px;left:50%;transform:translateX(-50%);min-width:280px;max-width:340px">${items}</div></div>`;
+        } else {
+          html += `<div class="ov-layer"><div class="scrim" data-act="close-menu"></div>
+            <div class="sheet"><div class="grab"></div>
+              <div class="sh-head"><div><b>${esc(title)}</b></div><button class="ibtn sm" data-act="close-menu">${I("x","s")}</button></div>
+              <div class="sh-body" style="gap:2px">${items}</div>
+            </div></div>`;
+        }
+      }
+    }
+
+    // L2 Phone BottomSheet (Auth or Log Detail)
+    if (S.sheet) {
+      if (S.sheet.kind === "auth") {
+        const r = S.sheet.round || 1;
+        html += `<div class="ov-layer l3"><div class="scrim" data-act="cancel-auth"></div>
+          <div class="sheet"><div class="grab"></div>
+            <div class="sh-head"><div><b>${r===1?tr("authTitle1"):tr("authTitle2")}</b><small>${esc(activeProfile().server)}</small></div><button class="ibtn sm" data-act="cancel-auth">${I("x","s")}</button></div>
+            <div class="sh-body">${renderAuthFormInner(S.sheet)}</div>
+            <div class="sh-foot">
+              <button class="btn full" data-act="cancel-auth">${tr("btnCancel")}</button>
+              <button class="btn pri full" data-act="submit-auth">${r===1?tr("authNext"):tr("authSubmit")}</button>
+            </div>
+          </div></div>`;
+      } else if (S.sheet.kind === "log-detail") {
+        const l = S.sheet.payload;
+        const lvLbl = l.lv === "error" ? tr("lvError") : l.lv === "warn" ? tr("lvWarn") : l.lv === "debug" ? tr("lvDebug") : tr("lvInfo");
+        html += `<div class="ov-layer"><div class="scrim" data-act="close-sheet"></div>
+          <div class="sheet"><div class="grab"></div>
+            <div class="sh-head"><div><b>${tr("logDetail")}</b><small>${esc(l.fullTs)} · ${lvLbl}</small></div><button class="ibtn sm" data-act="close-sheet">${I("x","s")}</button></div>
+            <div class="sh-body">
+              <div class="well" style="padding:10px 12px"><div style="font-family:var(--mono);font-size:12.5px;line-height:19px;color:var(--code);word-break:break-word">${esc(l.msg)}</div></div>
+              <div class="surf padded" style="padding:12px 14px">
+                <div class="kv">
+                  <span class="k">${tr("metaLevel")}</span><span class="v">${lvLbl}</span>
+                  <span class="k">${tr("metaModule")}</span><span class="v">${esc(l.mod)}</span>
+                  <span class="k">${tr("metaTarget")}</span><span class="v">${esc(l.target || "—")}</span>
+                </div>
+              </div>
+              <div class="surf" style="padding:4px">
+                <button class="mi" data-act="copy-log-close" data-val="${esc(l.msg)}">${I("copy","s")}<span>${tr("copyLog")}</span></button>
+              </div>
+            </div>
+          </div></div>`;
+      }
+    }
+
+    // L3 Dialog (Auth on Pad/PC, Error Detail)
+    if (S.dialog) {
+      if (S.dialog.kind === "auth") {
+        const r = S.dialog.round || 1;
+        html += `<div class="ov-layer l3"><div class="scrim" data-act="cancel-auth"></div>
+          <div class="dlg-wrap"><div class="dlg">
+            <div class="dlg-head"><div><b>${r===1?tr("authTitle1"):tr("authTitle2")}</b><small>${esc(activeProfile().server)}</small></div><button class="ibtn sm" data-act="cancel-auth">${I("x","s")}</button></div>
+            <div class="dlg-body">${renderAuthFormInner(S.dialog)}</div>
+            <div class="dlg-foot">
+              <button class="btn" data-act="cancel-auth">${tr("btnCancel")}</button>
+              <button class="btn pri" data-act="submit-auth">${r===1?tr("authNext"):tr("authSubmit")}</button>
+            </div>
+          </div></div></div>`;
+      } else if (S.dialog.kind === "error-detail") {
+        html += `<div class="ov-layer l3"><div class="scrim" data-act="close-dialog"></div>
+          <div class="dlg-wrap"><div class="dlg">
+            <div class="dlg-head"><div><b>${tr("stFailed")}</b></div><button class="ibtn sm" data-act="close-dialog">${I("x","s")}</button></div>
+            <div class="dlg-body"><div class="err-pre">${esc(DATA.lastErrorDetail)}</div></div>
+            <div class="dlg-foot">
+              <button class="btn" data-act="copy-text" data-val="${esc(DATA.lastErrorDetail)}">${I("copy","xs")}${tr("btnCopy")}</button>
+              <button class="btn pri" data-act="close-dialog">${S.lang==="zh"?"关闭":"Close"}</button>
+            </div>
+          </div></div></div>`;
+      }
+    }
+
+    // L4 AlertDialog
+    if (S.alert) {
+      html += `<div class="ov-layer l4"><div class="scrim" data-act="close-alert"></div>
+        <div class="dlg-wrap"><div class="alert-dlg" role="alertdialog" aria-modal="true">
+          <b>${esc(S.alert.title)}</b>
+          <p>${esc(S.alert.body)}</p>
+          <div class="acts">
+            <button class="btn sm" data-act="close-alert">${esc(S.alert.cancelLabel)}</button>
+            <button class="btn sm ${S.alert.destructive?"danger-solid":"pri"}" data-act="confirm-alert">${esc(S.alert.actionLabel)}</button>
+          </div>
+        </div></div></div>`;
+    }
+
+    // Top Modal-Aware Toast Deck
+    if (S.toasts.length) {
+      html += `<div class="toast-deck">${S.toasts.map(t => `<div class="toast-card ${t.tone}">
+        ${t.tone==="warn"?I("alert","s"):t.tone==="danger"?I("alert","s"):I("check","s")}
+        <span>${esc(t.text)}</span>
+      </div>`).join("")}</div>`;
+    }
+
+    return html;
+  }
+
+  /* ---------------- 完整设备壳体渲染 ---------------- */
+  function pageTitle() {
+    if (S.page === "home") return tr("navHome");
+    if (S.page === "profiles") return tr("navProfiles");
+    if (S.page === "profile-editor") return S.editorMode === "new" ? tr("editorNew") : tr("editorEdit");
+    if (S.page === "statistics") return tr("navStats");
+    if (S.page === "logs") return tr("navLogs");
+    if (S.page === "more") return tr("navMore");
+    if (S.page === "settings") return tr("navSettings");
+    if (S.page === "appearance") return tr("appearance");
+    if (S.page === "about") return tr("about");
+    if (S.page === "privacy") return tr("privacy");
+    return tr("appName");
+  }
+
+  function renderBody(dev) {
+    if (S.page === "home") return renderHome(dev);
+    if (S.page === "profiles") return renderProfiles(dev);
+    if (S.page === "profile-editor") return renderProfileEditor(dev);
+    if (S.page === "statistics") return renderStatistics(dev);
+    if (S.page === "logs") return renderLogs(dev);
+    if (S.page === "more") return renderMore();
+    if (S.page === "settings") return renderSettings(dev);
+    if (S.page === "appearance") return `<div class="scroll-body"><div class="${dev==="pad-p"?"pad-center":""}" style="display:flex;flex-direction:column;gap:18px">${renderAppearanceContent()}</div></div>`;
+    if (S.page === "about") return `<div class="scroll-body"><div class="${dev==="pad-p"?"pad-center":""}" style="display:flex;flex-direction:column;gap:18px">${renderAboutContent()}</div></div>`;
+    if (S.page === "privacy") return renderPrivacyContent(dev);
+    return renderHome(dev);
+  }
+
+  function renderDeviceFrame(dev) {
+    const desk = isDesktop(dev);
+    const wide = isWide(dev);
+    const cls = dev === "phone" ? "dev-frame dev-phone"
+      : dev === "pad-p" ? "dev-frame dev-pad-p"
+      : dev === "pad-l" ? "dev-frame dev-pad-l"
+      : dev === "pc-n" ? "dev-frame dev-pc narrow tier-pointer"
+      : "dev-frame dev-pc tier-pointer";
+
+    const globalBanner = S.conn === "unconfirmed" ? `<div class="global-banner">
+      <div style="display:flex;align-items:center;gap:8px;min-width:0">
+        ${I("alert","s")}<span><b>${tr("unconfirmedTitle")}</b> · ${tr("unconfirmedBody")}</span>
+      </div>
+      <div style="display:flex;gap:6px;flex:none">
+        <button class="btn sm" data-act="confirm-sync">${tr("btnConfirmSync")}</button>
+        <button class="btn sm stop" data-act="reset-state">${tr("btnResetState")}</button>
+      </div>
+    </div>` : "";
+
+    const topRightAction = S.page === "profiles"
+      ? `<button class="btn sm" data-act="new-profile">${I("plus","xs")}${tr("btnNewProfile")}</button>`
+      : S.page === "logs"
+      ? `${wide ? `<span class="bdg ${S.recording?"brand":""}">${S.recording ? tr("logListening") : tr("logPausedBadge")}</span>` : ""}
+         <button class="btn sm" data-act="toggle-recording">${I(S.recording?"pause":"play","xs")}${S.recording ? tr("logPauseBtn") : tr("logResumeBtn")}</button>
+         <button class="btn sm" data-act="confirm-clear-logs">${tr("btnClearLogs")}</button>`
+      : "";
+
+    if (wide) {
+      const exp = isExpandedSide(dev);
+      const sm = statusMeta();
+      const navItems = [
+        ["home","shield",tr("navHome"),"⌘1"],
+        ["profiles","server",tr("navProfiles"),"⌘2"],
+        ["statistics","activity",tr("navStats"),"⌘3"],
+        ["logs","file-text",tr("navLogs"),"⌘4"]
+      ];
+      const activeNav = S.page === "profile-editor" ? "profiles"
+        : ["appearance","about","privacy"].includes(S.page) ? "settings" : S.page;
+
+      return `<div class="${cls}">
+        <aside class="side ${exp?"":"rail"}">
+          <div class="side-top">
+            <button class="brand-btn" data-act="toggle-sidebar" title="${exp?"Collapse":"Expand"} (⌘B)">
+              <span class="logo-sq">${I("brand-" + S.iconVariant)}</span>
+              ${exp ? `<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${tr("appName")}</span>` : ""}
+            </button>
+          </div>
+          <div class="side-scroll">
+            <div class="nav-sec">
+              ${navItems.map(([id,ic,lbl,kbd]) => `<button class="nav-item ${activeNav===id?"on":""}" data-act="nav" data-page="${id}" title="${lbl}">
+                ${I(ic,"s")}${exp?`<span>${lbl}</span>${desk?`<span class="nav-kbd">${kbd}</span>`:""}`:""}
+              </button>`).join("")}
+            </div>
+            <div class="side-spacer"></div>
+            <div class="side-pin">
+              <div class="nav-sep"></div>
+              <button class="nav-item ${activeNav==="settings"?"on":""}" data-act="nav" data-page="settings" title="${tr("navSettings")}">
+                ${I("gear","s")}${exp?`<span>${tr("navSettings")}</span>${desk?`<span class="nav-kbd">⌘,</span>`:""}`:""}
+              </button>
+            </div>
+          </div>
+          <div class="side-foot">
+            <span style="display:inline-flex;align-items:center;gap:7px;min-width:0">
+              <span class="dot ${sm.dot}" style="width:8px;height:8px"></span>
+              ${exp?`<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${sm.label}</span>`:""}
+            </span>
+          </div>
+        </aside>
+        <main class="ws-main">
+          <div class="ws-tool">
+            ${S.page === "profile-editor" ? `<button class="btn ghost sm" data-act="back">${I("back","xs")}${tr("navProfiles")}</button><span class="ws-crumb">/</span>` : ""}
+            ${S.page === "privacy" ? `<button class="btn ghost sm" data-act="back">${I("back","xs")}${tr("about")}</button><span class="ws-crumb">/</span>` : ""}
+            <span class="ws-title">${pageTitle()}</span>
+            <div class="ws-acts">${topRightAction}</div>
+            ${desk ? `<div class="win-ctrls" aria-label="HarmonyOS Window Controls">
+              <span class="wc">${I("minus","xs")}</span><span class="wc">${I("square","xs")}</span><span class="wc close">${I("x","xs")}</span>
+            </div>` : ""}
+          </div>
+          ${globalBanner}
+          ${renderBody(dev)}
+        </main>
+        ${renderOverlays(dev)}
+      </div>`;
+    }
+
+    // Phone & Pad Portrait shell
+    const isSub = ["profile-editor","logs","appearance","about","privacy"].includes(S.page);
+    const activeTab = S.page === "profile-editor" ? "profiles"
+      : ["logs","appearance","about","privacy","settings"].includes(S.page) ? "more" : S.page;
+
+    return `<div class="${cls}">
+      <div class="sb"><span>10:41</span><span>5G · 100%</span></div>
+      <div class="hdr">
+        ${isSub ? `<button class="back-btn" data-act="back">${I("back","s")}${tr("back")}</button>` : ""}
+        <span class="t">${pageTitle()}</span>
+        <div class="act">${topRightAction}</div>
+      </div>
+      ${globalBanner}
+      ${renderBody(dev)}
+      ${!isSub ? `<nav class="btabs" aria-label="Primary Tabs">
+        ${[
+          ["home","shield",tr("navHome")],
+          ["profiles","server",tr("navProfiles")],
+          ["statistics","activity",tr("navStats")],
+          ["more","grid",tr("navMore")]
+        ].map(([id,ic,lbl]) => `<button class="btab ${activeTab===id?"on":""}" data-act="nav" data-page="${id}">
+          <span class="ti">${I(ic)}</span><span>${lbl}</span>
+        </button>`).join("")}
+      </nav>` : ""}
+      <div class="home-ind"></div>
+      ${renderOverlays(dev)}
+    </div>`;
+  }
+
+  function renderStage() {
+    const el = document.getElementById("live-stage");
+    if (el) el.innerHTML = renderDeviceFrame(S.device);
+  }
+
+  function syncConnButtons() {
+    document.querySelectorAll("#conn-seg button").forEach(b =>
+      b.setAttribute("aria-pressed", String(b.dataset.conn === S.conn))
+    );
+  }
+
+  function applyTheme(t) {
+    S.themePref = t;
+    document.documentElement.dataset.theme = t === "system" ? "" : t;
+    document.querySelectorAll("[data-theme-set]").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.themeSet === t)));
+  }
+
+  function applyLang(l) {
+    S.lang = l;
+    document.querySelectorAll("[data-lang-set]").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.langSet === l)));
+    renderStage();
+    buildBoards();
+  }
+
+  /* ---------------- 图标设计展板构建 ---------------- */
+  const ICON_PROPOSALS = [
+    { id:"a", tag:"推荐方案 · A", name:"同心开放隧道（Concentric Portal）",
+      desc:"双层等距同心开放 C 环呼应 OpenConnect 的 OC 结构，核心端点向外直贯隧道通路；无盾牌挂锁俗套，与 Paws 同框最具旗舰识别度。",
+      file:"docs/design/icons/proposal-a-concentric-portal.svg" },
+    { id:"b", tag:"方案 · B", name:"双环隧道桥（Dual Tunnel Bridge）",
+      desc:"左右对称开放门户包裹一对端点圆环（呼应 Paws 圆点语汇），中桥直线贯通隐喻端到端加密连接与 H 字母横梁，极富亲和与秩序感。",
+      file:"docs/design/icons/proposal-b-tunnel-bridge.svg" },
+    { id:"c", tag:"方案 · C", name:"同心隧道拱门（Concentric Tunnel Arch）",
+      desc:"以建筑感双层同心拱门具象「安全隧道入口」，底部轴线直连核心节点，稳重克制、极具企业级网络工具气质。",
+      file:"docs/design/icons/proposal-c-tunnel-arch.svg" },
+    { id:"d", tag:"方案 · D", name:"交织双环（Interlocked Link）",
+      desc:"45° 对角立体穿插的极简双链环，精准留白断口呈现加密绑定关系，经典直白、在 16pt 极小尺寸下依然一目了然。",
+      file:"docs/design/icons/proposal-d-interlocked-link.svg" }
+  ];
+
+  function buildIconLab() {
+    const host = document.getElementById("icon-lab");
+    if (!host) return;
+    const refBar = `<div class="surf padded" style="margin-bottom:16px">
+      <div style="display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:14px">
+        <div style="display:flex;align-items:center;gap:14px">
+          <div class="app-squircle light" style="width:68px;height:68px;border-radius:16px"><svg class="i" style="width:36px;height:36px;stroke-width:1.9"><use href="#brand-paws"/></svg></div>
+          <div class="app-squircle dark" style="width:68px;height:68px;border-radius:16px"><svg class="i" style="width:36px;height:36px;stroke-width:1.9"><use href="#brand-paws"/></svg></div>
+          <div>
+            <div style="font-weight:600;font-size:15px">家族基线参考：Paws 图标规范</div>
+            <div class="help">Paper 垂直柔灰渐变底 <code>#f8f9fb → #eceef2</code> · 浅色描边 <code>#4a840a</code> · 深色启动图 <code>#c8f26d</code> · <code>24×24</code> 画布 <code>stroke-width: 1.9</code> · 50% 安全区居中</div>
+          </div>
+        </div>
+        <span class="bdg brand">当前原型图标：方案 ${S.iconVariant.toUpperCase()}</span>
+      </div>
+    </div>`;
+
+    const cards = `<div class="icon-grid">${ICON_PROPOSALS.map(p => {
+      const on = S.iconVariant === p.id;
+      const sym = `#brand-${p.id}`;
+      return `<article class="icon-card ${on?"active":""}">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+          <span class="bdg ${p.id==="a"?"brand":""}">${p.tag}</span>
+          <button class="btn sm ${on?"pri":""}" data-icon-set="${p.id}">${on?I("check","xs")+"当前已套用":"应用到原型台"}</button>
+        </div>
+        <div>
+          <h3 style="font-size:15px;margin-bottom:4px">${p.name}</h3>
+          <p class="help">${p.desc}</p>
+        </div>
+        <div class="icon-hero-row">
+          <div class="app-squircle light" title="HarmonyOS Light Launcher"><svg class="i" style="stroke-width:1.9"><use href="${sym}"/></svg></div>
+          <div class="app-squircle dark" title="Dark Mode Icon"><svg class="i" style="stroke-width:1.9"><use href="${sym}"/></svg></div>
+          <div style="flex:1;display:flex;flex-direction:column;gap:6px">
+            <div class="help">桌面圆角图标对比</div>
+            <div class="icon-scale-strip">
+              <div class="icon-scale-item"><span class="logo-sq lg" style="width:40px;height:40px;border-radius:11px"><svg class="i" style="width:24px;height:24px;stroke-width:1.9"><use href="${sym}"/></svg></span><span>关于 56</span></div>
+              <div class="icon-scale-item"><span class="logo-sq"><svg class="i" style="width:16px;height:16px;stroke-width:1.9"><use href="${sym}"/></svg></span><span>侧栏 26</span></div>
+              <div class="icon-scale-item"><svg class="i" style="width:16px;height:16px;color:var(--brand);stroke-width:2"><use href="${sym}"/></svg><span>微缩 16</span></div>
+            </div>
+          </div>
+        </div>
+        <div class="layer-strip">
+          <div class="layer-cell"><div class="layer-box bg-only"></div><span>background</span></div>
+          <div class="layer-cell"><div class="layer-box checker"><svg class="i" style="width:22px;height:22px;stroke-width:1.9"><use href="${sym}"/></svg></div><span>foreground</span></div>
+          <div class="layer-cell"><div class="layer-box sp-l"><svg class="i" style="width:22px;height:22px;stroke-width:1.9"><use href="${sym}"/></svg></div><span>start Light</span></div>
+          <div class="layer-cell"><div class="layer-box sp-d"><svg class="i" style="width:22px;height:22px;stroke-width:1.9"><use href="${sym}"/></svg></div><span>start Dark</span></div>
+        </div>
+        <div class="help" style="font-family:var(--mono);font-size:11.5px">${p.file}</div>
+      </article>`;
+    }).join("")}</div>`;
+
+    host.innerHTML = refBar + cards;
+  }
+
+  /* ---------------- 事件委托 ---------------- */
+  document.addEventListener("click", e => {
+    const btn = e.target.closest("[data-mode],[data-icon-set],[data-theme-set],[data-motion-set],[data-scale-set],[data-lang-set],[data-dev],[data-conn],[data-chain],[data-act]");
+    if (!btn) return;
+
+    if (btn.dataset.mode) {
+      S.viewMode = btn.dataset.mode;
+      document.querySelectorAll("[data-mode]").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.mode === S.viewMode)));
+      document.getElementById("view-stage").classList.toggle("hidden", S.viewMode !== "stage");
+      document.getElementById("view-boards").classList.toggle("hidden", S.viewMode !== "boards");
+      document.getElementById("view-icons").classList.toggle("hidden", S.viewMode !== "icons");
+      document.getElementById("board-anchors").classList.toggle("hidden", S.viewMode !== "boards");
+      return;
+    }
+    if (btn.dataset.iconSet) {
+      S.iconVariant = btn.dataset.iconSet;
+      document.querySelectorAll("#icon-seg button").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.iconSet === S.iconVariant)));
+      renderStage();
+      buildBoards();
+      buildIconLab();
+      return;
+    }
+    if (btn.dataset.themeSet) { applyTheme(btn.dataset.themeSet); renderStage(); return; }
+    if (btn.dataset.motionSet) {
+      document.documentElement.dataset.reduceMotion = String(btn.dataset.motionSet === "reduce");
+      document.querySelectorAll("[data-motion-set]").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.motionSet === btn.dataset.motionSet)));
+      return;
+    }
+    if (btn.dataset.scaleSet) {
+      document.documentElement.dataset.fontScale = btn.dataset.scaleSet;
+      document.querySelectorAll("[data-scale-set]").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.scaleSet === btn.dataset.scaleSet)));
+      return;
+    }
+    if (btn.dataset.langSet) { applyLang(btn.dataset.langSet); return; }
+    if (btn.dataset.dev) {
+      S.device = btn.dataset.dev;
+      S.sidebarExpanded = null;
+      if (isWide(S.device) && S.page === "more") S.page = "settings";
+      if (!isWide(S.device) && S.page === "settings") S.page = "more";
+      if (S.conn === "authenticating") openAuthChallenge(S.sheet?.round || S.dialog?.round || 1);
+      document.querySelectorAll("#device-seg button").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.dev === S.device)));
+      renderStage(); return;
+    }
+    if (btn.dataset.conn) {
+      S.conn = btn.dataset.conn;
+      S.dialog = null; S.sheet = null; S.menu = null; S.alert = null;
+      syncConnButtons();
+      if (S.conn === "authenticating") openAuthChallenge(1);
+      renderStage(); return;
+    }
+    if (btn.dataset.chain) {
+      runChain(btn.dataset.chain);
+      return;
+    }
+
+    const act = btn.dataset.act;
+    if (!act) return;
+    e.stopPropagation();
+
+    switch (act) {
+      case "nav": navigateTo(btn.dataset.page); break;
+      case "push-page": pushPage(btn.dataset.page); break;
+      case "back": attemptBack(); break;
+      case "toggle-sidebar": S.sidebarExpanded = !isExpandedSide(); renderStage(); break;
+      case "go-stats": navigateTo("statistics"); break;
+      case "go-home": navigateTo("home"); break;
+      case "connect":
+        openAuthChallenge(1); renderStage(); break;
+      case "reopen-auth":
+        openAuthChallenge(1); renderStage(); break;
+      case "disconnect":
+        S.conn = "disconnected"; syncConnButtons(); pushToast(S.lang==="zh"?"安全连接已断开":"Secure connection closed"); renderStage(); break;
+      case "cancel-connect":
+        S.conn = "disconnected"; S.sheet = null; S.dialog = null; syncConnButtons(); pushToast(S.lang==="zh"?"已取消本次连接":"Connection cancelled", "warn"); renderStage(); break;
+      case "submit-auth": {
+        const cur = S.sheet || S.dialog;
+        if (cur && cur.round === 1) { openAuthChallenge(2); renderStage(); }
+        else { S.sheet = null; S.dialog = null; S.conn = "connected"; syncConnButtons(); pushToast(S.lang==="zh"?"身份验证通过，隧道已建立":"Verified · Tunnel established"); renderStage(); }
+        break;
+      }
+      case "cancel-auth":
+        S.sheet = null; S.dialog = null; S.conn = "disconnected"; syncConnButtons();
+        pushToast(S.lang==="zh"?"已取消认证与连接":"Authentication cancelled", "warn"); renderStage(); break;
+      case "open-err-detail":
+        S.dialog = { kind:"error-detail" }; renderStage(); break;
+      case "confirm-sync":
+        S.conn = "connected"; syncConnButtons(); pushToast(S.lang==="zh"?"状态已同步":"State synced"); renderStage(); break;
+      case "reset-state":
+        S.conn = "disconnected"; syncConnButtons(); pushToast(S.lang==="zh"?"连接状态已重置为未连接":"State reset to disconnected", "warn"); renderStage(); break;
+      case "open-profile-picker":
+        S.menu = { kind:"picker" }; renderStage(); break;
+      case "pick-active-profile":
+        S.activeId = btn.dataset.id; S.menu = null; pushToast(S.lang==="zh"?"已切换当前配置":"Active profile updated"); renderStage(); break;
+      case "edit-active":
+        openEditor("edit", S.activeId); break;
+      case "new-profile":
+        openEditor("new"); break;
+      case "edit-profile":
+        openEditor("edit", btn.dataset.id); break;
+      case "activate-profile":
+        S.activeId = btn.dataset.id; pushToast(S.lang==="zh"?"已设为当前配置":"Set as active profile"); renderStage(); break;
+      case "select-profile-row":
+        S.selectedProfileId = btn.dataset.id;
+        if (!isWide()) S.menu = { kind:"profile", id: btn.dataset.id };
+        renderStage(); break;
+      case "open-profile-menu":
+        S.selectedProfileId = btn.dataset.id;
+        S.menu = { kind:"profile", id: btn.dataset.id, y: 155, right: 24 };
+        renderStage(); break;
+      case "menu-activate":
+        S.activeId = btn.dataset.id; S.menu = null; pushToast(S.lang==="zh"?"已设为当前配置":"Set as active profile"); renderStage(); break;
+      case "menu-fav": {
+        const p = DATA.profiles.find(x => x.id === btn.dataset.id);
+        if (p) { p.fav = !p.fav; pushToast(p.fav?(S.lang==="zh"?"已收藏配置":"Profile pinned"):(S.lang==="zh"?"已取消收藏":"Profile unpinned")); }
+        S.menu = null; renderStage(); break;
+      }
+      case "menu-edit":
+        S.menu = null; openEditor("edit", btn.dataset.id); break;
+      case "menu-delete": {
+        const p = DATA.profiles.find(x => x.id === btn.dataset.id);
+        S.menu = null;
+        if (!p) break;
+        S.alert = {
+          title: tr("delProfTitle"),
+          body: S.lang==="zh" ? `将永久删除配置「${p.name}」（${p.server}），且无法恢复。` : `Permanently delete profile "${p.name}" (${p.server})?`,
+          cancelLabel: tr("btnCancel"), actionLabel: tr("delProfAct"), destructive: true,
+          onConfirm: () => { S.alert = null; pushToast(S.lang==="zh"?`已删除「${p.name}」`:`Deleted "${p.name}"`, "danger"); renderStage(); }
+        };
+        renderStage(); break;
+      }
+      case "discover-groups":
+        S.discovering = true; renderStage();
+        setTimeout(() => {
+          S.discovering = false;
+          S.discoveredGroups = ["Corp-Employees","Corp-Contractors","Corp-SAML","R&D-Direct"];
+          pushToast(S.lang==="zh"?"已自动探测到 4 个认证分组":"Discovered 4 auth groups");
+          renderStage();
+        }, 450);
+        break;
+      case "pick-group":
+        if (S.editorDraft) { S.editorDraft.group = btn.dataset.val; S.editorDirty = true; }
+        renderStage(); break;
+      case "open-select":
+        S.menu = { kind:"select", field: btn.dataset.field, y: btn.dataset.field === "auth" ? 260 : 380 };
+        renderStage(); break;
+      case "pick-select":
+        if (S.editorDraft && btn.dataset.field) {
+          S.editorDraft[btn.dataset.field] = btn.dataset.val;
+          S.editorDirty = true;
+        }
+        S.menu = null;
+        renderStage(); break;
+      case "set-draft-auth":
+        if (S.editorDraft) { S.editorDraft.auth = btn.dataset.val; S.editorDirty = true; }
+        renderStage(); break;
+      case "set-draft-split":
+        if (S.editorDraft) { S.editorDraft.split = btn.dataset.val; S.editorDirty = true; }
+        renderStage(); break;
+      case "toggle-draft-bool":
+        if (S.editorDraft) { S.editorDraft[btn.dataset.key] = !S.editorDraft[btn.dataset.key]; S.editorDirty = true; }
+        renderStage(); break;
+      case "toggle-adv":
+        S.editorAdvOpen = !S.editorAdvOpen; renderStage(); break;
+      case "pick-cert":
+        if (S.editorDraft) {
+          const map = { clientCert:"corp-client-2026.p12", privKey:"corp-client-2026.key", caCert:"corp-root-ca.pem" };
+          S.editorDraft[btn.dataset.kind] = map[btn.dataset.kind];
+          S.editorDirty = true;
+          pushToast(S.lang==="zh"?"已导入证书文件":"Certificate imported");
+        }
+        renderStage(); break;
+      case "save-profile": {
+        const mtuVal = S.editorDraft?.mtu?.trim();
+        if (mtuVal && (isNaN(Number(mtuVal)) || Number(mtuVal) < 576 || Number(mtuVal) > 1500)) {
+          S.editorMtuErr = S.lang==="zh" ? "MTU 需在 576–1500 之间或留空" : "MTU must be 576–1500 or blank";
+          renderStage(); break;
+        }
+        S.editorMtuErr = ""; S.editorDirty = false;
+        pushToast(S.lang==="zh"?"配置已保存":"Profile saved");
+        S.stack.pop(); S.page = S.stack[S.stack.length - 1] || "profiles";
+        renderStage(); break;
+      }
+      case "set-log-tab": S.logTab = btn.dataset.val; renderStage(); break;
+      case "set-log-level": S.logLevel = btn.dataset.val; renderStage(); break;
+      case "clear-log-filters": S.logSearch = ""; S.logLevel = "all"; renderStage(); break;
+      case "toggle-recording":
+        S.recording = !S.recording;
+        pushToast(S.recording?(S.lang==="zh"?"已开始记录日志":"Log recording started"):(S.lang==="zh"?"已停止记录日志":"Log recording stopped"));
+        renderStage(); break;
+      case "resume-follow": S.logPaused = false; renderStage(); break;
+      case "select-log":
+        S.selectedLogId = btn.dataset.id;
+        if (!isWide()) { S.sheet = { kind:"log-detail", payload: DATA.logs.find(x => x.id === btn.dataset.id) }; }
+        renderStage(); break;
+      case "close-inspector": S.selectedLogId = ""; renderStage(); break;
+      case "copy-log-close": S.sheet = null; pushToast(S.lang==="zh"?"已复制日志":"Log copied"); renderStage(); break;
+      case "confirm-clear-logs":
+        S.alert = {
+          title: tr("clrLogTitle"),
+          body: S.lang==="zh" ? `将清空当前内存中的 ${DATA.logs.length} 条日志，不影响已保存的归档文件。` : `Clear ${DATA.logs.length} in-memory log entries? Saved archives are unaffected.`,
+          cancelLabel: tr("btnCancel"), actionLabel: tr("clrLogAct"), destructive: true,
+          onConfirm: () => { S.alert = null; pushToast(S.lang==="zh"?"日志已清空":"Logs cleared"); renderStage(); }
+        };
+        renderStage(); break;
+      case "open-arch-menu":
+        S.menu = { kind:"archive", file: btn.dataset.file, y: 195 }; renderStage(); break;
+      case "menu-export-arch":
+        S.menu = null; pushToast(S.lang==="zh"?`日志已导出：${btn.dataset.file}`:`Log exported: ${btn.dataset.file}`); renderStage(); break;
+      case "menu-del-arch":
+        S.menu = null;
+        S.alert = {
+          title: S.lang==="zh" ? `删除“${btn.dataset.file}”？` : `Delete "${btn.dataset.file}"?`,
+          body: S.lang==="zh" ? "删除后无法恢复。" : "This action cannot be undone.",
+          cancelLabel: tr("btnCancel"), actionLabel: tr("delArchAct"), destructive: true,
+          onConfirm: () => { S.alert = null; pushToast(S.lang==="zh"?`日志已删除：${btn.dataset.file}`:`Log deleted: ${btn.dataset.file}`, "danger"); renderStage(); }
+        };
+        renderStage(); break;
+      case "set-settings-tab": S.settingsTab = btn.dataset.val; renderStage(); break;
+      case "app-set-lang": applyLang(btn.dataset.val); pushToast(btn.dataset.val==="zh"?"已切换为简体中文":"Switched to English"); break;
+      case "app-set-theme": applyTheme(btn.dataset.val); pushToast(S.lang==="zh"?"主题已更新":"Theme updated"); renderStage(); break;
+      case "copy-text": pushToast(S.lang==="zh"?"已复制":"Copied"); break;
+      case "open-ext": pushToast((S.lang==="zh"?"打开链接：":"Opening: ") + btn.dataset.url); break;
+      case "close-menu": S.menu = null; renderStage(); break;
+      case "close-sheet": S.sheet = null; renderStage(); break;
+      case "close-dialog": S.dialog = null; renderStage(); break;
+      case "close-alert": S.alert = null; renderStage(); break;
+      case "confirm-alert": if (S.alert?.onConfirm) S.alert.onConfirm(); break;
+    }
+  });
+
+  // 表单实时输入同步
+  document.addEventListener("input", e => {
+    const t = e.target;
+    if (t.dataset.bind === "profileSearch") { S.profileSearch = t.value; renderStage(); }
+    else if (t.dataset.bind === "logSearch") { S.logSearch = t.value; renderStage(); }
+    else if (t.dataset.draft && S.editorDraft) {
+      S.editorDraft[t.dataset.draft] = t.value;
+      S.editorDirty = true;
+    }
+  });
+
+  // 桌面右键上下文菜单
+  document.addEventListener("contextmenu", e => {
+    const row = e.target.closest("[data-ctx]");
+    if (!row || !isWide()) return;
+    e.preventDefault();
+    if (row.dataset.ctx === "profile") {
+      S.selectedProfileId = row.dataset.id;
+      S.menu = { kind:"profile", id: row.dataset.id, y: 170, right: 40 };
+      renderStage();
+    } else if (row.dataset.ctx === "archive") {
+      S.menu = { kind:"archive", file: row.dataset.file, y: 195 };
+      renderStage();
+    }
+  });
+
+  // 快捷键支持
+  document.addEventListener("keydown", e => {
+    if (e.key === "Escape") { if (popOverlay()) e.preventDefault(); return; }
+    if (S.viewMode !== "stage" || !isDesktop()) return;
+    if (e.metaKey || e.ctrlKey) {
+      const k = e.key.toLowerCase();
+      if (["1","2","3","4"].includes(k)) { e.preventDefault(); navigateTo(["home","profiles","statistics","logs"][Number(k)-1]); }
+      else if (k === ",") { e.preventDefault(); navigateTo("settings"); }
+      else if (k === "b") { e.preventDefault(); S.sidebarExpanded = !isExpandedSide(); renderStage(); }
+    }
+  });
+
+  // 8 条一键体验链
+  function runChain(id) {
+    S.menu = null; S.sheet = null; S.dialog = null; S.alert = null;
+    if (id === "c1") {
+      S.page = "home"; S.stack = ["home"]; openAuthChallenge(1); renderStage();
+    } else if (id === "c2") {
+      S.page = "profiles"; S.stack = ["profiles"]; openEditor("edit", "c1");
+      S.discoveredGroups = ["Corp-Employees","Corp-Contractors","Corp-SAML"]; renderStage();
+    } else if (id === "c3") {
+      S.page = "profiles"; S.stack = ["profiles"]; openEditor("edit", "c1");
+      S.editorDirty = true; S.editorMtuErr = S.lang==="zh" ? "MTU 必须在 576–1500 之间或留空自动" : "MTU must be 576–1500";
+      confirmDiscard(() => { S.page = "profiles"; S.stack = ["profiles"]; renderStage(); });
+    } else if (id === "c4") {
+      S.page = "profiles"; S.stack = ["profiles"]; openEditor("edit", "c2");
+      S.editorAdvOpen = true; renderStage();
+    } else if (id === "c5") {
+      S.conn = "connected"; syncConnButtons(); S.page = "profiles"; S.stack = ["profiles"];
+      S.selectedProfileId = "c1"; S.menu = { kind:"profile", id:"c1", y:155, right:24 }; renderStage();
+    } else if (id === "c6") {
+      S.page = "logs"; S.stack = isWide() ? ["logs"] : ["more","logs"];
+      S.logTab = "current"; S.logPaused = true; S.selectedLogId = "l6";
+      if (!isWide()) S.sheet = { kind:"log-detail", payload: DATA.logs[5] };
+      renderStage();
+    } else if (id === "c7") {
+      S.page = "logs"; S.stack = isWide() ? ["logs"] : ["more","logs"];
+      S.logTab = "archives"; S.recording = true; S.menu = { kind:"archive", file:"hopenconnect-2026-11-23.log", y:195 };
+      renderStage();
+    } else if (id === "c8") {
+      if (isWide()) { S.page = "settings"; S.settingsTab = "about"; S.stack = ["settings"]; }
+      else { S.page = "about"; S.stack = ["more","about"]; }
+      renderStage();
+    }
+  }
+
+  /* ---------------- 全景审计画板构建 ---------------- */
+  function snapshot(dev, patch, cap, note, wideCap = false) {
+    const saved = JSON.parse(JSON.stringify({ ...S, alert: null }));
+    const savedAlert = S.alert;
+    Object.assign(S, patch);
+    const html = renderDeviceFrame(dev);
+    Object.assign(S, saved); S.alert = savedAlert;
+    return `<div class="shot ${wideCap?"wide":""}">${html}<div class="cap"><b>${cap}</b><span>${note}</span></div></div>`;
+  }
+
+  function buildBoards() {
+    const audits = [
+      ["U01 · 架构三层分离","旧版将 UI 状态机、视图与桥接耦合在 Rust Dioxus + Arkit 与 @ohos-rs/ability 中","对标 Paws 拆分为 Presentation (ui/nsh TSX) + ArkTS Host (标准 UIAbility) + Rust hopenconnect_app / hopenconnect_core"],
+      ["U02 · 一等 nsh/host 通道","Paws 早期使用 0×0 自定义原生组件模拟 IPC，需自维护发送队列与 ACK","采用 nsh-platform-harmonyos 内置 nsh/host（surface.handle / surface.send / setParams），交互式长调用支持 timeout: 0"],
+      ["U03 · 零空闲轮询状态域","旧版 UI 每 250ms/1s 轮询完整 SessionSnapshot，携带全部配置与日志","拆分 6 个独立带 revision 的状态域（config/status/profiles/statistics/logs/about），由 watch::channel 事件驱动按需推送"],
+      ["U04 · 双进程安全移交零回归","UI 与 Extension 双进程安全边界不可削弱","完整保留 ashmem 独占凭据、无描述符 bootstrap Want、AF_UNIX SCM_RIGHTS 传递 FD、owner journal 与模拟器 debug 兼容层"],
+      ["U05 · 彻底移除 @ohos-rs/ability","旧版强依赖 NativeAbility、DefaultXComponent 与 ability-plugin-url","EntryAbility 回归标准 UIAbility；Index.ets 挂载 NshSurface + ContentSlot；SAML 外部浏览器改为薄 N-API TSFN"],
+      ["U06 · 三端自适应壳层","旧版仅有单端手机式底部导航，平板与 2-in-1 体验割裂","Phone 4 底栏 + 更多枢纽；Pad 宽屏主从分栏 + 锚定 Popover；PC 2-in-1 无缝通顶侧栏 + 48pt 工具栏 + 快捷键"],
+      ["U07 · 受控组件层与双档尺度","旧版页面直接堆砌样式与字面色值","抽离 ui/nsh/src/ui/* 受控组件层；Touch 档（40pt 按钮 / 46pt 输入 / 46pt 菜单）与 Pointer 档（28pt / 32pt / 26pt）精准双档"],
+      ["U08 · 多轮 MFA 严格字段绑定","认证挑战需要跨 Phone/Pad/PC 稳定承接软键盘与多轮跳转","严格按 AuthFieldKey 绑定服务端字段类型；Phone 走键盘感知 BottomSheet，宽屏/PC 走 460pt 居中 Dialog"],
+      ["U09 · 零禁用词合规红线","全量静态与动态文案、日志、错误、包描述均需满足上架要求","Rust sanitize_display_text + 契约测试 + NSH 渲染树自动化扫描三重守护，杜绝敏感词漏出"],
+      ["U10 · 可主机无头自动化验收","旧版 UI 缺乏独立于真机的端到端回归能力","新增纯 Rust hopenconnect_app 单测与 ui/nsh 无头多端测试套件（nsh check / nsh test / nsh build）"]
+    ];
+    document.getElementById("audit-cards").innerHTML = audits.map(([k,o,f]) =>
+      `<div class="audit-card"><span class="code-tag">${k}</span><p class="old">旧实现：${o}</p><p class="fix"><b>新设计：</b>${f}</p></div>`
+    ).join("");
+
+    const chains = [
+      ["链 1 · 交互式连接 → 多轮 MFA 认证闭环","Phone: BottomSheet · Pad/PC(≥768pt): 460pt 居中 Dialog",["L0 首页点击「连接」","L2/L3 第 1 轮组+密码验证","L3 第 2 轮 TOTP 动态口令","已连接 + 顶层成功 Toast"]],
+      ["链 2 · SAML 外部浏览器 SSO-v2 鉴权","Rust TSFN 同步挂起等待 UIAbilityContext.openLink",["L0 选择 SAML 配置并连接","Host 调起系统浏览器 SSO","回跳 http://[::1]:29786/api/sso","Ashmem + SCM_RIGHTS 建立隧道"]],
+      ["链 3 · 配置列表 → 菜单 → 编辑 + 700ms 分组探测","Phone: Sheet Menu · Pad/PC: 锚定 Popover/右键 Menu",["L0 配置列表行「⋯」/右键","L2 ObjectMenu「编辑配置…」","L1 编辑器 + 防抖探测分组 Chips","L4 有未保存修改返回 → 丢弃 Alert"]],
+      ["链 4 · 证书导入（0600 权限）+ 高级协议展开","host.call('platform.pickCertFile', { timeout: 0 })",["L1 配置编辑器认证区","选择客户端证书/私钥/CA","系统 DocumentViewPicker → certs/","权限 0600 校验 + 顶层 Toast"]],
+      ["链 5 · 活跃配置保护与破坏性删除","连接中/已连接禁止切换或删除当前配置",["L0 配置列表「⋯」菜单","L2 活跃项置灰并展示原因","非活跃项选「删除配置…」","L4 AlertDialog 结果动词「删除配置」"]],
+      ["链 6 · 日志流过滤 → 详情检查器与复制","Phone: BottomSheet · Pad: 主从 · PC: 330pt 可关检查器",["L0 日志流 5 级分段 + 暂停胶囊","L2 点击单条日志展开详情","完整时间戳/模块/原始文本","一键复制 → 顶层 Toast"]],
+      ["链 7 · 历史归档 → 导出与活跃录制保护","正在录制中的当日归档禁止删除",["L0 日志切换「历史归档」","L2 归档对象菜单（导出/删除）","导出调系统保存选择器(timeout:0)","非活跃删除 → AlertDialog「删除归档」"]],
+      ["链 8 · 异常待确认横幅 + 失败追踪详情","杜绝盲目二次启动，所有动态错误经过净化",["全局顶部「状态尚未确认」横幅","点击「查看详情…」弹长文 Dialog","点击「重新同步」或「重置状态」","Top NotificationViewport 顶置反馈"]]
+    ];
+    document.getElementById("chain-cards").innerHTML = chains.map(([t,sub,st]) => `<div class="chain-card">
+      <div><h3>${t}</h3><span class="help">${sub}</span></div>
+      <div class="steps">${st.map((s,i)=>`<span class="step-pill ${i===1?"lv2":i===2?"lv3":i===3?"lv4":""}">${s}</span>${i<st.length-1?`<span style="color:var(--faint)">→</span>`:""}`).join("")}</div>
+    </div>`).join("");
+
+    document.getElementById("state-matrix").innerHTML = `<table>
+      <thead><tr><th>交互状态</th><th>Primary / Stop 按钮</th><th>Secondary 凸起钮</th><th>列表行 / 侧栏项</th><th>输入框 / 选择器</th><th>规范要求</th></tr></thead>
+      <tbody>
+        <tr><td><b>静止 Rest</b></td><td><span class="state-demo"><span class="btn sm pri">连接</span><span class="btn sm stop">${I("stop","xs")}断开连接</span></span></td><td><span class="btn sm">新建配置…</span></td><td><span class="nav-item" style="width:140px">${I("server","s")}配置</span></td><td><span class="inp" style="height:32px;width:155px;font-size:13px">1380</span></td><td>高对比清晰，卡片无多余阴影</td></tr>
+        <tr><td><b>悬停 Hover</b></td><td><span class="btn sm pri" style="filter:brightness(1.04)">连接</span></td><td><span class="btn sm" style="filter:brightness(1.04)">新建配置…</span></td><td><span class="nav-item" style="width:140px;background:var(--wash-hover);color:var(--fg)">${I("server","s")}配置</span></td><td><span class="inp" style="height:32px;width:155px;font-size:13px;border-color:var(--faint)">1380</span></td><td>仅 PC 指针档生效，触屏无 hover</td></tr>
+        <tr><td><b>按下 Pressed</b></td><td><span class="btn sm pri" style="transform:scale(.97)">连接</span></td><td><span class="btn sm" style="transform:scale(.97);box-shadow:var(--sh-pressed)">新建配置…</span></td><td><span class="nav-item" style="width:140px;background:var(--wash-press);color:var(--fg)">${I("server","s")}配置</span></td><td><span class="sel-trig" style="height:32px;width:155px;font-size:13px;opacity:.75"><span>总部研发网关</span>${I("chev-d","xs")}</span></td><td>按钮缩 0.97；列表行仅加深底色不缩放</td></tr>
+        <tr><td><b>选中 Selected</b></td><td>—</td><td><span class="btn sm on">按日录制中</span></td><td><span class="nav-item on" style="width:140px">${I("server","s")}配置</span></td><td><span class="state-demo"><span class="rad on"></span><span class="sw on"></span></span></td><td>表面填充 + 字重，禁止左侧竖条</td></tr>
+        <tr><td><b>键盘焦点 Focus</b></td><td><span class="btn sm pri" style="outline:2px solid var(--ring);outline-offset:2px;box-shadow:0 0 0 4px var(--ring-halo)">连接</span></td><td><span class="btn sm" style="outline:2px solid var(--ring);outline-offset:2px;box-shadow:0 0 0 4px var(--ring-halo)">探测分组</span></td><td><span class="nav-item on" style="width:140px;outline:2px solid var(--ring);outline-offset:2px">${I("server","s")}配置</span></td><td><span class="inp" style="height:32px;width:155px;font-size:13px;border-color:var(--ring);outline:2px solid var(--ring-halo);outline-offset:-1px">1380</span></td><td>外置焦点环，与选中态叠加清晰可见</td></tr>
+        <tr><td><b>禁用 Disabled</b></td><td><span class="btn sm pri" style="background:var(--raised);border-color:var(--edge-raised);box-shadow:var(--sh-raised);color:var(--muted);opacity:.5">连接</span></td><td><span class="btn sm" style="opacity:.48">切换配置</span></td><td><span class="nav-item" style="width:140px;opacity:.45">${I("trash","s")}删除归档…</span></td><td><span class="inp ro" style="height:32px;width:155px;font-size:13px;opacity:.55">仅只读显示</span></td><td>Primary 禁用退回中性底并附原因说明</td></tr>
+        <tr><td><b>加载 Loading</b></td><td><span class="btn sm"><span class="spin"></span>取消连接</span></td><td><span class="btn sm"><span class="spin"></span>探测分组</span></td><td><span class="nav-item" style="width:140px"><span class="spin"></span>同步中…</span></td><td><span class="sel-trig" style="height:32px;width:155px;font-size:13px"><span>正在探测</span><span class="spin"></span></span></td><td>保留文案与按钮宽度，防重复提交</td></tr>
+        <tr><td><b>错误 Invalid</b></td><td>—</td><td><span class="btn sm danger">停止录制</span></td><td><span class="nav-item" style="width:140px;color:var(--danger)">${I("alert","s")}连接失败</span></td><td><span class="inp err" style="height:32px;width:155px;font-size:13px">9999</span></td><td>红描边 + 紧邻下方给出修正范围说明</td></tr>
+      </tbody></table>`;
+
+    // Phone Panorama (3 rows x 4 = 12 screens)
+    document.getElementById("board-phone-1").innerHTML = [
+      snapshot("phone",{page:"home",conn:"connected",stack:["home"]},"Phone · 连接首页（已连接）","状态卡使用实心红「断开连接」，内联展示实时速率双柱图、IPv4、网关与 MTU。"),
+      snapshot("phone",{page:"home",conn:"unconfirmed",stack:["home"]},"Phone · 状态待确认全局横幅","扩展进程未确认上次操作时顶部固定警告条，提供「重新同步」与「重置状态」。"),
+      snapshot("phone",{page:"home",conn:"authenticating",stack:["home"],sheet:{kind:"auth",round:1,group:"Corp-Employees",pass:"••••••••"}},"Phone · 多轮 MFA 认证 BottomSheet (第1轮)","严格按服务端 AuthFieldKey 渲染分组选择与密码输入，跟随软键盘高度抬升。"),
+      snapshot("phone",{page:"home",conn:"failed",stack:["home"],dialog:{kind:"error-detail"}},"Phone · 连接失败与诊断追踪 Dialog","动态错误经 sanitize_display_text 净化，支持「查看详情…」与一键复制。")
+    ].join("");
+
+    document.getElementById("board-phone-2").innerHTML = [
+      snapshot("phone",{page:"profiles",conn:"connected",stack:["profiles"],menu:{kind:"profile",id:"c1"}},"Phone · 配置列表 + 活跃配置对象菜单","46pt 触屏菜单行；活跃配置「删除配置…」自动禁用并标注「使用中」。"),
+      snapshot("phone",{page:"profile-editor",stack:["profiles","profile-editor"],editorMode:"edit",editorDraft:{...DATA.profiles[1]},editorAdvOpen:false,discoveredGroups:["Ops-mTLS","Ops-Emergency"]},"Phone · 配置编辑器（证书 + 自动分组探测）","700ms 防抖探测候选分组 Chips，证书文件选择导入沙箱并强制 0600 权限。"),
+      snapshot("phone",{page:"profile-editor",stack:["profiles","profile-editor"],editorMode:"edit",editorDraft:{...DATA.profiles[0],mtu:"9999"},editorDirty:true,editorMtuErr:"MTU 必须在 576–1500 之间或留空自动",alert:{title:"丢弃未保存的修改？",body:"当前配置表单包含未保存的草稿，离开后会丢失。",cancelLabel:"继续编辑",actionLabel:"丢弃修改",destructive:true}},"Phone · 表单校验 + 脏草稿离开确认 Alert","MTU 错误高亮提示；未保存返回弹出结果动词 AlertDialog（继续编辑 / 丢弃修改）。"),
+      snapshot("phone",{page:"statistics",conn:"connected",stack:["statistics"]},"Phone · 统计与网络详情","4 格核心指标 + 30 秒双序列速率柱图 + IPv4/IPv6/DNS/路由表（逐行可复制）。")
+    ].join("");
+
+    document.getElementById("board-phone-3").innerHTML = [
+      snapshot("phone",{page:"logs",stack:["more","logs"],logTab:"current",logPaused:true,selectedLogId:"l6",sheet:{kind:"log-detail",payload:DATA.logs[5]}},"Phone · 日志流 + 详情 Sheet（对齐 Paws）","页头收敛「暂停 / 清空…」；单行状态条展示按日保存与条数；点按日志弹出底部详情 Sheet。"),
+      snapshot("phone",{page:"logs",stack:["more","logs"],logTab:"archives",recording:true,menu:{kind:"archive",file:"hopenconnect-2026-11-23.log"}},"Phone · 历史归档（带数量计数）+ 写入中保护","去除冗余说明横幅；正在写入的当日归档禁用删除，支持系统选择器导出。"),
+      snapshot("phone",{page:"about",stack:["more","about"]},"Phone · 关于页（对齐 Paws 极简结构）","品牌图标 + 简洁版本号（复制按钮）+ 连接引擎/开源致谢外链 + 隐私说明入口。"),
+      snapshot("phone",{page:"privacy",stack:["more","about","privacy"]},"Phone · 隐私说明独立子页","从关于页推入独立可读长文页，无冗余技术参数，清晰说明本地存储与商标声明。")
+    ].join("");
+
+    // Pad Panorama (2 rows x 3 = 6 screens)
+    document.getElementById("board-pad-1").innerHTML = [
+      snapshot("pad-l",{page:"home",conn:"connected",stack:["home"]},"Pad 横屏 · 连接双列工作区（64pt 触屏图标轨）","42pt 触屏图标轨 + 左列状态控制与配置卡 + 右列实时速率柱图与网络摘要。",true),
+      snapshot("pad-l",{page:"home",conn:"authenticating",stack:["home"],dialog:{kind:"auth",round:2,otp:"482910"}},"Pad 横屏 · 二次验证居中 Dialog","宽屏认证浮层升格为 460pt 居中 Dialog，保持触屏档 46pt 输入框与 40pt 按钮。",true),
+      snapshot("pad-p",{page:"profiles",conn:"connected",stack:["profiles"],menu:{kind:"profile",id:"c2",y:165,right:80}},"Pad 竖屏 · 768pt 锚定 Popover 菜单 + 640pt 居中","≥768pt 起所有菜单切换为触发器锚定悬浮 Popover（无全屏暗色遮罩，36pt 触控行）。",true)
+    ].join("");
+
+    document.getElementById("board-pad-2").innerHTML = [
+      snapshot("pad-l",{page:"profiles",conn:"disconnected",stack:["profiles"],selectedProfileId:"c2"},"Pad 横屏 · 配置主从分栏","左侧 330pt 配置列表，右侧展示完整配置摘要与快捷编辑/启用。",true),
+      snapshot("pad-l",{page:"logs",stack:["logs"],logTab:"current",selectedLogId:"l6"},"Pad 横屏 · 日志流 1.15:0.85 主从分栏（对齐 Paws）","工具栏右侧放录制状态徽章与「暂停 / 清空…」；左流右详情常驻，切历史归档自动全宽。",true),
+      snapshot("pad-l",{page:"settings",stack:["settings"],settingsTab:"about"},"Pad 横屏 · 设置 · 关于页","统一设置内以分段切换外观与关于，隐私说明按钮推入独立子页。",true)
+    ].join("");
+
+    // PC Panorama (2 rows x 3 = 6 screens)
+    document.getElementById("board-pc-1").innerHTML = [
+      snapshot("pc",{page:"home",conn:"connected",stack:["home"]},"PC 2-in-1 桌面 · 连接双列（无缝通顶侧栏 + 48pt 工具栏）","侧栏与内容区双通顶；4 主工作区 + 底部固定设置（⌘1–4 / ⌘,）；右侧预留窗口控制按钮；指针档 28pt 按钮。",true),
+      snapshot("pc",{page:"profiles",conn:"disconnected",stack:["profiles"],selectedProfileId:"c1",menu:{kind:"profile",id:"c1",y:155,right:28}},"PC 2-in-1 桌面 · 配置主从 + 26pt 右键/更多锚定菜单","右键或点击「⋯」呼出 26pt 指针档锚定弹出菜单，Esc 逐级关闭并归还焦点。",true),
+      snapshot("pc",{page:"profile-editor",stack:["profiles","profile-editor"],editorMode:"edit",editorDraft:{...DATA.profiles[1]},editorAdvOpen:true,discoveredGroups:["Ops-mTLS","Ops-Emergency"]},"PC 2-in-1 桌面 · 配置编辑器（高级选项展开态）","居中 720pt 表单区，面包屑返回带脏草稿守护，32pt 指针输入框与 16pt 开关齐平。",true)
+    ].join("");
+
+    document.getElementById("board-pc-2").innerHTML = [
+      snapshot("pc",{page:"statistics",conn:"connected",stack:["statistics"]},"PC 2-in-1 桌面 · 统计与网络详情双列","左侧实时速率柱图与流量统计，右侧网络详情与路由表逐项可复制。",true),
+      snapshot("pc",{page:"logs",stack:["logs"],logTab:"current",selectedLogId:"l6"},"PC 2-in-1 桌面 · 日志内联工具条 + 按需 330pt 检查器（对齐 Paws）","顶栏「正在记录 / 暂停 / 清空…」；两行内联筛选条；默认不占宽，点击日志行右侧弹出 330pt 检查器。",true),
+      snapshot("pc-n",{page:"home",conn:"connected",stack:["home"]},"PC 窄窗 · 840pt 自动收起为 64pt 指针图标轨","窗口收窄自动折叠侧栏为 36pt 图标轨，保留单条 48pt 工具栏，绝不退回手机底栏。",true)
+    ].join("");
+
+    // Token, Motion & Vocab Compliance Tables
+    document.getElementById("token-table").innerHTML = `<table>
+      <thead><tr><th>控件 / 令牌</th><th>Touch 档（Phone &amp; Pad）</th><th>Pointer 档（HarmonyOS 2-in-1 / PC）</th><th>设计说明</th></tr></thead>
+      <tbody>
+        <tr><td>Button small / regular</td><td class="num">36 / 40 pt（热区补齐 ≥44pt / 48dp）</td><td class="num">24 / 28 pt（字 12 / 13，图标 12 / 14）</td><td>工具栏新建用 Secondary，决策区唯一 Primary</td></tr>
+        <tr><td>Input / Search / Select</td><td class="num">46 / 44 pt（圆角 10）</td><td class="num">32 / 32 pt（圆角 7）</td><td>输入与选择器同排严格齐平</td></tr>
+        <tr><td>Segmented / Switch / Radio</td><td class="num">分段 36/32 · 开关 42×24 · 单选 22</td><td class="num">分段 30/24 · 开关 28×16 · 单选 16</td><td>对齐 NSH Gallery 几何规范</td></tr>
+        <tr><td>Menu / Sheet / Dialog</td><td class="num">Phone 底部 Sheet(角20, 行46) · Pad 锚定 Popover(行36)</td><td class="num">锚定 Popover(角10, 行26) · Dialog 460pt</td><td>≥768pt 禁用底部 Sheet，统一锚定浮层或居中 Dialog</td></tr>
+        <tr><td>Shell 壳层</td><td class="num">Phone 页头52 底栏64 · Pad 轨64(块42)/栏232</td><td class="num">PC 通顶栏232(行28)/轨64(块36) · 工具栏48</td><td>2-in-1 隐藏系统标题栏并预留右上窗口控制区</td></tr>
+      </tbody></table>`;
+
+    document.getElementById("motion-table").innerHTML = `<table>
+      <thead><tr><th>交互类别</th><th>触发场景</th><th>NSH 动效令牌</th><th>reduceMotion() 行为</th></tr></thead>
+      <tbody>
+        <tr><td>按压与悬停</td><td>按钮按压；列表/侧栏行悬停</td><td>按钮 <code>press (520/34)</code> 缩 0.97；行 <code>120ms</code> 底色过渡不缩放</td><td>0ms 即时切换，无缩放</td></tr>
+        <tr><td>图标与遥测数字</td><td>连接↔取消 Spinner↔停止；实时速率/时长</td><td><code>control (1218/70)</code> 图标切换；<b>速率/流量/时长严格无动效</b></td><td>即时替换</td></tr>
+        <tr><td>选中与浮层</td><td>Segmented 滑块；Menu/Dialog/Sheet/Toast</td><td><code>move (504/38)</code>；Popup <code>150ms</code>；Toast <code>220ms</code></td><td>即时落位/显隐</td></tr>
+        <tr><td>披露展开</td><td>高级协议手风琴、检查器显隐、侧栏折叠</td><td><code>LayoutAnimation 180ms</code>（仅用户动作触发）</td><td>跳过布局动画即时重排</td></tr>
+        <tr><td>声音策略</td><td>全局所有交互</td><td><b>默认静音（Silent by default）</b>，搭配视觉与无障碍播报</td><td>始终静音</td></tr>
+      </tbody></table>`;
+
+    document.getElementById("vocab-table").innerHTML = `<table>
+      <thead><tr><th>合规项</th><th>禁止露出</th><th>规范中文替代</th><th>规范英文替代</th></tr></thead>
+      <tbody>
+        <tr><td>产品定位与状态</td><td>任何大小写形式的敏感网络缩写</td><td>安全连接 / 安全隧道 / 企业隧道</td><td>Secure Connection / Secure Tunnel</td></tr>
+        <tr><td>配置与开关文案</td><td>同上</td><td>连接配置 / 隧道路由 / 断开连接</td><td>Connection Profile / Tunnel Routes / Disconnect</td></tr>
+        <tr><td>动态错误与日志</td><td>底层库或系统错误原文直接透出</td><td>统一经 <code>sanitize_display_text</code> 实时净化</td><td>Sanitized to <code>connection</code> before display</td></tr>
+      </tbody></table>`;
+  }
+
+  renderStage();
+  buildBoards();
+  buildIconLab();
+})();
+</script>
+</body>
+</html>

@@ -896,3 +896,50 @@ fn platform_want_options_exclude_authenticated_secrets() {
     assert!(sanitized.key_password.is_empty());
     assert!(sanitized.token_string.is_empty());
 }
+
+#[tokio::test]
+async fn reset_from_failed_transitions_directly_to_disconnected_without_disconnecting_flash() {
+    let engine = SessionEngine::new();
+    let mut rx = engine.lifecycle_tx.subscribe();
+    let observed = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let observed_bg = Arc::clone(&observed);
+    let watcher = tokio::spawn(async move {
+        while rx.changed().await.is_ok() {
+            let state = *rx.borrow_and_update();
+            observed_bg.lock().unwrap().push(state);
+            if state == ConnectionLifecycle::Disconnected {
+                break;
+            }
+        }
+    });
+    tokio::task::yield_now().await;
+    {
+        let mut inner = engine.lock().unwrap();
+        engine.set_lifecycle_locked(
+            &mut inner,
+            ConnectionLifecycle::Failed,
+            Some("auth rejected".to_owned()),
+        );
+    }
+    tokio::task::yield_now().await;
+
+    engine.disconnect().await.unwrap();
+    tokio::time::timeout(Duration::from_secs(1), watcher)
+        .await
+        .unwrap()
+        .unwrap();
+
+    let states = observed.lock().unwrap().clone();
+    assert!(
+        !states.contains(&ConnectionLifecycle::Disconnecting),
+        "resetting from Failed must never emit Disconnecting: {states:?}"
+    );
+    assert_eq!(
+        states.last().copied(),
+        Some(ConnectionLifecycle::Disconnected)
+    );
+
+    let snap = engine.snapshot().unwrap();
+    assert_eq!(snap.lifecycle, ConnectionLifecycle::Disconnected);
+    assert!(snap.last_error.is_none());
+}

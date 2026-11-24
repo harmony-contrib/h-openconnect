@@ -37,6 +37,12 @@ impl SessionEngine {
         // Absorb a sibling-process frame when this process has already
         // attached to the current ashmem session.
         self.sync_platform_locked(&mut inner);
+        self.bump_revisions(|rev| {
+            rev.config = rev.config.saturating_add(1);
+            rev.profiles = rev.profiles.saturating_add(1);
+            rev.status = rev.status.saturating_add(1);
+            rev.logs = rev.logs.saturating_add(1);
+        });
         Ok(())
     }
 
@@ -75,7 +81,11 @@ impl SessionEngine {
         let mut inner = self.lock()?;
         inner.preferences.language = language.to_owned();
         inner.preferences.theme = theme.to_owned();
-        self.persist_preferences_locked(&inner)
+        self.persist_preferences_locked(&inner)?;
+        self.bump_revisions(|rev| {
+            rev.config = rev.config.saturating_add(1);
+        });
+        Ok(())
     }
 
     /// Pending interactive auth form, if the OpenConnect worker is blocked on UI.
@@ -117,6 +127,9 @@ impl SessionEngine {
         ] {
             let _ = std::fs::remove_file(inner.home.join(name));
         }
+        self.bump_revisions(|rev| {
+            rev.logs = rev.logs.saturating_add(1);
+        });
         Ok(())
     }
 
@@ -156,6 +169,9 @@ impl SessionEngine {
                 logs.clear();
             }
         }
+        self.bump_revisions(|rev| {
+            rev.logs = rev.logs.saturating_add(1);
+        });
         log_recording::recording_status(&root)
     }
 
@@ -167,6 +183,9 @@ impl SessionEngine {
     pub fn delete_log_archive(&self, file_name: &str) -> CoreResult<crate::LogRecordingStatus> {
         let inner = self.lock()?;
         log_recording::delete_archive(&inner.home, file_name)?;
+        self.bump_revisions(|rev| {
+            rev.logs = rev.logs.saturating_add(1);
+        });
         log_recording::recording_status(&inner.home)
     }
 
@@ -176,7 +195,30 @@ impl SessionEngine {
             store.save(&profiles)?;
         }
         inner.snapshot.connections = profiles;
+        self.bump_revisions(|rev| {
+            rev.config = rev.config.saturating_add(1);
+            rev.profiles = rev.profiles.saturating_add(1);
+        });
         Ok(())
+    }
+
+    pub fn toggle_favorite(&self, id: &str) -> CoreResult<bool> {
+        let mut inner = self.lock()?;
+        let profile = inner
+            .snapshot
+            .connections
+            .iter_mut()
+            .find(|item| item.id == id)
+            .ok_or_else(|| CoreError::msg(format!("unknown profile {id}")))?;
+        profile.favorite = !profile.favorite;
+        let favorite = profile.favorite;
+        if let Some(store) = &inner.store {
+            store.save(&inner.snapshot.connections)?;
+        }
+        self.bump_revisions(|rev| {
+            rev.profiles = rev.profiles.saturating_add(1);
+        });
+        Ok(favorite)
     }
 
     pub fn upsert_profile(&self, profile: ConnectionProfile) -> CoreResult<()> {
@@ -218,6 +260,10 @@ impl SessionEngine {
         if let Some(previous) = previous {
             cleanup_unreferenced_profile_files(&inner, &previous);
         }
+        self.bump_revisions(|rev| {
+            rev.config = rev.config.saturating_add(1);
+            rev.profiles = rev.profiles.saturating_add(1);
+        });
         Ok(())
     }
 
@@ -304,6 +350,10 @@ impl SessionEngine {
                 format!("force_global={force_global} routes={first_route:?}"),
             );
         }
+        self.bump_revisions(|rev| {
+            rev.config = rev.config.saturating_add(1);
+            rev.profiles = rev.profiles.saturating_add(1);
+        });
         Ok(session_live)
     }
 
@@ -336,6 +386,10 @@ impl SessionEngine {
         }
         self.persist_preferences_locked(&inner)?;
         cleanup_unreferenced_profile_files(&inner, &removed);
+        self.bump_revisions(|rev| {
+            rev.config = rev.config.saturating_add(1);
+            rev.profiles = rev.profiles.saturating_add(1);
+        });
         Ok(())
     }
 
@@ -351,6 +405,10 @@ impl SessionEngine {
         }
         inner.snapshot.active_connection_id = Some(id.to_owned());
         self.persist_preferences_locked(&inner)?;
+        self.bump_revisions(|rev| {
+            rev.config = rev.config.saturating_add(1);
+            rev.profiles = rev.profiles.saturating_add(1);
+        });
         Ok(())
     }
 

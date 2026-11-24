@@ -1,0 +1,24 @@
+{
+  "name": "H-OpenConnect",
+  "id": "com.harmonycontrib.hopenconnect",
+  "version": "2.0.0",
+  "build": 2000000,
+  "appearance": "system",
+  "window": {
+    "title": "H-OpenConnect",
+    "titleBar": {
+      "style": "hidden",
+      "height": 48
+    }
+  },
+  "capabilities": {
+    "application": true,
+    "clipboard": true,
+    "statusBar": true,
+    "openUrl": {
+      "schemes": ["https", "http"]
+    },
+    "host": ["core.*", "platform.*"]
+  },
+  "theme": "./theme.json"
+}

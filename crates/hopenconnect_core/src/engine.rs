@@ -14,6 +14,8 @@ use crate::platform_state::{
     BrowserOpenRequest, PlatformStartOutcome, PlatformVpnState, SessionHandoff,
 };
 use crate::store::{Preferences, ProfileStore};
+use serde::{Deserialize, Serialize};
+use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::sync::{Arc, LazyLock, Mutex, Once, OnceLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -21,6 +23,29 @@ use tokio::sync::watch;
 use tracing::Level;
 use tracing_subscriber::prelude::*;
 use tracing_subscriber::Layer;
+
+const MAX_TRAFFIC_HISTORY: usize = 30;
+
+/// Monotonic per-domain revision counters used by the NSH application layer to
+/// push only changed domains instead of polling aggregate snapshots.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeRevisions {
+    pub revision: u64,
+    pub config: u64,
+    pub status: u64,
+    pub profiles: u64,
+    pub statistics: u64,
+    pub logs: u64,
+    pub about: u64,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TrafficSample {
+    pub rx_bytes_per_sec: u64,
+    pub tx_bytes_per_sec: u64,
+}
 
 mod connection;
 mod logging;
@@ -102,6 +127,10 @@ struct Inner {
     last_vpn_options: VpnOptions,
     logs: RecordedLogBuffer,
     platform_diagnostics: Vec<DiagnosticEntry>,
+    traffic_history: VecDeque<TrafficSample>,
+    last_sampled_rx: u64,
+    last_sampled_tx: u64,
+    last_sampled_at: Option<Instant>,
     #[cfg(feature = "native-anyconnect")]
     pending_native: Option<PendingNativeSession>,
     #[cfg(feature = "native-anyconnect")]
@@ -113,6 +142,7 @@ pub struct SessionEngine {
     platform_ipc: Mutex<Option<Arc<PlatformIpc>>>,
     lifecycle_tx: watch::Sender<ConnectionLifecycle>,
     platform_start_tx: watch::Sender<PlatformStartEvent>,
+    revisions_tx: watch::Sender<RuntimeRevisions>,
     auth: Arc<AuthInteraction>,
 }
 
@@ -137,7 +167,23 @@ impl SessionEngine {
         install_runtime_log_layer();
         let (lifecycle_tx, _) = watch::channel(ConnectionLifecycle::Disconnected);
         let (platform_start_tx, _) = watch::channel(PlatformStartEvent::default());
-        let auth = AuthInteraction::shared();
+        let initial_revisions = RuntimeRevisions {
+            revision: 1,
+            config: 1,
+            status: 1,
+            profiles: 1,
+            statistics: 1,
+            logs: 1,
+            about: 1,
+        };
+        let (revisions_tx, _) = watch::channel(initial_revisions);
+        let auth_revisions_tx = revisions_tx.clone();
+        let auth = AuthInteraction::with_on_change(Arc::new(move || {
+            auth_revisions_tx.send_modify(|rev| {
+                rev.revision = rev.revision.saturating_add(1);
+                rev.status = rev.status.saturating_add(1);
+            });
+        }));
         Self {
             inner: Mutex::new(Inner {
                 home: PathBuf::from("."),
@@ -176,6 +222,10 @@ impl SessionEngine {
                 last_vpn_options: VpnOptions::default(),
                 logs: RecordedLogBuffer::new("."),
                 platform_diagnostics: Vec::new(),
+                traffic_history: VecDeque::with_capacity(MAX_TRAFFIC_HISTORY),
+                last_sampled_rx: 0,
+                last_sampled_tx: 0,
+                last_sampled_at: None,
                 #[cfg(feature = "native-anyconnect")]
                 pending_native: None,
                 #[cfg(feature = "native-anyconnect")]
@@ -184,21 +234,116 @@ impl SessionEngine {
             platform_ipc: Mutex::new(None),
             lifecycle_tx,
             platform_start_tx,
+            revisions_tx,
             auth,
         }
     }
 }
 
 impl SessionEngine {
+    pub(super) fn bump_revisions(&self, mutate: impl FnOnce(&mut RuntimeRevisions)) {
+        self.revisions_tx.send_modify(|rev| {
+            rev.revision = rev.revision.saturating_add(1);
+            mutate(rev);
+        });
+    }
+
+    pub fn runtime_revisions(&self) -> RuntimeRevisions {
+        *self.revisions_tx.borrow()
+    }
+
+    pub fn subscribe_runtime_revisions(&self) -> watch::Receiver<RuntimeRevisions> {
+        self.revisions_tx.subscribe()
+    }
+
+    pub async fn wait_for_runtime_revision(&self, after: u64) -> RuntimeRevisions {
+        let mut rev_rx = self.revisions_tx.subscribe();
+        let current = *rev_rx.borrow();
+        if current.revision > after {
+            return current;
+        }
+        while rev_rx.changed().await.is_ok() {
+            let next = *rev_rx.borrow();
+            if next.revision > after {
+                return next;
+            }
+        }
+        let last = *rev_rx.borrow();
+        last
+    }
+
+    pub fn traffic_history(&self) -> CoreResult<Vec<TrafficSample>> {
+        let inner = self.lock()?;
+        Ok(inner.traffic_history.iter().copied().collect())
+    }
+
+    pub fn record_traffic_sample(&self) -> CoreResult<Vec<TrafficSample>> {
+        let mut inner = self.lock()?;
+        self.sync_platform_locked(&mut inner);
+        self.refresh_stats_locked(&mut inner);
+        if !inner.snapshot.lifecycle.is_active() {
+            if !inner.traffic_history.is_empty() {
+                inner.traffic_history.clear();
+                inner.last_sampled_rx = 0;
+                inner.last_sampled_tx = 0;
+                inner.last_sampled_at = None;
+                self.bump_revisions(|rev| rev.statistics = rev.statistics.saturating_add(1));
+            }
+            return Ok(Vec::new());
+        }
+        let now = Instant::now();
+        let rx = inner.snapshot.stats.bytes_received;
+        let tx = inner.snapshot.stats.bytes_sent;
+        let sample = if let Some(prev_at) = inner.last_sampled_at {
+            let elapsed_ms = now.duration_since(prev_at).as_millis().max(1) as u64;
+            let drx = rx.saturating_sub(inner.last_sampled_rx);
+            let dtx = tx.saturating_sub(inner.last_sampled_tx);
+            TrafficSample {
+                rx_bytes_per_sec: drx.saturating_mul(1000) / elapsed_ms,
+                tx_bytes_per_sec: dtx.saturating_mul(1000) / elapsed_ms,
+            }
+        } else {
+            TrafficSample::default()
+        };
+        inner.last_sampled_rx = rx;
+        inner.last_sampled_tx = tx;
+        inner.last_sampled_at = Some(now);
+        if inner.traffic_history.len() >= MAX_TRAFFIC_HISTORY {
+            inner.traffic_history.pop_front();
+        }
+        inner.traffic_history.push_back(sample);
+        self.bump_revisions(|rev| rev.statistics = rev.statistics.saturating_add(1));
+        Ok(inner.traffic_history.iter().copied().collect())
+    }
+
+    pub fn platform_status_meta(&self) -> CoreResult<(String, bool, bool)> {
+        let inner = self.lock()?;
+        Ok((
+            inner.platform_start_attempt_id.clone(),
+            inner.platform_vpn_starting || inner.platform_os_stop_in_flight,
+            inner.dry_run,
+        ))
+    }
+
     fn set_lifecycle_locked(
         &self,
         inner: &mut Inner,
         lifecycle: ConnectionLifecycle,
         error: Option<String>,
     ) {
+        if !lifecycle.is_active() {
+            inner.traffic_history.clear();
+            inner.last_sampled_rx = 0;
+            inner.last_sampled_tx = 0;
+            inner.last_sampled_at = None;
+        }
         inner.snapshot.lifecycle = lifecycle;
         inner.snapshot.last_error = error;
         let _ = self.lifecycle_tx.send(lifecycle);
+        self.bump_revisions(|rev| {
+            rev.status = rev.status.saturating_add(1);
+            rev.statistics = rev.statistics.saturating_add(1);
+        });
     }
 
     fn push_diag_locked(&self, inner: &mut Inner, level: &str, message: impl Into<String>) {
@@ -209,6 +354,9 @@ impl SessionEngine {
         });
         if inner.logs.enabled() {
             inner.snapshot.diagnostics = merged_logs(&inner.logs);
+            self.bump_revisions(|rev| {
+                rev.logs = rev.logs.saturating_add(1);
+            });
         }
     }
 

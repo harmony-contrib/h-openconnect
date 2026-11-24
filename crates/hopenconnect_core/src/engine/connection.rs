@@ -353,7 +353,7 @@ impl SessionEngine {
         let pending;
         #[cfg(feature = "native-anyconnect")]
         let running;
-        let disconnect_generation = {
+        let (disconnect_generation, needs_async_disconnect) = {
             let mut inner = self.lock()?;
             if expected_attempt_id
                 .is_some_and(|attempt_id| inner.platform_start_attempt_id != attempt_id)
@@ -361,8 +361,29 @@ impl SessionEngine {
                 return Ok(false);
             }
             if matches!(inner.snapshot.lifecycle, ConnectionLifecycle::Disconnected) {
+                let needs_clear = inner.snapshot.last_error.is_some()
+                    || inner.snapshot.pending_auth.is_some()
+                    || inner.platform_vpn_running
+                    || inner.platform_vpn_starting
+                    || inner.platform_session_handoff.is_some()
+                    || inner.platform_browser_request.is_some();
+                if needs_clear {
+                    self.auth.abort();
+                    inner.snapshot.pending_auth = None;
+                    inner.platform_vpn_running = false;
+                    inner.platform_vpn_starting = false;
+                    inner.platform_session_handoff = None;
+                    inner.platform_browser_request = None;
+                    self.set_lifecycle_locked(&mut inner, ConnectionLifecycle::Disconnected, None);
+                    let _ = self.persist_platform_locked(&mut inner);
+                }
                 return Ok(true);
             }
+            let was_active_tunnel = matches!(
+                inner.snapshot.lifecycle,
+                ConnectionLifecycle::Connected | ConnectionLifecycle::Disconnecting
+            ) || inner.platform_vpn_running;
+
             // Unblock any auth worker waiting on a challenge form.
             self.auth.abort();
             inner.snapshot.pending_auth = None;
@@ -372,21 +393,39 @@ impl SessionEngine {
             if inner.platform_start_outcome != PlatformStartOutcome::Failed {
                 inner.platform_start_outcome = PlatformStartOutcome::Cancelled;
             }
-            self.set_lifecycle_locked(&mut inner, ConnectionLifecycle::Disconnecting, None);
-            self.push_diag_locked(&mut inner, "info", "disconnect requested");
             inner.generation += 1;
 
             // Capture every native resource while the owner/generation check
             // is protected by the same lock. A concurrent bind can never make
             // this old cleanup take a newer attempt's worker.
             #[cfg(feature = "native-anyconnect")]
-            {
+            let has_running_native = {
                 pending = inner.pending_native.take();
                 running = inner.running_native.take();
+                running.is_some()
+            };
+            #[cfg(not(feature = "native-anyconnect"))]
+            let has_running_native = false;
+
+            let needs_async_disconnect =
+                expected_attempt_id.is_some() || was_active_tunnel || has_running_native;
+            if needs_async_disconnect {
+                self.set_lifecycle_locked(&mut inner, ConnectionLifecycle::Disconnecting, None);
+                self.push_diag_locked(&mut inner, "info", "disconnect requested");
+            } else {
+                // Resetting a failed or pre-tunnel attempt should return directly
+                // to Disconnected without flashing a live Disconnecting state.
+                self.set_lifecycle_locked(&mut inner, ConnectionLifecycle::Disconnected, None);
+                inner.connected_at = None;
+                inner.snapshot.stats = SessionStats::default();
+                inner.snapshot.network = NetworkSnapshot::default();
+                inner.platform_session_handoff = None;
+                inner.platform_browser_request = None;
+                self.push_diag_locked(&mut inner, "info", "connection state reset");
             }
             let generation = inner.generation;
             self.persist_platform_locked(&mut inner)?;
-            generation
+            (generation, needs_async_disconnect)
         };
 
         #[cfg(feature = "native-anyconnect")]
@@ -397,6 +436,10 @@ impl SessionEngine {
                 let _ =
                     tokio::task::spawn_blocking(move || running.join(Duration::from_secs(8))).await;
             }
+        }
+
+        if !needs_async_disconnect {
+            return Ok(true);
         }
 
         // Platform stop is asynchronous; mark disconnected if extension already gone.

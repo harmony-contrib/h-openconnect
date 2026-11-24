@@ -32,7 +32,7 @@ pub use auth_bridge::AuthInteraction;
 pub use client_identity::{
     configure_platform_identity, default_client_version, default_user_agent,
 };
-pub use engine::{shared_engine, SessionEngine};
+pub use engine::{shared_engine, RuntimeRevisions, SessionEngine, TrafficSample};
 pub use error::{CoreError, CoreResult};
 pub use log_recording::{LogArchiveSummary, LogRecordingStatus};
 pub use model::{

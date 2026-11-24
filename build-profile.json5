@@ -42,6 +42,10 @@
   },
   "modules": [
     {
+      "name": "nsh_harmonyos",
+      "srcPath": "./target/ohos/arkts-deps/nsh"
+    },
+    {
       "name": "entry",
       "srcPath": "./entry",
       "targets": [

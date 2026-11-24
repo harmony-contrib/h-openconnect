@@ -1,6 +1,7 @@
 use crate::error::{CoreError, CoreResult};
 use crate::model::DiagnosticEntry;
 use crate::private_fs::{ensure_private_dir, secure_existing_file, write_atomic_private};
+use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 use std::fs;
 use std::io::Write;
@@ -17,7 +18,8 @@ const LOG_FILE_PREFIX: &str = "h-openconnect.";
 const LEGACY_LOG_FILE_PREFIX: &str = "h-openconnect-";
 const LOG_FILE_SUFFIX: &str = ".log";
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct LogArchiveSummary {
     pub file_name: String,
     pub date: String,
@@ -26,7 +28,8 @@ pub struct LogArchiveSummary {
     pub active: bool,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct LogRecordingStatus {
     pub enabled: bool,
     pub archives: Vec<LogArchiveSummary>,

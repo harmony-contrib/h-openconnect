@@ -1,5 +1,5 @@
-import { bundleManager, common } from '@kit.AbilityKit';
-import { deviceInfo } from '@kit.BasicServicesKit';
+import { bundleManager, common } from "@kit.AbilityKit";
+import { deviceInfo } from "@kit.BasicServicesKit";
 
 export interface NativePlatformIdentityApi {
   configurePlatformIdentity(
