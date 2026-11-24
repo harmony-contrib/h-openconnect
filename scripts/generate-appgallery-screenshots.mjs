@@ -257,25 +257,47 @@ function speedGrid(up = "3.2 MB/s", down = "18.6 MB/s", compact = false) {
     </div>
     <div class="speed-sep"></div>
     <div class="speed-cell">
-      <div class="speed-head">${icon("arrow-down", compact ? 13 : 15, "#138a5a", 2.1)}<span>下载</span></div>
+      <div class="speed-head">${icon("arrow-down", compact ? 13 : 15, "#4a840a", 2.1)}<span>下载</span></div>
       <div class="speed-val">${down}</div>
     </div>
   </div>`;
 }
 
 function trafficChart(height = 136) {
-  const bars = TRAFFIC_BARS.map(
-    ([d, u]) => `<div class="chart-col">
-      <div class="chart-bar down" style="height:${d}%;"></div>
-      <div class="chart-bar up" style="height:${u}%;"></div>
-    </div>`,
-  ).join("");
+  const w = 400;
+  const h = 120;
+  const padTop = 8;
+  const padBottom = 6;
+  const plotH = h - padTop - padBottom;
+  const n = TRAFFIC_BARS.length;
+  const toPoints = (idx) =>
+    TRAFFIC_BARS.map((pair, i) => {
+      const x = (i / (n - 1)) * w;
+      const y = padTop + plotH * (1 - pair[idx] / 100);
+      return [x.toFixed(1), y.toFixed(1)];
+    });
+  const linePath = (pts) =>
+    pts.map(([x, y], i) => `${i === 0 ? "M" : "L"}${x},${y}`).join(" ");
+  const areaPath = (pts) =>
+    `M${pts[0][0]},${padTop + plotH} ${pts.map(([x, y]) => `L${x},${y}`).join(" ")} L${pts[pts.length - 1][0]},${padTop + plotH} Z`;
+  const downPts = toPoints(0);
+  const upPts = toPoints(1);
+  const gridY = [padTop, padTop + plotH / 2, padTop + plotH];
   return `<div class="chart-box">
-    <div class="chart-plot" style="height:${height}px;">${bars}</div>
     <div class="chart-legend">
-      <div class="legend-item"><span class="legend-dot" style="background:#3d63d1"></span>下载峰值 21.4 MB/s</div>
-      <div class="legend-item"><span class="legend-dot" style="background:#138a5a"></span>上传峰值 5.8 MB/s</div>
+      <div class="chart-legend-left">
+        <div class="legend-item"><span class="legend-dot" style="background:#4a840a"></span>下载</div>
+        <div class="legend-item"><span class="legend-dot" style="background:#3d63d1"></span>上传</div>
+      </div>
+      <span class="chart-peak">21.4 MB/s</span>
     </div>
+    <svg class="chart-svg" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" style="width:100%;height:${height}px;display:block;">
+      ${gridY.map((y) => `<line x1="0" y1="${y}" x2="${w}" y2="${y}" stroke="#e4e4e7" stroke-width="1" vector-effect="non-scaling-stroke"/>`).join("")}
+      <path d="${areaPath(downPts)}" fill="#4a840a" fill-opacity="0.16"/>
+      <path d="${linePath(downPts)}" fill="none" stroke="#4a840a" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>
+      <path d="${areaPath(upPts)}" fill="#3d63d1" fill-opacity="0.12"/>
+      <path d="${linePath(upPts)}" fill="none" stroke="#3d63d1" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>
+    </svg>
   </div>`;
 }
 
@@ -351,7 +373,6 @@ function sidebarHtml(active, isDesktop, connected = true) {
     </div>
     <div class="sb-foot">
       <div class="sb-status"><span class="${connected ? "dot-up" : "dot-idle"}"></span><span>${connected ? "已连接" : "正在验证"}</span></div>
-      <span class="sb-ver">v1.0.1</span>
     </div>
   </div>`;
 }
@@ -456,7 +477,7 @@ function profileListPane(selectedId = "hq", isDesktop = false, showContextMenu =
   ).join("");
   const menuOverlay = showContextMenu
     ? `<div class="ctx-menu">
-        <div class="ctx-item">${icon("check", 14, "#5f636a", 2)}<span>设为当前连接</span></div>
+        <div class="ctx-item disabled">${icon("check", 14, "#9a9da3", 2)}<span>设为当前连接</span><span class="ctx-reason">请先断开</span></div>
         <div class="ctx-item active">${icon("file-pen", 14, "#5f636a", 2)}<span>编辑配置</span></div>
         <div class="ctx-item">${icon("star-filled", 14, "#4a840a", 1.9)}<span>取消收藏</span></div>
         <div class="ctx-item">${icon("qr-code", 14, "#5f636a", 2)}<span>导出二维码…</span></div>
@@ -508,7 +529,7 @@ function authChallengeDialog(isSheet = false) {
       <div class="modal-head">
         <div>
           <div class="modal-title">身份验证</div>
-          <div class="modal-sub">gw.corp.example.com · 企业统一认证</div>
+          <div class="modal-sub">gw.corp.example.com · 第 2 步验证</div>
         </div>
         <div class="icon-btn-sm">${icon("x", 16, "#5f636a", 2)}</div>
       </div>
@@ -524,11 +545,6 @@ function authChallengeDialog(isSheet = false) {
         <div class="field-group">
           <div class="field-label">动态验证码</div>
           <div class="input-box focused"><span>482 916</span><span class="caret"></span></div>
-        </div>
-        <div class="auth-methods-hint">
-          <span class="pill-chip">${icon("lock", 12, "#4a840a", 2)}客户端证书</span>
-          <span class="pill-chip">${icon("globe", 12, "#3d63d1", 2)}网页单点登录</span>
-          <span class="pill-chip">${icon("key", 12, "#138a5a", 2)}TOTP 令牌</span>
         </div>
       </div>
       <div class="modal-foot">
@@ -559,7 +575,7 @@ function trafficCard(chartHeight = 132) {
   return `<div class="card">
     <div class="card-head">
       <span class="card-title">实时速率</span>
-      <span class="meta-text">最近 60 秒</span>
+      <span class="meta-text">最近 30 秒</span>
     </div>
     ${trafficChart(chartHeight)}
     <div class="sep"></div>
@@ -635,12 +651,13 @@ function renderPhoneScreen(slide) {
       ${profileListPane("hq", false, false)}
       <div class="qr-promo-card">
         <div class="qr-mini-box">
-          ${icon("qr-code", 40, "#101319", 1.7)}
+          ${icon("qr-code", 28, "#101319", 1.85)}
         </div>
         <div class="qr-promo-text">
           <div class="row-title">二维码快速迁移配置</div>
-          <div class="row-sub">一键导出高清二维码，扫一扫即刻导入</div>
+          <div class="row-sub">导出当前配置二维码，扫码即刻导入</div>
         </div>
+        ${icon("chevron-right", 16, "#9a9da3", 2)}
       </div>
     </div>`;
   } else if (slide === 3) {
@@ -654,17 +671,28 @@ function renderPhoneScreen(slide) {
   } else if (slide === 4) {
     title = "统计";
     activeTab = "statistics";
-    body = `<div class="p-body" style="gap:12px;">
+    body = `<div class="p-body" style="gap:10px;">
       ${speedGrid("3.2 MB/s", "18.6 MB/s", true)}
-      ${trafficCard(86)}
-      <div class="card" style="gap:8px;padding:14px 16px;">
+      <div class="card" style="gap:8px;padding:13px 15px;">
+        <div class="card-head">
+          <span class="card-title">实时速率</span>
+          <span class="meta-text">最近 30 秒</span>
+        </div>
+        ${trafficChart(68)}
+        <div class="sep"></div>
+        ${detailRow("已接收", "284.6 MB (218,430)")}
+        ${detailRow("已发送", "42.1 MB (64,912)")}
+        ${detailRow("连接时长", "01:42:18", true)}
+      </div>
+      <div class="card" style="gap:6px;padding:12px 15px;">
         <div class="card-head">
           <span class="card-title">网络信息</span>
           ${badge("DTLS 已启用", "success")}
         </div>
         ${detailRow("IPv4", "10.24.0.15 / 255.255.255.0")}
         ${detailRow("IPv6", "fd00:24::15 / 64")}
-        ${detailRow("网关 · MTU", "gw.corp.example.com · 1400")}
+        ${detailRow("网关", "gw.corp.example.com")}
+        ${detailRow("MTU", "1400")}
         ${detailRow("DNS", "10.24.0.1, 10.24.0.2", true)}
       </div>
     </div>`;
@@ -1383,21 +1411,20 @@ html,body{width:100%;height:100%;overflow:hidden;font-family:var(--sans);color:v
 .filter-bar .search-field,.logs-pc-bar .search-field{flex:1;}
 .tier-pointer .search-field{height:30px;border-radius:7px;font-size:12.5px;padding:0 10px;}
 
-/* QR Promo Accent on Phone Profiles */
+/* QR Migration Card on Phone Profiles */
 .qr-promo-card{
-  background:linear-gradient(135deg,#ffffff 0%,#f4faea 100%);
-  border:1px solid #cfe0b0;border-radius:16px;padding:14px 16px;
-  display:flex;align-items:center;gap:14px;
+  background:var(--card);border:1px solid var(--border);border-radius:16px;padding:14px 16px;
+  display:flex;align-items:center;gap:12px;
 }
 .qr-mini-box{
-  width:56px;height:56px;border-radius:12px;background:#ffffff;border:1px solid var(--border);
+  width:48px;height:48px;border-radius:12px;background:var(--inset);border:1px solid var(--line);
   display:flex;align-items:center;justify-content:center;flex-shrink:0;
 }
-.qr-promo-text{display:flex;flex-direction:column;gap:3px;}
+.qr-promo-text{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px;}
 
 /* PC Context Menu */
 .ctx-menu{
-  position:absolute;right:14px;top:148px;width:186px;z-index:5;
+  position:absolute;right:14px;top:148px;width:214px;z-index:5;
   background:#ffffff;border:1px solid var(--border);border-radius:10px;padding:4px;
   box-shadow:0 14px 32px -8px rgba(16,19,25,.22), 0 2px 6px rgba(16,19,25,.06);
   display:flex;flex-direction:column;gap:1px;
@@ -1406,6 +1433,8 @@ html,body{width:100%;height:100%;overflow:hidden;font-family:var(--sans);color:v
   height:28px;padding:0 9px;border-radius:6px;display:flex;align-items:center;gap:8px;
   font-size:12.5px;color:var(--fg);
 }
+.ctx-item.disabled{opacity:.48;color:var(--muted);}
+.ctx-reason{margin-left:auto;font-size:11px;color:var(--faint);}
 .ctx-item.active{background:var(--inset);}
 .ctx-item.danger{color:var(--danger);}
 .ctx-sep{height:1px;background:var(--line);margin:3px 4px;}
@@ -1460,19 +1489,13 @@ html,body{width:100%;height:100%;overflow:hidden;font-family:var(--sans);color:v
 }
 
 /* Traffic Chart */
-.chart-box{display:flex;flex-direction:column;gap:10px;}
-.chart-plot{
-  display:flex;align-items:flex-end;gap:4px;padding:8px 4px 0;
-  border-bottom:1px solid var(--line);
-  background:repeating-linear-gradient(180deg, transparent 0, transparent 31px, rgba(16,19,25,.035) 31px, rgba(16,19,25,.035) 32px);
-}
-.chart-col{flex:1;height:100%;display:flex;align-items:flex-end;gap:1.5px;}
-.chart-bar{flex:1;border-radius:2.5px 2.5px 0 0;}
-.chart-bar.down{background:linear-gradient(180deg,#4c73e0 0%,#3d63d1 100%);}
-.chart-bar.up{background:linear-gradient(180deg,#20a870 0%,#138a5a 100%);}
-.chart-legend{display:flex;justify-content:space-between;font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums;}
+.chart-box{display:flex;flex-direction:column;gap:8px;}
+.chart-legend{display:flex;align-items:center;justify-content:space-between;font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums;}
+.chart-legend-left{display:flex;align-items:center;gap:14px;}
 .legend-item{display:flex;align-items:center;gap:6px;}
-.legend-dot{width:8px;height:8px;border-radius:2px;display:inline-block;}
+.legend-dot{width:8px;height:8px;border-radius:50%;display:inline-block;}
+.chart-peak{font-size:11.5px;color:var(--faint);font-variant-numeric:tabular-nums;}
+.chart-svg{border-radius:8px;}
 
 /* Logs */
 .status-note{
@@ -1641,9 +1664,12 @@ const generated = [];
 for (const target of TARGETS) {
   for (const slide of SLIDES) {
     const html = buildPosterHtml(target.form, slide);
-    // Strict zero-VPN compliance guard
+    // Strict zero-VPN and zero-version compliance guards
     if (/\bvpn\b/i.test(html)) {
       throw new Error(`Forbidden VPN string detected in ${target.form}/${slide.slug}`);
+    }
+    if (/\bv\d+\.\d+/i.test(html)) {
+      throw new Error(`Unexpected version string detected in ${target.form}/${slide.slug}`);
     }
     const htmlPath = path.join(TMP_HTML, `${target.form}-${slide.slug}.html`);
     const pngPath = path.join(OUT_ROOT, target.form, `${slide.slug}.png`);
