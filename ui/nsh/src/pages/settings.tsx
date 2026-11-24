@@ -202,7 +202,7 @@ export function SettingsPage() {
                     id="settings-open-about"
                     icon="info"
                     title={ui.t("关于", "About")}
-                    value={about()?.appVersion || "1.0.1"}
+                    value={about()?.appVersion || "2.0.0"}
                     tabular
                     chevron
                     onPress={() => ui.navigate("about")}
@@ -253,7 +253,7 @@ export function AboutPage() {
   const about = () => ui.client.domains.data("about");
 
   const versionCopyText = () => {
-    const lines = [`H-OpenConnect ${about()?.appVersion || "1.0.1"}`];
+    const lines = [`H-OpenConnect ${about()?.appVersion || "2.0.0"}`];
     if (about()?.openconnectVersion) {
       lines.push(`OpenConnect ${about()!.openconnectVersion}`);
     }
@@ -309,7 +309,7 @@ export function AboutPage() {
         <Card id="about-version-card" title={ui.t("版本", "Version")}>
           <Detail
             label={ui.t("应用版本", "App version")}
-            value={about()?.appVersion || "1.0.1"}
+            value={about()?.appVersion || "2.0.0"}
           />
           <If when={!!about()?.openconnectVersion}>
             <Separator />

@@ -426,7 +426,7 @@ dependencies = [
 
 [[package]]
 name = "hopenconnect_app"
-version = "1.0.1"
+version = "2.0.0"
 dependencies = [
  "hopenconnect_core",
  "serde",
@@ -438,7 +438,7 @@ dependencies = [
 
 [[package]]
 name = "hopenconnect_core"
-version = "1.0.1"
+version = "2.0.0"
 dependencies = [
  "anyconnect",
  "libc",
@@ -456,7 +456,7 @@ dependencies = [
 
 [[package]]
 name = "hopenconnect_ui"
-version = "1.0.1"
+version = "2.0.0"
 dependencies = [
  "hopenconnect_app",
  "hopenconnect_core",

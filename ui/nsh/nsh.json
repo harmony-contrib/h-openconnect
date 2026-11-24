@@ -1,8 +1,8 @@
 {
   "name": "H-OpenConnect",
   "id": "com.harmonycontrib.hopenconnect",
-  "version": "1.0.1",
-  "build": 1,
+  "version": "2.0.0",
+  "build": 2000000,
   "appearance": "system",
   "window": {
     "title": "H-OpenConnect",

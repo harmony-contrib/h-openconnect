@@ -474,7 +474,7 @@ test("Settings preferences, About version copy, Privacy sub-page and zero-VPN au
     await app.waitFor("id:about-version-card");
     assertNoVpnCopy(app.texts(), `${lang}/about`);
     await app.press("id:about-copy-version");
-    expect(app.clipboard()).toContain("1.0.1");
+    expect(app.clipboard()).toContain("2.0.0");
     await app.waitFor("id:dismiss-toast-1");
     await app.press("id:dismiss-toast-1");
     await app.waitFor("id:sonner-viewport", { state: "gone" });

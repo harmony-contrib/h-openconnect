@@ -486,7 +486,7 @@ export function HOpenConnectApp(props: { client: CoreClient }) {
           <If when={wide()}>
             <DesktopNavigation
               page={page()}
-              version={props.client.domains.data("about")?.appVersion || "1.0.1"}
+              version={props.client.domains.data("about")?.appVersion || "2.0.0"}
               statusLabel={
                 connected() ? t("已连接", "Connected") : t("未连接", "Idle")
               }

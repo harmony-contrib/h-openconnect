@@ -373,7 +373,7 @@ export class MockHOpenHost {
       }
       case "about": {
         const d: AboutDomainData = {
-          appVersion: "1.0.1",
+          appVersion: "2.0.0",
           openconnectVersion: "OpenConnect 9.12",
           backend: "anyconnect-rs",
           sdkReady: true,
