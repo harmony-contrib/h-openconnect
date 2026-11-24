@@ -1,15 +1,24 @@
-import { Scroll, View } from "nsh";
+import { Scroll, Text, View } from "nsh";
 import { formatBytes, formatDuration } from "../locale";
 import { isLifecycleConnected } from "../model";
 import { TrafficChart } from "../ui/chart";
 import { useApp, useLayout } from "../ui/context";
-import { Body, Card, Detail, Empty, Separator, SpeedGrid } from "../ui/surface";
-import { spacing } from "../ui/tokens";
+import {
+  Badge,
+  Body,
+  Card,
+  Detail,
+  Empty,
+  Separator,
+  SpeedGrid,
+} from "../ui/surface";
+import { density, palette, spacing, typography } from "../ui/tokens";
 
 export function StatisticsPage() {
   const ui = useApp();
   const layout = useLayout();
   const statsData = () => ui.client.domains.data("statistics");
+  const profilesData = () => ui.client.domains.data("profiles");
   const connected = () =>
     isLifecycleConnected(statsData()?.lifecycle ?? "disconnected");
   const stats = () => statsData()?.stats;
@@ -17,11 +26,34 @@ export function StatisticsPage() {
   const history = () => statsData()?.trafficHistory ?? [];
   const latest = () =>
     history().length > 0 ? history()[history().length - 1] : undefined;
+  const activeProfile = () => {
+    const id =
+      profilesData()?.activeConnectionId ??
+      ui.client.domains.data("config")?.activeConnectionId ??
+      "";
+    return profilesData()?.profiles.find((item) => item.id === id);
+  };
+  const dtlsEnabled = () => activeProfile()?.useDtls !== false;
 
   const renderTrafficCard = () => (
     <Card
       id="stats-traffic-card"
       title={ui.t("实时速率", "Live throughput")}
+      right={
+        <If when={connected()}>
+          <Text
+            testID="stats-window-meta"
+            style={{
+              fontSize: typography.note,
+              lineHeight: density.line(18),
+              color: palette().muted,
+              fontVariant: ["tabular-nums"],
+            }}
+          >
+            {ui.t("最近 30 秒", "Last 30s")}
+          </Text>
+        </If>
+      }
     >
       <TrafficChart
         samples={connected() ? history() : []}
@@ -57,7 +89,23 @@ export function StatisticsPage() {
   );
 
   const renderNetworkCard = () => (
-    <Card id="stats-network-card" title={ui.t("网络信息", "Network")}>
+    <Card
+      id="stats-network-card"
+      title={ui.t("网络信息", "Network")}
+      right={
+        <If when={connected()}>
+          <Badge
+            id="stats-transport-badge"
+            tone={dtlsEnabled() ? "success" : "neutral"}
+            label={
+              dtlsEnabled()
+                ? ui.t("DTLS 已启用", "DTLS enabled")
+                : "TLS / CSTP"
+            }
+          />
+        </If>
+      }
+    >
       <If
         when={connected()}
         else={

@@ -27,7 +27,7 @@ import {
   type SettingsSection,
 } from "./desktop-navigation";
 import { workspaceLayout, workspaceLayoutEquals } from "./layout";
-import { isLifecycleConnected, type RuntimeDomain } from "./model";
+import type { ConnectionLifecycle, RuntimeDomain } from "./model";
 import { AuthChallengeOverlay } from "./pages/auth-challenge";
 import { HomePage } from "./pages/home";
 import { LogsPage } from "./pages/logs";
@@ -61,7 +61,15 @@ import {
 } from "./ui/notifications";
 import { Badge, Loading } from "./ui/surface";
 import { Tabs } from "./ui/tabs";
-import { chrome, density, focusRing, palette, spacing, typography } from "./ui/tokens";
+import {
+  chrome,
+  density,
+  focusRing,
+  palette,
+  spacing,
+  typography,
+  type StatusTone,
+} from "./ui/tokens";
 import { Workspaces } from "./workspaces";
 
 const phonePrimary: { page: Page; zh: string; en: string; icon: IconName }[] = [
@@ -92,7 +100,7 @@ function pageDomains(page: Page): RuntimeDomain[] {
     case "profile-editor":
       return ["config", "status", "profiles"];
     case "statistics":
-      return ["config", "status", "statistics"];
+      return ["config", "status", "profiles", "statistics"];
     case "logs":
       return ["config", "status", "logs"];
     case "settings":
@@ -463,10 +471,26 @@ export function HOpenConnectApp(props: { client: CoreClient }) {
     }
   };
 
-  const connected = () =>
-    isLifecycleConnected(
-      props.client.domains.data("status")?.lifecycle ?? "disconnected",
-    );
+  const lifecycle = (): ConnectionLifecycle =>
+    props.client.domains.data("status")?.lifecycle ?? "disconnected";
+  const sidebarStatus = (): { label: string; tone: StatusTone } => {
+    switch (lifecycle()) {
+      case "connected":
+        return { label: t("已连接", "Connected"), tone: "success" };
+      case "connecting":
+        return { label: t("正在连接", "Connecting"), tone: "info" };
+      case "authenticating":
+        return { label: t("正在验证", "Authenticating"), tone: "info" };
+      case "establishing":
+        return { label: t("正在建立", "Establishing"), tone: "info" };
+      case "disconnecting":
+        return { label: t("正在断开", "Disconnecting"), tone: "warning" };
+      case "failed":
+        return { label: t("连接失败", "Failed"), tone: "danger" };
+      default:
+        return { label: t("未连接", "Idle"), tone: "neutral" };
+    }
+  };
 
   return (
     <App.Provider value={appContext}>
@@ -487,10 +511,8 @@ export function HOpenConnectApp(props: { client: CoreClient }) {
             <DesktopNavigation
               page={page()}
               version={props.client.domains.data("about")?.appVersion || "2.0.0"}
-              statusLabel={
-                connected() ? t("已连接", "Connected") : t("未连接", "Idle")
-              }
-              connected={connected()}
+              statusLabel={sidebarStatus().label}
+              statusTone={sidebarStatus().tone}
               navigate={switchWorkspace}
               t={t}
               expanded={layout().expanded}

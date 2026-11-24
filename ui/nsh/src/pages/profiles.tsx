@@ -8,7 +8,9 @@ import {
 import { Action, Actions, IconButton } from "../ui/button";
 import { confirmAction, useApp, useLayout, useLifetime } from "../ui/context";
 import { SearchField } from "../ui/field";
+import { Icon } from "../ui/icons";
 import { ObjectMenu, type ObjectCommand } from "../ui/menu";
+import { feedbackStyle } from "../ui/motion";
 import { Dialog } from "../ui/overlay";
 import {
   Alert,
@@ -23,7 +25,15 @@ import {
   Separator,
 } from "../ui/surface";
 import { Tabs } from "../ui/tabs";
-import { density, palette, radius, spacing, typography } from "../ui/tokens";
+import {
+  density,
+  focusRing,
+  palette,
+  radius,
+  spacing,
+  surfaceFinish,
+  typography,
+} from "../ui/tokens";
 
 function authMethodLabel(
   method: AuthMethod,
@@ -385,6 +395,89 @@ export function ProfilesPage() {
           </Each>
         </If>
       </ListSurface>
+
+      <If
+        when={
+          !layout().masterDetail &&
+          profiles().length > 0 &&
+          ui.client.canGenerateQr
+        }
+      >
+        <View
+          testID="profiles-qr-migration-card"
+          role="button"
+          accessibilityLabel={ui.t(
+            "二维码快速迁移配置",
+            "Quick QR migration",
+          )}
+          focusVisibleStyle={focusRing()}
+          hoverStyle={{ backgroundColor: palette().hover }}
+          activeStyle={{ backgroundColor: palette().soft }}
+          onPress={() => {
+            const target =
+              profiles().find((p) => p.id === activeId()) ?? profiles()[0];
+            if (target) void openQrExport(target);
+          }}
+          style={{
+            flexDirection: "row",
+            alignItems: "center",
+            gap: spacing.md,
+            paddingHorizontal: spacing.lg,
+            paddingVertical: density.space(14),
+            borderRadius: radius.xl,
+            borderCurve: "continuous",
+            borderWidth: 1,
+            borderColor: palette().border,
+            backgroundColor: palette().panel,
+            ...surfaceFinish("card"),
+            ...feedbackStyle(),
+          }}
+        >
+          <View
+            style={{
+              width: 48,
+              height: 48,
+              borderRadius: radius.lg,
+              borderCurve: "continuous",
+              borderWidth: 1,
+              borderColor: palette().line,
+              backgroundColor: palette().inset,
+              alignItems: "center",
+              justifyContent: "center",
+              flexShrink: 0,
+            }}
+          >
+            <Icon name="qr-code" size={26} color={palette().text} />
+          </View>
+          <View style={{ flex: 1, minWidth: 0, gap: 3 }}>
+            <Text
+              style={{
+                numberOfLines: 1,
+                fontSize: typography.sm,
+                lineHeight: density.line(20),
+                fontWeight: "600",
+                color: palette().text,
+              }}
+            >
+              {ui.t("二维码快速迁移配置", "Quick QR migration")}
+            </Text>
+            <Text
+              style={{
+                numberOfLines: 1,
+                fontSize: typography.note,
+                lineHeight: density.line(18),
+                color: palette().muted,
+              }}
+            >
+              {ui.t(
+                "导出当前配置二维码，扫码即刻导入",
+                "Export active profile QR to scan and import",
+              )}
+            </Text>
+          </View>
+          <Icon name="chevron-right" size={16} color={palette().faint} />
+        </View>
+      </If>
     </View>
   );
 
@@ -416,7 +509,18 @@ export function ProfilesPage() {
               title={item().name}
               subtitle={item().server}
               right={
-                <If when={isActive()}>
+                <If
+                  when={isActive()}
+                  else={
+                    <If when={isFavorite(item())}>
+                      <Badge
+                        id="detail-favorite-badge"
+                        tone="brand"
+                        label={ui.t("已收藏", "Favorite")}
+                      />
+                    </If>
+                  }
+                >
                   <Badge
                     tone={isLifecycleConnected(lifecycle()) ? "success" : "brand"}
                     label={

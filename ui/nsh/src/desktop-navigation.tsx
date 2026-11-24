@@ -12,6 +12,7 @@ import {
   radius,
   spacing,
   surfaceFinish,
+  type StatusTone,
 } from "./ui/tokens";
 
 interface Destination {
@@ -95,12 +96,28 @@ export function DesktopNavigation(props: {
   page: Page;
   version: string;
   statusLabel: string;
-  connected: boolean;
+  statusTone: StatusTone;
   navigate: (page: Page) => void;
   t: (zh: string, en: string) => string;
   expanded: boolean;
   onToggle: () => void;
 }) {
+  const statusDotColor = () => {
+    switch (props.statusTone) {
+      case "success":
+        return palette().success;
+      case "info":
+        return palette().info;
+      case "warning":
+        return palette().warning;
+      case "danger":
+        return palette().danger;
+      case "brand":
+        return palette().accent;
+      default:
+        return palette().faint;
+    }
+  };
   const expanded = () => props.expanded;
   const selected = (page: Page) => normalizeDestination(props.page) === page;
 
@@ -425,12 +442,11 @@ export function DesktopNavigation(props: {
               width: 7,
               height: 7,
               borderRadius: radius.full,
-              backgroundColor: props.connected
-                ? palette().success
-                : palette().faint,
+              backgroundColor: statusDotColor(),
             }}
           />
           <Text
+            testID="desktop-sidebar-status"
             style={{
               flexShrink: 1,
               minWidth: 0,

@@ -1,4 +1,4 @@
-import { effect, signal, View } from "nsh";
+import { effect, signal, Text, View } from "nsh";
 import { sanitizeDisplayText } from "../locale";
 import {
   fieldKeyString,
@@ -9,10 +9,11 @@ import {
 import { Action, Actions } from "../ui/button";
 import { useApp } from "../ui/context";
 import { Field } from "../ui/field";
+import { Icon } from "../ui/icons";
 import { Select } from "../ui/menu";
 import { BottomSheet } from "../ui/overlay";
-import { Alert, Hint } from "../ui/surface";
-import { spacing } from "../ui/tokens";
+import { Alert } from "../ui/surface";
+import { density, palette, radius, spacing, typography } from "../ui/tokens";
 
 export function AuthChallengeOverlay() {
   const ui = useApp();
@@ -85,14 +86,33 @@ export function AuthChallengeOverlay() {
         const active = () => challenge()!;
         const visibleFields = () =>
           active().fields.filter((f) => f.kind !== "hidden");
+        const activeServer = () => {
+          const profilesData = ui.client.domains.data("profiles");
+          const activeId =
+            profilesData?.activeConnectionId ??
+            ui.client.domains.data("config")?.activeConnectionId ??
+            "";
+          return (
+            profilesData?.profiles.find((p) => p.id === activeId)?.server || ""
+          );
+        };
+        const subtitle = () => {
+          const server = activeServer();
+          const step =
+            active().round > 1
+              ? ui.t(`第 ${active().round} 步验证`, `Step ${active().round}`)
+              : "";
+          if (server && step) return `${server} · ${step}`;
+          return server || step || undefined;
+        };
+        const promptLines = () =>
+          [active().banner, active().message]
+            .map((line) => sanitizeDisplayText(line || ""))
+            .filter(Boolean);
         return (
           <BottomSheet
             title={ui.t("身份验证", "Verification")}
-            subtitle={
-              active().round > 1
-                ? ui.t(`第 ${active().round} 步验证`, `Step ${active().round}`)
-                : undefined
-            }
+            subtitle={subtitle()}
             onClose={cancel}
             footer={
               <Actions>
@@ -105,8 +125,9 @@ export function AuthChallengeOverlay() {
                 <Action
                   id="auth-submit"
                   primary
+                  icon="check"
                   loading={ui.client.isPending("auth.submit")}
-                  label={ui.t("继续", "Continue")}
+                  label={ui.t("提交验证", "Verify")}
                   onPress={() => void submit()}
                 />
               </Actions>
@@ -119,11 +140,43 @@ export function AuthChallengeOverlay() {
                   text={sanitizeDisplayText(active().error || "")}
                 />
               </If>
-              <If when={!!active().banner}>
-                <Hint text={sanitizeDisplayText(active().banner || "")} />
-              </If>
-              <If when={!!active().message}>
-                <Hint text={sanitizeDisplayText(active().message || "")} />
+              <If when={promptLines().length > 0}>
+                <View
+                  testID="auth-prompt-banner"
+                  style={{
+                    flexDirection: "row",
+                    alignItems: "flex-start",
+                    gap: spacing.sm,
+                    paddingHorizontal: spacing.md,
+                    paddingVertical: density.space(10),
+                    borderRadius: radius.lg,
+                    borderCurve: "continuous",
+                    backgroundColor: palette().accentFill,
+                  }}
+                >
+                  <View style={{ marginTop: 1 }}>
+                    <Icon
+                      name="shield-check"
+                      size={16}
+                      color={palette().accent}
+                    />
+                  </View>
+                  <View style={{ flex: 1, minWidth: 0, gap: spacing.xxs }}>
+                    <Each of={promptLines()}>
+                      {(line) => (
+                        <Text
+                          style={{
+                            fontSize: typography.note,
+                            lineHeight: density.line(18),
+                            color: palette().text,
+                          }}
+                        >
+                          {line()}
+                        </Text>
+                      )}
+                    </Each>
+                  </View>
+                </View>
               </If>
 
               <Each of={visibleFields()} key={(f) => fieldKeyString(f.key)}>

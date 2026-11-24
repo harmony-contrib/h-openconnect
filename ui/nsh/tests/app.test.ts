@@ -28,6 +28,11 @@ test("responsive navigation works across Phone, Pad and Desktop viewports", asyn
 
   await phone.press("id:nav-profiles");
   await phone.waitFor("id:profiles-list");
+  expect(phone.shows("id:profiles-qr-migration-card")).toBe(true);
+  await phone.press("id:profiles-qr-migration-card");
+  await phone.waitFor("id:export-profile-qr");
+  await phone.press("id:dialog-close");
+  await phone.waitFor("id:export-profile-qr", { state: "gone" });
   await phone.press("id:nav-statistics");
   await phone.waitFor("id:stats-traffic-card");
   await phone.press("id:nav-settings");
@@ -87,6 +92,8 @@ test("connect -> MFA challenge -> connected stats -> disconnect flow", async () 
   await app.press("id:home-connection-action");
   await app.waitFor("id:auth-challenge-form");
   expect(app.texts().some((t) => t.includes("正在验证身份…"))).toBe(true);
+  expect(app.texts().some((t) => t.includes("gw.example.com"))).toBe(true);
+  expect(app.shows("id:auth-prompt-banner")).toBe(true);
   expect(app.shows("id:auth-field-0")).toBe(true);
   await app.type("id:auth-field-0", "123456");
   await app.press("id:auth-submit");
@@ -97,6 +104,9 @@ test("connect -> MFA challenge -> connected stats -> disconnect flow", async () 
 
   await app.press("id:home-open-stats");
   await app.waitFor("id:stats-network-card");
+  expect(app.shows("id:stats-window-meta")).toBe(true);
+  expect(app.shows("id:stats-transport-badge")).toBe(true);
+  expect(app.texts().some((t) => t.includes("DTLS 已启用"))).toBe(true);
   expect(app.texts().some((t) => t.includes("10.24.0.15"))).toBe(true);
   expect(app.texts().some((t) => t.includes("1400"))).toBe(true);
 
@@ -212,10 +222,18 @@ test("Pad portrait & landscape align with Paws touch-tier split-pane, popovers, 
   expect(pad.shows("id:header-refresh")).toBe(true);
   assertNoVpnCopy(pad.texts(), "pad/home");
 
+  // Pad sidebar reflects authenticating status while challenge is active.
+  await pad.press("id:home-connection-action");
+  await pad.waitFor("id:auth-challenge-form");
+  expect(pad.texts().some((t) => t.includes("正在验证"))).toBe(true);
+  await pad.press("id:auth-cancel");
+  await pad.waitFor("id:auth-challenge-form", { state: "gone" });
+
   // Profiles master-detail + camera QR scan button available on tablet.
   await pad.press("id:nav-profiles");
   await pad.waitFor("id:profiles-master-detail");
   expect(pad.shows("id:profile-detail-card")).toBe(true);
+  expect(pad.shows("id:profiles-qr-migration-card")).toBe(false);
   expect(pad.shows("id:header-scan-qr")).toBe(true);
   await pad.press("id:header-scan-qr");
   await pad.waitUntil(() =>
