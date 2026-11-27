@@ -1,0 +1,34 @@
+# Standalone cdylib runner linking the published `nsh-platform-harmonyos` crate
+# for H-OpenConnect's HarmonyOS embedding. Kept outside the root Cargo workspace
+# so the core Rust crates stay decoupled from NSH's edition/MSRV.
+[package]
+name = "nsh-harmonyos-runner"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[lib]
+name = "nsh_platform_harmonyos"
+path = "lib.rs"
+crate-type = ["cdylib"]
+
+[dependencies]
+# H-OpenConnect uses core `nsh`, `nsh/base` controls, `nsh/desktop`, and `nsh/mobile`
+# only (no optional editor, rich-editor, plot, term, highlight, math, emoji-picker,
+# zlib, crypto, or websocket modules).
+backend = { package = "nsh-platform-harmonyos", version = "0.7.0" }
+
+[build-dependencies]
+napi-build-ohos = "1.2"
+
+[profile.release]
+lto = "fat"
+codegen-units = 1
+strip = true
+
+[profile.dev.package.quickjs-jit-sys]
+opt-level = 3
+[profile.dev.package.taffy]
+opt-level = 3
+
+[workspace]

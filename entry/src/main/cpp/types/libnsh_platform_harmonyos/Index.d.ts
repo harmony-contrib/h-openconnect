@@ -30,6 +30,8 @@ export interface Batch {
 export interface EditorAccessibility {
   label: string
   hint: string
+  stateDescription: string
+  api23: boolean
   hidden: boolean
   accessible?: boolean
   disabled: boolean
@@ -63,6 +65,7 @@ export interface EditorEvent {
   html?: string
   files?: string
   image?: string
+  imageTooLarge?: number
 }
 
 export interface EditorKeyEvent {
@@ -74,7 +77,15 @@ export interface EditorKeyEvent {
   alt: boolean
   shift: boolean
   cmd: boolean
+  capsLock?: boolean
   timestamp: number
+}
+
+export interface EditorPlannedEdit {
+  text: string
+  clipped: string
+  caret: number
+  changed: boolean
 }
 
 export interface EditorReceipt {
@@ -103,7 +114,10 @@ export interface EditorSettings {
   editable: boolean
   autoCorrect: boolean
   reportPaste: boolean
+  listensPaste: boolean
+  pasteMaxSize?: number
   editActions?: boolean
+  selectTextOnFocus: boolean
   scrollbarVisible: boolean
   hitTest: number
   align: number
@@ -133,11 +147,12 @@ export interface HostCommand {
   limit?: number
   filters?: Array<string>
   url?: string
+  orientations?: number
 }
 
 export interface HostInit {
-  speechAvailable: boolean
   shareAvailable?: boolean
+  speechAvailable?: boolean
   sdkApiVersion: number
   deviceType: string
   cacheDir: string
@@ -347,18 +362,21 @@ export interface SystemCommand {
   body?: string
   silent?: boolean
   count?: number
+  maxBytes?: number
   ask?: boolean
   lang?: string
   interim?: boolean
   ephemeral?: boolean
 }
 
-/** Typed completion shared by clipboard, notification and speech services. */
+/** Typed completion shared by clipboard, notification and system services. */
 export interface SystemEvent {
   permission?: string
   shown?: boolean
+  opened?: boolean
   pressed?: string
   has?: boolean
+  denied?: boolean
   text?: string
   html?: string
   uri?: string
@@ -381,6 +399,7 @@ export interface TextureInsets {
 
 export interface ViewOptions {
   targetId: number
+  windowId?: number
   width: number
   height: number
   textureInsets?: TextureInsets
@@ -443,6 +462,8 @@ export interface WebEvent {
   message?: string
   code?: number
   download?: WebDownload
+  x?: number
+  y?: number
 }
 
 export interface WebHeader {
@@ -460,6 +481,7 @@ export interface WebSettings {
   loadGeneration: number
   javaScriptEnabled: boolean
   scrollEnabled: boolean
+  zoomable: boolean
   userAgent?: string
   injectedJavascript?: string
   documentStartScript: string
@@ -492,6 +514,10 @@ export declare function nshEditorEvent(targetId: number, event: EditorEvent): Ed
 
 export declare function nshEditorKeyEvent(targetId: number, event: EditorKeyEvent): boolean
 
+export declare function nshEditorPlanEdit(targetId: number, current: string, start: number, end: number, inserted: string, normalizePaste: boolean): EditorPlannedEdit
+
+export declare function nshEditorPlanReplace(targetId: number, previous: string, candidate: string): EditorPlannedEdit
+
 export declare function nshOpenUrlResult(sessionId: number, openId: number, opened: boolean): void
 
 export declare function nshPickImagesResult(sessionId: number, pickId: number, files: Array<PickedDescriptor>): void
@@ -508,6 +534,8 @@ export declare function nshServiceEvent(sessionId: number, key: number, value: S
 
 export declare function nshSetLifecycle(sessionId: number, lifecycle: string): void
 
+export declare function nshSpeechEvent(sessionId: number, key: number, value: SystemEvent): void
+
 export declare function nshUpdateAccessibility(sessionId: number, screenReader?: boolean | undefined | null, reduceMotion?: boolean | undefined | null): void
 
 export declare function nshUpdateConfig(sessionId: number, colorMode: number, fontSizeScale: number, language: string, rtl: boolean, deviceType?: string | undefined | null, pixelRatio?: number | undefined | null, languages?: Array<string> | undefined | null, timeZone?: string | undefined | null, regionalLocale?: string | undefined | null, is24HourClock?: boolean | undefined | null, fontChanged?: boolean | undefined | null): void
@@ -523,6 +551,8 @@ export declare function nshWebControllerAttached(targetId: number, nativeTag: st
 export declare function nshWebDownloadAllowed(targetId: number, url: string): boolean
 
 export declare function nshWebEvent(event: WebEvent): boolean
+
+export declare function nshWebMediaAllowed(targetId: number, kind: string): boolean
 
 export declare function nshWebNavigate(targetId: number, url: string): boolean
 
@@ -608,7 +638,7 @@ export declare class NshSurface {
   * handler. A later load, stop, dispose or Ability teardown cancels this load.
   */
   loadResource(name: string, sourceMap?: string | undefined | null): Promise<void>
-  /** Starts the Rust app linked into this binary (`nsh_platform_harmonyos::app!`). */
+  /** Starts the Rust app linked into this binary (`nsh_platform_harmonyos_core::app!`). */
   runApp(): void
   /** Whether this binary was built with a linked Rust app (`runApp()`). */
   get hasApp(): boolean

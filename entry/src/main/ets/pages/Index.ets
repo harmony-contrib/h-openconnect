@@ -1,3 +1,4 @@
+import { KeyboardAvoidMode } from "@kit.ArkUI";
 import { NshSurface } from "@nsh/harmonyos";
 import { hilog } from "@kit.PerformanceAnalysisKit";
 import BuildProfile from "BuildProfile";
@@ -13,6 +14,11 @@ struct Index {
   @State loadFailed: boolean = false;
 
   aboutToAppear(): void {
+    try {
+      this.getUIContext().setKeyboardAvoidMode(KeyboardAvoidMode.NONE);
+    } catch (_err) {
+      // ignore on runtimes that do not support explicit keyboard avoid mode
+    }
     const host = hopenHost();
     host.attachSurface(this.surface, this.getUIContext());
     this.surface.setErrorHandler((message: string): void => {
