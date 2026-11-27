@@ -1,136 +1,182 @@
-"""Record the pinned local NSH SDK and HarmonyOS backend build inputs."""
+"""Record the HarmonyOS NSH backend and CLI build inputs."""
 import argparse
 import hashlib
 import json
 import os
 from pathlib import Path
 import subprocess
-import tomllib
 
 ROOT = Path(__file__).resolve().parents[1]
+RUNNER_DIR = ROOT / 'scripts/nsh-harmonyos-runner'
+RUNNER_MANIFEST = RUNNER_DIR / 'Cargo.toml'
+OHOS_TARGET = 'aarch64-unknown-linux-ohos'
 
 
-def _pinned_revision(filename):
-    revision = (ROOT / filename).read_text().strip()
-    if len(revision) != 40 or any(character not in '0123456789abcdef' for character in revision):
-        raise ValueError(f'{filename} must contain one complete commit SHA')
-    return revision
+def _arkts_dir(harmonyos_root: Path) -> Path:
+    candidate = harmonyos_root / 'arkts'
+    if (candidate / 'oh-package.json5').is_file():
+        return candidate
+    legacy = harmonyos_root / 'crates/nsh-platform-harmonyos/arkts'
+    if (legacy / 'oh-package.json5').is_file():
+        return legacy
+    raise ValueError(f'Matching @nsh/harmonyos ArkTS package is unavailable under {harmonyos_root}')
 
 
-def default_nsh_root():
-    """Locate the immutable local NSH checkout selected for this application."""
-    return ROOT / 'target/nsh-checkouts' / _pinned_revision('scripts/nsh-revision')
+def _hash_tree(root: Path, base: Path | None = None) -> tuple[str, int]:
+    base = base or root
+    generated = {
+        'target', 'dist', 'build', 'oh_modules', 'node_modules',
+        '.hvigor', '.cxx', '.nsh', '__pycache__', '.git',
+    }
+    files = []
+    for directory, children, names in os.walk(root):
+        current = Path(directory)
+        children[:] = [name for name in children if name not in generated]
+        files.extend(current / name for name in names if name != '.DS_Store')
+    digest = hashlib.sha256(b'HOpenConnect-NSH-OHOS-source-v2\0')
+    for filename in sorted(files):
+        relative = os.fsencode(filename.relative_to(base))
+        digest.update(relative + b'\0')
+        if filename.is_symlink():
+            digest.update(b'L' + os.fsencode(os.readlink(filename)))
+        else:
+            with filename.open('rb') as stream:
+                for chunk in iter(lambda: stream.read(1 << 20), b''):
+                    digest.update(chunk)
+        digest.update(b'\0')
+    return digest.hexdigest(), len(files)
 
 
-def default_harmonyos_root():
-    """Locate the immutable local nsh-platform-harmonyos checkout selected for this application."""
-    return ROOT / 'target/nsh-harmonyos-checkouts' / _pinned_revision('scripts/nsh-harmonyos-revision')
-
-
-def resolve_inputs():
-    selected = os.environ.get('NSH_ROOT')
-    nsh = (Path(selected) if selected else default_nsh_root()).resolve(strict=True)
-    harmonyos_selected = os.environ.get('NSH_HARMONYOS_ROOT')
-    harmonyos = (Path(harmonyos_selected) if harmonyos_selected else default_harmonyos_root()).resolve(strict=True)
-
-    manifest = tomllib.loads((nsh / 'Cargo.toml').read_text())
-    harmonyos_manifest = tomllib.loads((harmonyos / 'Cargo.toml').read_text())
-
-    def identity(path, sdk_subdir=None):
-        git = ['git', '-c', 'core.fsmonitor=false', '-C', str(path)]
-        revision = subprocess.check_output([*git, 'rev-parse', 'HEAD'], text=True, timeout=30).strip()
-        status = subprocess.check_output([*git, 'status', '--porcelain=v1', '--untracked-files=normal'], timeout=30)
-        dirty = bool(status.splitlines())
-        digest = hashlib.sha256(b'HOpenConnect-NSH-worktree-v1\0' + revision.encode() + b'\0')
-        digest.update(subprocess.check_output([*git, 'diff', '--no-ext-diff', '--no-textconv', 'HEAD', '--binary'], timeout=30))
-        untracked = subprocess.check_output([*git, 'ls-files', '-z', '--others', '--exclude-standard'], timeout=30)
-        for relative in sorted(filter(None, untracked.split(b'\0'))):
-            digest.update(len(relative).to_bytes(8, 'little') + relative)
-            filename = path / os.fsdecode(relative)
-            if filename.is_symlink():
-                content = os.fsencode(os.readlink(filename))
-                digest.update(b'L' + len(content).to_bytes(8, 'little') + content)
-            else:
-                digest.update(b'F' + filename.stat().st_size.to_bytes(8, 'little'))
-                with filename.open('rb') as stream:
-                    for chunk in iter(lambda: stream.read(1 << 20), b''):
-                        digest.update(chunk)
-        result = {'revision': revision, 'dirty': dirty, 'worktreeSha256': ''}
-        if sdk_subdir:
-            port = path / sdk_subdir
-            files = []
-            generated = {'target', 'dist', 'build', 'oh_modules', 'node_modules', '.hvigor', '.cxx', '.nsh', '__pycache__'}
-            for directory, children, names in os.walk(port):
-                current = Path(directory)
-                if current in (port, port / 'arkts'):
-                    children[:] = [name for name in children if name not in generated]
-                children[:] = [name for name in children if name != '.git']
-                files.extend(current / name for name in names if name != '.DS_Store')
-            sdk_digest = hashlib.sha256(b'HOpenConnect-NSH-OHOS-source-v1\0')
-            ignored = set(subprocess.check_output(
-                [*git, 'ls-files', '-z', '--others', '--ignored', '--exclude-standard', '--', sdk_subdir],
-                timeout=30,
-            ).split(b'\0'))
-            for filename in sorted(files):
-                relative = os.fsencode(filename.relative_to(path))
-                sdk_digest.update(relative + b'\0')
-                if filename.is_symlink():
-                    sdk_digest.update(b'L' + os.fsencode(os.readlink(filename)))
-                else:
-                    with filename.open('rb') as stream:
-                        for chunk in iter(lambda: stream.read(1 << 20), b''):
-                            sdk_digest.update(chunk)
-                sdk_digest.update(b'\0')
-                if relative in ignored:
-                    result['dirty'] = True
-            result.update(sdkSourceSha256=sdk_digest.hexdigest(), sdkSourceFileCount=len(files))
-            digest.update(b'\0NSH-OHOS-source-inputs\0' + sdk_digest.digest())
-        result['worktreeSha256'] = digest.hexdigest()
-        return result
-
-    nsh_identity = identity(nsh)
-    harmonyos_identity = identity(harmonyos, sdk_subdir='crates/nsh-platform-harmonyos')
-    result = {
-        'nshRoot': str(nsh),
-        'harmonyosRoot': str(harmonyos),
-        'nsh': nsh_identity,
-        'harmonyos': harmonyos_identity,
-        'nshRevision': harmonyos_identity['revision'] + ('+dirty' if harmonyos_identity['dirty'] else ''),
-        'hostModel': 'native-ui-context',
+def _git_identity(path: Path) -> dict:
+    git = ['git', '-c', 'core.fsmonitor=false', '-C', str(path)]
+    revision = subprocess.check_output([*git, 'rev-parse', 'HEAD'], text=True, timeout=30).strip()
+    status = subprocess.check_output(
+        [*git, 'status', '--porcelain=v1', '--untracked-files=normal'], timeout=30
+    )
+    dirty = bool(status.splitlines())
+    digest = hashlib.sha256(b'HOpenConnect-NSH-worktree-v2\0' + revision.encode() + b'\0')
+    digest.update(
+        subprocess.check_output([*git, 'diff', '--no-ext-diff', '--no-textconv', 'HEAD', '--binary'], timeout=30)
+    )
+    arkts_sha, arkts_count = _hash_tree(_arkts_dir(path), path)
+    digest.update(b'\0NSH-OHOS-arkts\0' + arkts_sha.encode())
+    return {
+        'sourceKind': 'local-checkout',
+        'revision': revision,
+        'dirty': dirty,
+        'arktsSha256': arkts_sha,
+        'arktsFileCount': arkts_count,
+        'worktreeSha256': digest.hexdigest(),
     }
 
-    path_dependencies = {}
-    for workspace_root, workspace_manifest in ((nsh, manifest), (harmonyos, harmonyos_manifest)):
-        for packages in workspace_manifest.get('patch', {}).values():
-            for name, options in packages.items():
-                if not isinstance(options, dict) or 'path' not in options:
-                    continue
-                package = (workspace_root / options['path']).resolve(strict=True)
-                root = Path(subprocess.check_output(
-                    ['git', '-c', 'core.fsmonitor=false', '-C', str(package), 'rev-parse', '--show-toplevel'],
-                    text=True, timeout=30,
-                ).strip()).resolve(strict=True)
-                key = str(root)
-                if key not in path_dependencies:
-                    path_dependencies[key] = {'root': key, 'identity': identity(root), 'packages': {}}
-                path_dependencies[key]['packages'][name] = str(package)
-    if path_dependencies:
-        result['pathDependencies'] = [path_dependencies[key] for key in sorted(path_dependencies)]
-    return result
+
+def _crates_io_inputs() -> dict:
+    command = [
+        'cargo', 'metadata',
+        '--manifest-path', str(RUNNER_MANIFEST),
+        '--format-version', '1',
+        '--filter-platform', OHOS_TARGET,
+    ]
+    if (RUNNER_DIR / 'Cargo.lock').is_file():
+        command.append('--locked')
+    metadata = json.loads(subprocess.check_output(command, text=True, timeout=180))
+    packages = {pkg['name']: pkg for pkg in metadata['packages']}
+
+    harmonyos_pkg = packages.get('nsh-platform-harmonyos')
+    if not harmonyos_pkg:
+        raise ValueError('nsh-platform-harmonyos was not found in runner Cargo metadata')
+    nsh_core_pkg = packages.get('nsh-core')
+    if not nsh_core_pkg:
+        raise ValueError('nsh-core was not found in runner Cargo metadata')
+
+    harmonyos_root = Path(harmonyos_pkg['manifest_path']).resolve(strict=True).parent
+    arkts_dir = _arkts_dir(harmonyos_root)
+    arkts_sha, arkts_count = _hash_tree(arkts_dir, harmonyos_root)
+
+    runner_digest = hashlib.sha256(b'HOpenConnect-NSH-runner-v2\0')
+    for name in ('Cargo.toml', 'Cargo.lock', 'lib.rs', 'build.rs'):
+        file_path = RUNNER_DIR / name
+        if file_path.is_file():
+            runner_digest.update(name.encode() + b'\0' + file_path.read_bytes() + b'\0')
+    runner_sha = runner_digest.hexdigest()
+
+    combined = hashlib.sha256(
+        b'HOpenConnect-NSH-crates-io-v2\0'
+        + harmonyos_pkg['version'].encode() + b'\0'
+        + nsh_core_pkg['version'].encode() + b'\0'
+        + runner_sha.encode() + b'\0'
+        + arkts_sha.encode()
+    ).hexdigest()
+
+    resolved_crates = {
+        name: packages[name]['version']
+        for name in (
+            'nsh-platform-harmonyos',
+            'nsh-core',
+            'nsh-engine',
+            'nsh-base',
+            'ohos-display-binding',
+            'ohos-arkui-binding',
+            'ohos-enum-derive',
+        )
+        if name in packages
+    }
+
+    return {
+        'harmonyosRoot': str(harmonyos_root),
+        'harmonyosVersion': harmonyos_pkg['version'],
+        'nshCoreVersion': nsh_core_pkg['version'],
+        'nshRevision': f"nsh-platform-harmonyos-{harmonyos_pkg['version']}",
+        'hostModel': 'native-ui-context',
+        'harmonyos': {
+            'sourceKind': 'crates-io',
+            'version': harmonyos_pkg['version'],
+            'source': harmonyos_pkg.get('source'),
+            'runnerSha256': runner_sha,
+            'arktsSha256': arkts_sha,
+            'arktsFileCount': arkts_count,
+            'worktreeSha256': combined,
+            'resolvedCrates': resolved_crates,
+        },
+    }
 
 
-def verify_source_identity(recorded, current):
-    """Reject missing fingerprints and any changes to any checked-out source tree."""
-    for name in ('nsh', 'harmonyos'):
-        if not recorded.get(name, {}).get('worktreeSha256'):
-            raise ValueError('NSH SDK has no recorded worktree digest; rebuild before reuse')
+def resolve_inputs() -> dict:
+    local_override = os.environ.get('NSH_HARMONYOS_ROOT', '').strip()
+    if local_override:
+        harmonyos_root = Path(local_override).resolve(strict=True)
+        identity = _git_identity(harmonyos_root)
+        version = 'local'
+        cargo_toml = harmonyos_root / 'Cargo.toml'
+        if cargo_toml.is_file():
+            import tomllib
+            manifest = tomllib.loads(cargo_toml.read_text())
+            version = manifest.get('package', {}).get('version', version)
+        return {
+            'harmonyosRoot': str(harmonyos_root),
+            'harmonyosVersion': version,
+            'nshCoreVersion': '0.7.2',
+            'nshRevision': identity['revision'] + ('+dirty' if identity['dirty'] else ''),
+            'hostModel': 'native-ui-context',
+            'harmonyos': identity,
+        }
+    return _crates_io_inputs()
+
+
+def verify_source_identity(recorded: dict, current: dict) -> None:
+    """Reject missing fingerprints and any changes to the backend inputs."""
+    if not recorded.get('harmonyos', {}).get('worktreeSha256'):
+        raise ValueError('NSH SDK has no recorded backend digest; rebuild before reuse')
     if {key: recorded.get(key) for key in current} != current:
-        raise ValueError('NSH SDK source roots, revisions or worktree content changed; rebuild before reuse')
+        raise ValueError('NSH SDK inputs changed; rebuild before reuse')
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--field', choices=('nshRoot', 'harmonyosRoot', 'nshRevision'))
+    parser.add_argument(
+        '--field',
+        choices=('harmonyosRoot', 'harmonyosVersion', 'nshCoreVersion', 'nshRevision'),
+    )
     args = parser.parse_args()
     values = resolve_inputs()
     print(values[args.field] if args.field else json.dumps(values, indent=2))

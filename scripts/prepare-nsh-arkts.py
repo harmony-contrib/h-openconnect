@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Stage @nsh/harmonyos ArkTS sources inside target/ohos/arkts-deps/nsh without modifying sibling checkouts.
+"""Stage @nsh/harmonyos ArkTS sources inside target/ohos/arkts-deps/nsh.
 
-Also re-exports upstream `NativeAuthSession` and `SystemReply` from the staged
-package entry so the app host consumes upstream's web sign-in sheet directly
-without duplicating any WebView auth UI.
+Resolves the ArkTS package bundled inside the pinned `nsh-platform-harmonyos`
+crate (or `NSH_HARMONYOS_ROOT` local override) and re-exports upstream
+`NativeAuthSession` and `SystemReply` so the app host consumes upstream's web
+sign-in sheet directly without duplicating any WebView auth UI.
 """
 import hashlib
 import json
@@ -17,7 +18,9 @@ from nsh_build_inputs import resolve_inputs
 ROOT = Path(__file__).resolve().parents[1]
 inputs = resolve_inputs()
 harmonyos_root = Path(inputs['harmonyosRoot'])
-nsh_arkts = harmonyos_root / 'crates/nsh-platform-harmonyos/arkts'
+nsh_arkts = harmonyos_root / 'arkts'
+if not (nsh_arkts / 'oh-package.json5').is_file():
+    nsh_arkts = harmonyos_root / 'crates/nsh-platform-harmonyos/arkts'
 destination = ROOT / 'target/ohos/arkts-deps'
 target = destination / 'nsh'
 
@@ -83,8 +86,7 @@ package = json.loads(subprocess.check_output([
 ], text=True, timeout=30))
 
 sidecar = {
-    'format': 'HOpenConnect-matching-ArkTS-sources-v1',
-    'nsh': inputs['nsh'],
+    'format': 'HOpenConnect-matching-ArkTS-sources-v2',
     'harmonyos': inputs['harmonyos'],
     'packages': [{
         'name': package['name'],

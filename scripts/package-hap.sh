@@ -11,10 +11,23 @@ HAP_BUILD_MODE="${HAP_BUILD_MODE:-release}"
 # Full anyconnect-rs integration by default. Set FEATURES= to build UI-only shell.
 FEATURES="${FEATURES:-native-anyconnect}"
 SIGN_HAP="${SIGN_HAP:-0}"
-if [ "${1:-}" = "--signed" ]; then
-  SIGN_HAP=1
-  shift
-fi
+PACKAGE_APP="${PACKAGE_APP:-0}"
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --signed)
+      SIGN_HAP=1
+      shift
+      ;;
+    --app)
+      PACKAGE_APP=1
+      shift
+      ;;
+    *)
+      echo "Unknown option: $1" >&2
+      exit 2
+      ;;
+  esac
+done
 
 case "$NATIVE_PROFILE" in
   release)
@@ -66,10 +79,6 @@ fi
 cd "$ROOT_DIR"
 
 # 1. Build NSH HarmonyOS runtime, stage @nsh/harmonyos ArkTS, and bundle ui/nsh/.
-NSH_HARMONYOS_ROOT=$(python3 "$ROOT_DIR/scripts/prepare-nsh-build-source.py")
-export NSH_HARMONYOS_ROOT
-NSH_ROOT=${NSH_ROOT:-$(python3 "$ROOT_DIR/scripts/nsh_build_inputs.py" --field nshRoot)}
-export NSH_ROOT
 NATIVE_PROFILE="$NATIVE_PROFILE" "$ROOT_DIR/scripts/build-nsh-ohos.sh"
 
 # 2. Build H-OpenConnect N-API native library (hopenconnect_ui -> hopenconnect_app + hopenconnect_core).
@@ -115,7 +124,35 @@ if command -v ohpm >/dev/null 2>&1; then
   ohpm install --all
 fi
 
-# 3. Package HarmonyOS HAP via Hvigor.
+# 3. Package HarmonyOS APP or HAP via Hvigor.
+if [ "$PACKAGE_APP" = "1" ]; then
+  APP_PATH="${APP_PATH:-$ROOT_DIR/build/outputs/default/h-anyconnect-default-unsigned.app}"
+  SIGNED_APP_PATH="${SIGNED_APP_PATH:-$ROOT_DIR/build/outputs/default/h-anyconnect-default-signed.app}"
+  # shellcheck disable=SC2086
+  "$HVIGORW_BIN" assembleApp --mode project -p product=default \
+    -p buildMode="$HAP_BUILD_MODE" $HVIGOR_ARGS
+
+  if [ ! -f "$APP_PATH" ]; then
+    echo "Expected unsigned APP was not generated: $APP_PATH" >&2
+    exit 1
+  fi
+
+  if [ "$SIGN_HAP" = "1" ]; then
+    if [ ! -f "$SIGNED_APP_PATH" ]; then
+      echo "Expected signed APP was not generated: $SIGNED_APP_PATH" >&2
+      exit 1
+    fi
+    if [ -z "$(find "$SIGNED_APP_PATH" -newer "$APP_PATH" -print)" ]; then
+      echo "Signed APP is stale relative to the unsigned build: $SIGNED_APP_PATH" >&2
+      exit 1
+    fi
+    echo "$SIGNED_APP_PATH"
+  else
+    echo "$APP_PATH"
+  fi
+  exit 0
+fi
+
 SIGN_ARGS=""
 HVIGOR_TASK="default@PackageHap"
 if [ "$SIGN_HAP" = "1" ]; then

@@ -7,6 +7,7 @@ import argparse
 import os
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -42,9 +43,13 @@ def run_step(name: str, cmd: list[str], log_dir: Path, timeout: float) -> str:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
+    default_nsh = os.environ.get("NSH_BIN")
+    if not default_nsh:
+        staged_nsh = ROOT / "dist/nsh-sdk/release/nsh"
+        default_nsh = str(staged_nsh) if staged_nsh.is_file() else (shutil.which("nsh") or str(staged_nsh))
     parser.add_argument(
         "--nsh-bin",
-        default=os.environ.get("NSH_BIN", str(ROOT / "dist/nsh-sdk/release/nsh")),
+        default=default_nsh,
         help="Path to the nsh CLI binary",
     )
     parser.add_argument(
